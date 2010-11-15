@@ -1,0 +1,18 @@
+========================================================================
+README for Kinect 3D Video Capture Project version 0.01
+Copyright (c) 2010 Oliver Kreylos
+========================================================================
+
+This will be the public release of my Kinect 3D video capture software.
+
+Unfortunately, it is based on the Vrui toolkit, version 2.0 -- which is
+not (quite) released yet. It should be done in a couple of days, but as
+of right now, the most recent public Vrui release is 1.0-068.
+
+This software will unfortunately *not* completely build on top of
+Vrui-1.0. I still decided to release the actual code right away; even if
+there are some problems building it, others can already take a peek at
+the underlying algorithms and start their own projects.
+
+Once Vrui-2.0 is released, this code will build and run on top of it.
+Promise!
