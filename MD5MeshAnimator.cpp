@@ -27,7 +27,6 @@ Software Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA
 #include <GL/GLMaterial.h>
 #include <GL/GLTransformationWrappers.h>
 #include <Vrui/Vrui.h>
-#include <Vrui/OpenFile.h>
 
 /********************************
 Methods of class MD5MeshAnimator:
@@ -40,7 +39,7 @@ MD5MeshAnimator::MD5MeshAnimator(void)
 	 numAnims(0),anims(0)
 	{
 	/* Find all pak???.pk4 files in the base/ directory: */
-	fileManager.addPakFiles(Vrui::openDirectory("/work/okreylos/GameData/Doom3/base/"),"pak");
+	fileManager.addPakFiles("/work/okreylos/GameData/Doom3/base/","pak");
 	
 	/* Load the mesh: */
 	mesh=new SceneGraph::Doom3MD5Mesh(fileManager,materialManager,"models/md5/monsters/hellknight/hellknight.md5mesh");
