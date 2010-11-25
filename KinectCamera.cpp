@@ -6,6 +6,7 @@ Copyright (c) 2010 Oliver Kreylos
 
 #include "KinectCamera.h"
 
+#include <string.h>
 #include <unistd.h>
 #include <libusb-1.0/libusb.h>
 #include <iostream>
@@ -17,8 +18,8 @@ Copyright (c) 2010 Oliver Kreylos
 #include "USBContext.h"
 #include "USBDeviceList.h"
 #include "FrameBuffer.h"
-#include "SimpleReadBuffer.h"
-#include "SimpleWriteBuffer.h"
+
+#define KINECT_DUMP_INIT 0
 
 namespace {
 
@@ -236,107 +237,54 @@ void KinectCamera::StreamingState::transferCallback(libusb_transfer* transfer)
 Methods of class KinectCamera:
 *****************************/
 
-void KinectCamera::chant(Misc::ValueSource& chantSource)
+size_t KinectCamera::sendMessage(unsigned short messageType,const unsigned short* messageData,size_t messageSize,void* replyBuffer,size_t replyBufferSize)
 	{
-	/* Parse the incantation: */
-	if(chantSource.peekc()=='#')
+	if(messageSize>252)
+		Misc::throwStdErr("KinectCamera: Message too long");
+	
+	/* Fill a message buffer: */
+	unsigned short messageBuffer[256];
+	messageBuffer[0]=0x4d47U; // Magic number
+	messageBuffer[1]=messageSize;
+	messageBuffer[2]=messageType;
+	messageBuffer[3]=messageSequenceNumber;
+	++messageSequenceNumber;
+	
+	/* Copy the message data: */
+	for(size_t i=0;i<messageSize;++i)
+		messageBuffer[4+i]=messageData[i];
+	
+	/* Send the message to the device: */
+	writeControl(0x40,0x00,0x0000,0x0000,reinterpret_cast<unsigned char*>(messageBuffer),(4+messageSize)*sizeof(unsigned short));
+	
+	/* Receive the reply message: */
+	size_t replySize=0;
+	while(replySize==0)
 		{
-		/* Ignore comment lines: */
-		chantSource.skipLine();
-		chantSource.skipWs();
-		return;
-		}
-	
-	/* Read the command: */
-	unsigned int command=readUInt(chantSource);
-	
-	/* Check for comma: */
-	if(chantSource.peekc()!=',')
-		Misc::throwStdErr("KinectCamera::chant: Missing comma in incantation");
-	chantSource.readChar();
-	
-	/* Read the command value: */
-	unsigned int value=readUInt(chantSource);
-	
-	/* Check for comma: */
-	if(chantSource.peekc()!=',')
-		Misc::throwStdErr("KinectCamera::chant: Missing comma in incantation");
-	chantSource.readChar();
-	
-	/* Read the chant call: */
-	unsigned char call[1024];
-	size_t callSize=readUCharBuffer(chantSource,call,sizeof(call));
-	if(callSize>sizeof(call))
-		Misc::throwStdErr("KinectCamera::chant: Buffer overflow in incantation");
-	if(callSize&0x1)
-		Misc::throwStdErr("KinectCamera::chant: Odd call size in incantation");
-	
-	/* Check for comma: */
-	if(chantSource.peekc()!=',')
-		Misc::throwStdErr("KinectCamera::chant: Missing comma in incantation");
-	chantSource.readChar();
-	
-	/* Read the chant reply: */
-	unsigned char reply[1024];
-	size_t replySize=readUCharBuffer(chantSource,reply,sizeof(reply));
-	if(replySize>sizeof(reply))
-		Misc::throwStdErr("KinectCamera::chant: Buffer overflow in incantation");
-	if(replySize&0x1)
-		Misc::throwStdErr("KinectCamera::chant: Odd reply size in incantation");
-	
-	/* Check for newline: */
-	if(chantSource.peekc()!='\n')
-		Misc::throwStdErr("KinectCamera::chant: Overlong line in incantation");
-	chantSource.skipLine();
-	chantSource.skipWs();
-	
-	/* Create a little-endian write buffer to marshal data to the device: */
-	SimpleWriteBuffer buffer(4096);
-	
-	/* Write the magic number: */
-	buffer.write<unsigned short>(0x4d47U);
-	
-	/* Write the call length: */
-	buffer.write<unsigned short>(callSize/2); // Calls are actually composed of unsigned shorts, not unsigned bytes
-	
-	/* Write the command and value: */
-	buffer.write<unsigned short>(command);
-	buffer.write<unsigned short>(value);
-	
-	/* Write the call body: */
-	buffer.write<unsigned char>(call,callSize);
-	
-	/* Send the call to the device: */
-	std::cout<<"Chanting call: "<<command<<", "<<value<<", "<<callSize<<", "<<replySize<<"; size "<<buffer.getDataSize()<<std::endl;
-	writeControl(0x40,0x00,0x0000,0x0000,buffer.getData(),buffer.getDataSize());
-	
-	/* Read the reply from the device: */
-	SimpleReadBuffer read(4096);
-	std::cout<<"Listening for reply"<<std::flush;
-	do
-		{
+		/* Wait for a reply: */
 		usleep(1000);
-		std::cout<<'.'<<std::flush;
-		read.fill(readControl(0x40,0x00,0x0000,0x0000,read.getBuffer(),read.getBufferSize()));
+		replySize=readControl(0x40,0x00,0x0000,0x0000,static_cast<unsigned char*>(replyBuffer),replyBufferSize);
 		}
-	while(read.getDataSize()==0);
-	std::cout<<"got "<<read.getDataSize()<<std::endl;
 	
-	/* Read the reply magic number, reply length, command, and value: */
-	unsigned int replyMagic=read.read<unsigned short>();
-	unsigned int replyLen=read.read<unsigned short>();
-	unsigned int replyCommand=read.read<unsigned short>();
-	unsigned int replyValue=read.read<unsigned short>();
+	/* Check the reply's magic number, command, and sequence number: */
+	unsigned short* rb=static_cast<unsigned short*>(replyBuffer);
+	if(rb[0]!=0x4252U||rb[2]!=messageBuffer[2]||rb[3]!=messageBuffer[3])
+		Misc::throwStdErr("KinectCamera: Protocol error while sending message %u",(unsigned int)messageType);
 	
-	/* Check the reply: */
-	bool replyOk=replyMagic==0x4252U;
-	replyOk=replyOk&&replyLen*2==read.getDataSize()&&replyLen*2==replySize;
-	replyOk=replyOk&&replyCommand==command;
-	replyOk=replyOk&&replyValue==value;
-	for(size_t i=0;i<replySize&&replyOk;++i)
-		replyOk=reply[i]==read.read<unsigned char>();
-	if(!replyOk)
-		Misc::throwStdErr("KinectCamera::chant: Bad reply in incantation; %u, %u, %u, %u",replyMagic,replyLen*2,replyCommand,replyValue);
+	return replySize;
+	}
+
+bool KinectCamera::sendCommand(unsigned short command,unsigned short value)
+	{
+	/* Prepare a command message: */
+	unsigned short commandBuffer[2];
+	commandBuffer[0]=command;
+	commandBuffer[1]=value;
+	unsigned short replyBuffer[8];
+	size_t replySize=sendMessage(0x0003U,commandBuffer,2,replyBuffer,sizeof(replyBuffer));
+	
+	/* Check for success message: */
+	return replySize==5*sizeof(unsigned short)&&replyBuffer[1]==1&&replyBuffer[4]==0x0000U;
 	}
 
 namespace {
@@ -387,7 +335,7 @@ void* KinectCamera::colorDecodingThreadMethod(void)
 		int stride=width;
 		const unsigned char* rRowPtr=framePtr;
 		unsigned char* cRowPtr=static_cast<unsigned char*>(decodedFrame.getBuffer());
-		cRowPtr+=(height-1)*stride*3;
+		cRowPtr+=(height-1)*stride*3; // Flip the depth image vertically
 		
 		/* Convert the first row: */
 		const unsigned char* rPtr=rRowPtr;
@@ -563,12 +511,13 @@ void* KinectCamera::depthDecodingThreadMethod(void)
 		dRowPtr+=width*(height-1);
 		
 		/* Process rows: */
-		for(int y=0;y<height;++y,dRowPtr-=width)
+		unsigned short* bfPtr=backgroundFrame;
+		for(int y=0;y<height;++y,dRowPtr-=width) // Flip the depth image vertically
 			{
 			unsigned short* dPtr=dRowPtr;
 			
 			/* Process pixels in groups of eight: */
-			for(int x=0;x<width;x+=8,sPtr+=11,dPtr+=8)
+			for(int x=0;x<width;x+=8,sPtr+=11,dPtr+=8,bfPtr+=8)
 				{
 				/* Convert a run of 11 8-bit bytes into 8 11-bit pixels: */
 				dPtr[0]=((unsigned short)sPtr[0]<<3)|((unsigned short)sPtr[1]>>5);
@@ -580,12 +529,27 @@ void* KinectCamera::depthDecodingThreadMethod(void)
 				dPtr[6]=(((unsigned short)sPtr[8]&0x3fU)<<5)|((unsigned short)sPtr[9]>>3);
 				dPtr[7]=(((unsigned short)sPtr[9]&0x07U)<<8)|(unsigned short)sPtr[10];
 				
-				/* Replace invalid depths with zero: */
-				for(int j=0;j<8;++j)
-					if(dPtr[j]==0x07ffU)
-						dPtr[j]=0x0U;
+				/* Check if we're in the middle of capturing a background frame: */
+				if(numBackgroundFrames>0)
+					{
+					/* Update the pixels' background depth values: */
+					for(int i=0;i<8;++i)
+						if(bfPtr[i]>dPtr[i])
+							bfPtr[i]=dPtr[i];
+					}
+				
+				if(removeBackground)
+					{
+					/* Remove background pixels: */
+					for(int i=0;i<8;++i)
+						if(dPtr[i]>=bfPtr[i])
+							dPtr[i]=invalidDepth; // Mark the pixel as invalid
+					}
 				}
 			}
+		
+		if(numBackgroundFrames>0)
+			--numBackgroundFrames;
 		
 		/* Pass the decoded depth buffer to the streaming callback function: */
 		(*depthStreamer->streamingCallback)(decodedFrame);
@@ -595,7 +559,9 @@ void* KinectCamera::depthDecodingThreadMethod(void)
 	}
 
 KinectCamera::KinectCamera(USBContext& usbContext,size_t index)
-	:colorStreamer(0),depthStreamer(0)
+	:messageSequenceNumber(0x2000U),
+	 colorStreamer(0),depthStreamer(0),
+	 numBackgroundFrames(0),backgroundFrame(0),removeBackground(false)
 	{
 	/* Get the index-th Kinect camera device from the context: */
 	USBDeviceList deviceList(usbContext);
@@ -608,18 +574,19 @@ KinectCamera::~KinectCamera(void)
 	{
 	delete colorStreamer;
 	delete depthStreamer;
+	delete[] backgroundFrame;
 	
 	releaseInterface(0);
-	// setConfiguration(1);
+	// setConfiguration(1); // This seems to confuse the device
 	
-	// reset();
+	// reset(); // This seems to confuse the device
 	}
 
 void KinectCamera::startStreaming(KinectCamera::StreamingCallback* newColorStreamingCallback,KinectCamera::StreamingCallback* newDepthStreamingCallback)
 	{
 	/* Open and prepare the device: */
 	open();
-	// setConfiguration(1);
+	// setConfiguration(1); // This seems to confuse the device
 	claimInterface(0);
 	
 	/* Check if caller wants to receive color frames: */
@@ -627,7 +594,8 @@ void KinectCamera::startStreaming(KinectCamera::StreamingCallback* newColorStrea
 		{
 		/* Create the color streaming state: */
 		const int colorFrameSize[2]={640,480};
-		colorStreamer=new StreamingState(getDeviceHandle(),0x81U,0x80U,1920,colorFrameSize,307200,newColorStreamingCallback);
+		size_t rawFrameSize=colorFrameSize[0]*colorFrameSize[1]; // Bayer pattern; one byte per pixel
+		colorStreamer=new StreamingState(getDeviceHandle(),0x81U,0x80U,1920,colorFrameSize,rawFrameSize,newColorStreamingCallback);
 		
 		/* Start the color decoding thread: */
 		colorStreamer->decodingThread.start(this,&KinectCamera::colorDecodingThreadMethod);
@@ -638,33 +606,104 @@ void KinectCamera::startStreaming(KinectCamera::StreamingCallback* newColorStrea
 		{
 		/* Create the depth streaming state: */
 		const int depthFrameSize[2]={640,480};
-		depthStreamer=new StreamingState(getDeviceHandle(),0x82U,0x70U,1760,depthFrameSize,422400,newDepthStreamingCallback);
+		size_t rawFrameSize=(depthFrameSize[0]*depthFrameSize[1]*11+7)/8; // Packed bitstream; 11 bits per pixel
+		depthStreamer=new StreamingState(getDeviceHandle(),0x82U,0x70U,1760,depthFrameSize,rawFrameSize,newDepthStreamingCallback);
 		
 		/* Start the depth decoding thread: */
 		depthStreamer->decodingThread.start(this,&KinectCamera::depthDecodingThreadMethod);
 		}
 	
-	/********************************************************************
-	Send the magic incantations to start color and depth video capture on
-	the device:
-	********************************************************************/
+	/***********************************************************
+	Query the device's serial number(?) and firmware version(?):
+	***********************************************************/
 	
-	/* Read and send the magic chant file: */
-	Misc::FileCharacterSource chantSourceFile("MagicIncantation.txt");
-	Misc::ValueSource chantSource(chantSourceFile);
-	chantSource.setPunctuation("#,\n");
-	chantSource.skipWs();
-	initHexDigits();
-	while(!chantSource.eof())
-		chant(chantSource);
-	std::cout<<"Chant completed!"<<std::endl;
+	/* This seems to wake up the device: */
+	unsigned short replyBuffer[64];
+	size_t replySize=sendMessage(0x0000U,0,0,replyBuffer,sizeof(replyBuffer));
+	
+	replySize=sendMessage(0x0005U,0,0,replyBuffer,sizeof(replyBuffer));
+	
+	/**********************************************************
+	Initialize the color and depth cameras and start streaming:
+	**********************************************************/
+	
+	bool sequenceOk=true;
+	sequenceOk=sequenceOk&&sendCommand(0x0005U,0x0000U); // Disable color streaming
+	sequenceOk=sequenceOk&&sendCommand(0x0006U,0x0000U); // Disable depth streaming
+	sequenceOk=sequenceOk&&sendCommand(0x000cU,0x0000U); // Request regular color frame format
+	sequenceOk=sequenceOk&&sendCommand(0x000dU,0x0001U); // Request regular color frame format
+	sequenceOk=sequenceOk&&sendCommand(0x000eU,0x001eU); // Request Bayer-encoded color images
+	sequenceOk=sequenceOk&&sendCommand(0x0012U,0x0003U); // Request 11-bit depth images
+	sequenceOk=sequenceOk&&sendCommand(0x0013U,0x0001U); // Request regular depth frame format
+	sequenceOk=sequenceOk&&sendCommand(0x0014U,0x001eU); // Unknown semantics
+	sequenceOk=sequenceOk&&sendCommand(0x0016U,0x0001U); // Enable depth smoothing
+	sequenceOk=sequenceOk&&sendCommand(0x0018U,0x0000U); // Unknown semantics
+	sequenceOk=sequenceOk&&sendCommand(0x0002U,0x0000U); // Unknown semantics
+	sequenceOk=sequenceOk&&sendCommand(0x0105U,0x0000U); // Unknown semantics
+	sequenceOk=sequenceOk&&sendCommand(0x0024U,0x0001U); // Unknown semantics
+	sequenceOk=sequenceOk&&sendCommand(0x002dU,0x0001U); // Unknown semantics
+	
+	if(depthStreamer!=0)
+		{
+		sequenceOk=sequenceOk&&sendCommand(0x0006U,0x0002U); // Enable depth streaming
+		sequenceOk=sequenceOk&&sendCommand(0x0017U,0x0000U); // Request normal orientation of depth images
+		}
+	
+	if(colorStreamer!=0)
+		{
+		sequenceOk=sequenceOk&&sendCommand(0x0005U,0x0001U); // Enable color streaming
+		sequenceOk=sequenceOk&&sendCommand(0x0047U,0x0000U); // Request normal orientation of color images
+		}
+	
+	if(!sequenceOk)
+		Misc::throwStdErr("KinectCamera: Failed to initialize streaming mode");
+	}
+
+void KinectCamera::captureBackground(unsigned int newNumBackgroundFrames)
+	{
+	/* Bail out if there is no depth streamer: */
+	if(depthStreamer==0)
+		return;
+	
+	/* Initialize the background frame buffer: */
+	if(backgroundFrame==0)
+		backgroundFrame=new unsigned short[640*480];
+	
+	/* Initialize the background frame to "empty:" */
+	unsigned short* bfPtr=backgroundFrame;
+	for(unsigned int y=0;y<480;++y)
+		for(unsigned int x=0;x<640;++x,++bfPtr)
+			*bfPtr=invalidDepth;
+	
+	/* Start capturing background frames: */
+	numBackgroundFrames=newNumBackgroundFrames;
+	}
+
+void KinectCamera::setRemoveBackground(bool newRemoveBackground)
+	{
+	/* Bail out if there is no background frame buffer: */
+	if(backgroundFrame==0)
+		return;
+	
+	/* Set the background removal flag: */
+	removeBackground=newRemoveBackground;
 	}
 
 void KinectCamera::stopStreaming(void)
 	{
+	/* Send commands to stop streaming: */
+	sendCommand(0x0005U,0x0000U); // Disable color streaming
+	sendCommand(0x0006U,0x0000U); // Disable depth streaming (and turn off IR projector)
+	
 	/* Destroy the streaming states: */
 	delete colorStreamer;
 	colorStreamer=0;
 	delete depthStreamer;
 	depthStreamer=0;
+	
+	/* Destroy the background removal buffer: */
+	numBackgroundFrames=0;
+	delete[] backgroundFrame;
+	backgroundFrame=0;
+	removeBackground=false;
 	}

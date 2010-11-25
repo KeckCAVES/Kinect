@@ -16,6 +16,7 @@ Copyright (c) 2010 Oliver Kreylos
 #include "USBContext.h"
 #include "USBDevice.h"
 #include "USBDeviceList.h"
+#include "KinectMotor.h"
 #include "KinectCamera.h"
 
 void dumpControl(USBDevice& device,unsigned int bmRequest,unsigned int bRequest,unsigned int wValue,unsigned int wIndex,size_t maxSize = 4096)
@@ -26,7 +27,12 @@ void dumpControl(USBDevice& device,unsigned int bmRequest,unsigned int bRequest,
 	try
 		{
 		/* Issue the request: */
-		size_t resultSize=device.readControl(bmRequest|0x80U,bRequest,wValue,wIndex,buffer,maxSize);
+		size_t resultSize=0;
+		while(resultSize==0)
+			{
+			usleep(1000);
+			resultSize=device.readControl(bmRequest|0x80U,bRequest,wValue,wIndex,buffer,maxSize);
+			}
 		
 		/* Process the result: */
 		std::cout<<"Received "<<resultSize<<" bytes for request "<<int(bmRequest)<<", "<<int(bRequest)<<", "<<int(wValue)<<", "<<int(wIndex)<<":"<<std::endl;
@@ -119,42 +125,51 @@ void playWithCamera(USBContext& context)
 
 int main(int argc,char* argv[])
 	{
+	/* Create a USB context: */
+	USBContext context;
+	context.setDebugLevel(3);
+	context.startEventHandling();
+	
+	{
+	/* Get the first Kinect camera device: */
+	KinectCamera kinectCamera(context,0);
+	
+	/* Open the device: */
+	kinectCamera.open();
+	kinectCamera.setConfiguration(1);
+	
+	/* Send a control message: */
+	unsigned short commandBuffer[4];
+	commandBuffer[0]=0x4d47U;
+	commandBuffer[1]=0;
+	commandBuffer[2]=0x0000U;
+	commandBuffer[3]=0x1000U;
+	kinectCamera.writeControl(0x40,0x00,0x0000,0x0000,reinterpret_cast<unsigned char*>(commandBuffer),sizeof(commandBuffer));
+	
+	/* Dump the reply: */
+	dumpControl(kinectCamera,0x40,0x00,0x0000,0x0000);
+	}
+
 	if(argc>1&&strcmp(argv[1],"reset")==0)
 		{
-		/* Create a USB context: */
-		USBContext context;
-		context.setDebugLevel(3);
-		
-		/* Enumerate all devices: */
-		USBDeviceList deviceList(context);
-		
 		/* Get the first Kinect camera device: */
-		USBDevice kinectCamera(deviceList.getDevice(0x045e,0x02ae));
-		if(!kinectCamera.isValid())
-			Misc::throwStdErr("USBTest: No Kinect camera device found");
+		KinectCamera kinectCamera(context,0);
 		
 		/* Open and reset the device: */
 		kinectCamera.open();
 		kinectCamera.reset();
-		
-		return 0;
 		}
 	
-	try
+	if(argc>2&&strcmp(argv[1],"led")==0)
 		{
-		/* Create a USB context: */
-		USBContext context;
-		context.setDebugLevel(3);
-		context.startEventHandling();
+		/* Enumerate all devices: */
+		USBDeviceList deviceList(context);
 		
-		playWithMotor(context,atoi(argv[1]));
+		/* Get the first Kinect motor device: */
+		KinectMotor kinectMotor(context,0);
 		
-		// playWithCamera(context);
-		}
-	catch(std::runtime_error err)
-		{
-		std::cerr<<"Caught exception "<<err.what()<<std::endl;
-		return 1;
+		/* Set the LED state: */
+		kinectMotor.setLED((KinectMotor::LEDState)atoi(argv[2]));
 		}
 	
 	return 0;

@@ -22,8 +22,8 @@ int main(void)
 		double x=data.readField<double>();
 		double y=data.readField<double>();
 		double z=data.readField<double>();
-		double s=data.readField<double>();
-		double t=data.readField<double>();
+		double s=data.readField<double>()/640.0;
+		double t=data.readField<double>()/480.0;
 		
 		/* Insert the entry's two linear equations into the linear system: */
 		double eq[2][12];
@@ -107,11 +107,42 @@ int main(void)
 		}
 	}
 	
-	/* Save the calibration matrix: */
-	Misc::File matrixFile("CameraCalibrationMatrix.dat","wb",Misc::File::LittleEndian);
-	for(unsigned int i=0;i<3;++i)
+	/* Open the calibration file: */
+	Misc::File matrixFile("CameraCalibrationMatrices.dat","wb",Misc::File::LittleEndian);
+	
+	/* Create the depth projection matrix: */
+	Math::Matrix depthProjection(4,4,0.0);
+	double cameraFov=560.0;
+	depthProjection(0,0)=1.0/cameraFov;
+	depthProjection(0,3)=-320.0/cameraFov;
+	depthProjection(1,1)=1.0/cameraFov;
+	depthProjection(1,3)=-240.0/cameraFov;
+	depthProjection(2,3)=-1.0;
+	depthProjection(3,2)=-1.0/34400.0;
+	depthProjection(3,3)=1090.0/34400.0;
+	
+	/* Save the depth projection matrix: */
+	for(unsigned int i=0;i<4;++i)
 		for(unsigned int j=0;j<4;++j)
-			matrixFile.write<double>(hom(i,j));
+			matrixFile.write<double>(depthProjection(i,j));
+	
+	/* Create the color projection matrix by extending the homography: */
+	Math::Matrix colorProjection(4,4);
+	for(unsigned int i=0;i<2;++i)
+		for(unsigned int j=0;j<4;++j)
+			colorProjection(i,j)=hom(i,j);
+	for(unsigned int j=0;j<4;++j)
+		colorProjection(2,j)=j==2?1.0:0.0;
+	for(unsigned int j=0;j<4;++j)
+		colorProjection(3,j)=hom(2,j);
+	
+	/* Modify the color projection matrix by the depth projection matrix: */
+	colorProjection*=depthProjection;
+	
+	/* Save the color projection matrix: */
+	for(unsigned int i=0;i<4;++i)
+		for(unsigned int j=0;j<4;++j)
+			matrixFile.write<double>(colorProjection(i,j));
 	
 	return 0;
 	}
