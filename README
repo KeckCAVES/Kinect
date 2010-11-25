@@ -1,18 +1,22 @@
 ========================================================================
-README for Kinect 3D Video Capture Project version 0.01
+README for Kinect 3D Video Capture Project version 1.0
 Copyright (c) 2010 Oliver Kreylos
 ========================================================================
 
-This will be the public release of my Kinect 3D video capture software.
+Requirements
+============
 
-Unfortunately, it is based on the Vrui toolkit, version 2.0 -- which is
-not (quite) released yet. It should be done in a couple of days, but as
-of right now, the most recent public Vrui release is 1.0-068.
+This software requires the Vrui VR toolkit, version 2.0-001 or later. It
+also requires libusb version 1.0.
 
-This software will unfortunately *not* completely build on top of
-Vrui-1.0. I still decided to release the actual code right away; even if
-there are some problems building it, others can already take a peek at
-the underlying algorithms and start their own projects.
+Installation
+============
 
-Once Vrui-2.0 is released, this code will build and run on top of it.
-Promise!
+0. Install Vrui
+
+1. Set Vrui's installation directory in the makefile, if it was changed
+   from the default of $HOME/Vrui-2.0-001 during step 0.
+
+2. Run make
+
+3. Run ./bin/KinectViewer

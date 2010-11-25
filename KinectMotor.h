@@ -31,11 +31,22 @@ class USBContext;
 
 class KinectMotor:public USBDevice
 	{
+	/* Embedded classes: */
+	public:
+	enum LEDState // Enumerated type for Kinect's LED states
+		{
+		LED_OFF=0x0,
+		LED_GREEN,LED_RED,LED_YELLOW,
+		LED_BLINK_YELLOW,LED_BLINK_GREEN,
+		LED_RED_YELLOW,LED_RED_GREEN
+		};
+	
 	/* Constructors and destructors: */
 	public:
 	KinectMotor(USBContext& usbContext,size_t index =0); // Opens the index-th Kinect motor device on the given USB context
 	
 	/* Methods: */
+	void setLED(LEDState newLEDState); // Sets the state of the Kinect's LED
 	void setPitch(int pitch); // Sets the motor's pitch angle
 	void readAccelerometers(float accels[3]); // Writes the Kinect's accelerometer readings into the given array
 	};

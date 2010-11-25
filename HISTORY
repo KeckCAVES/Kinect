@@ -3,3 +3,7 @@ Kinect 3D Video Capture Project History
 
 Kinect-0.01:
 - Initial release, needs Vrui-2.0 to build.
+
+Kinect-1.0:
+- Update with refactoring and additional vislet and raw viewer.
+- First "official" release.

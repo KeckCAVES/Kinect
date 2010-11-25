@@ -24,31 +24,34 @@
 # same setting in Vrui's makefile. By default the directories match; if
 # the installation directory was adjusted during Vrui's installation, it
 # must be adjusted here as well.
-VRUIDIR = $(HOME)/Vrui-2.0
+VRUIDIR = $(HOME)/Vrui-2.0-001
 
 # Set up additional flags for the C++ compiler:
 CFLAGS = 
 
 # Set up destination directories for compilation products:
 OBJDIRBASE = o
+LIBDIRBASE = lib
 BINDIRBASE = bin
 
 # Create debug or fully optimized versions of the software:
 ifdef DEBUG
   # Include the debug version of the Vrui application makefile fragment:
-  include $(VRUIDIR)/etc/Vrui.debug.makeinclude
+  include $(VRUIDIR)/share/Vrui.debug.makeinclude
   # Enable debugging and disable optimization:
   CFLAGS += -g3 -O0
   # Set destination directories for created objects:
   OBJDIR = $(OBJDIRBASE)/debug
+  LIBDIR = $(LIBDIRBASE)/debug
   BINDIR = $(BINDIRBASE)/debug
 else
   # Include the release version of the Vrui application makefile fragment:
-  include $(VRUIDIR)/etc/Vrui.makeinclude
+  include $(VRUIDIR)/share/Vrui.makeinclude
   # Disable debugging and enable optimization:
   CFLAGS += -g0 -O3 -DNDEBUG
   # Set destination directories for created objects:
   OBJDIR = $(OBJDIRBASE)
+  LIBDIR = $(LIBDIRBASE)
   BINDIR = $(BINDIRBASE)
 endif
 
@@ -59,7 +62,10 @@ $(OBJDIR)/%.o: %.cpp
 	@g++ -c -o $@ $(VRUI_CFLAGS) $(CFLAGS) $<
 
 # Rule to build all Kinect components:
-ALL = $(BINDIR)/CalibrateCameras \
+ALL = $(LIBDIR)/libKinect.a \
+      $(BINDIR)/USBTest \
+      $(BINDIR)/CalibrateCameras \
+      $(BINDIR)/RawKinectViewer \
       $(BINDIR)/KinectViewer
 .PHONY: all
 all: $(ALL)
@@ -68,12 +74,48 @@ all: $(ALL)
 clean:
 	-rm -f $(OBJDIR)/*.o
 	-rm -f $(ALL)
-	-rmdir $(BINDIR)
 
 # Rule to clean the source directory for packaging:
 distclean:
 	-rm -rf $(OBJDIRBASE)
+	-rm -rf $(LIBDIRBASE)
 	-rm -rf $(BINDIRBASE)
+
+#
+# Library containing basic USB and Kinect classes:
+#
+
+LIBKINECT_SOURCES = USBContext.cpp \
+                    USBDevice.cpp \
+                    USBDeviceList.cpp \
+                    USBConfigDescriptor.cpp \
+                    KinectMotor.cpp \
+                    KinectCamera.cpp
+
+$(LIBDIR)/libKinect.a: $(LIBKINECT_SOURCES:%.cpp=$(OBJDIR)/%.o)
+	@mkdir -p $(LIBDIR)
+	@-rm -f $@
+	@echo Linking $@...
+	@ar crs $@ $^
+
+#
+# Simple test program for libusb-1.0; can control motor and LEDs and
+# send commands to camera:
+#
+
+USBTEST_SOURCES = USBTest.cpp
+
+$(BINDIR)/USBTest: $(USBTEST_SOURCES:%.cpp=$(OBJDIR)/%.o) \
+                   $(LIBDIR)/libKinect.a
+	@mkdir -p $(BINDIR)
+	@echo Linking $@...
+	@g++ -o $@ $^ $(VRUI_LINKFLAGS) -lusb-1.0
+.PHONY: USBTest
+USBTest: $(BINDIR)/USBTest
+
+#
+# Camera calibration program, based on set of tie points:
+#
 
 CALIBRATECAMERAS_SOURCES = CalibrateCameras.cpp
 
@@ -84,15 +126,29 @@ $(BINDIR)/CalibrateCameras: $(CALIBRATECAMERAS_SOURCES:%.cpp=$(OBJDIR)/%.o)
 .PHONY: CalibrateCameras
 CalibrateCameras: $(BINDIR)/CalibrateCameras
 
-KINECTVIEWER_SOURCES = USBContext.cpp \
-                       USBDevice.cpp \
-                       USBDeviceList.cpp \
-                       KinectMotor.cpp \
-                       KinectCamera.cpp \
-                       MD5Animator.cpp \
+#
+# Viewer for raw depth and color image streams:
+#
+
+RAWKINECTVIEWER_SOURCES = RawKinectViewer.cpp
+
+$(BINDIR)/RawKinectViewer: $(RAWKINECTVIEWER_SOURCES:%.cpp=$(OBJDIR)/%.o) \
+                           $(LIBDIR)/libKinect.a
+	@mkdir -p $(BINDIR)
+	@echo Linking $@...
+	@g++ -o $@ $^ $(VRUI_LINKFLAGS) -lusb-1.0
+.PHONY: RawKinectViewer
+RawKinectViewer: $(BINDIR)/RawKinectViewer
+
+#
+# Viewer for 3D image streams:
+#
+
+KINECTVIEWER_SOURCES = KinectProjector.cpp \
                        KinectViewer.cpp
 
-$(BINDIR)/KinectViewer: $(KINECTVIEWER_SOURCES:%.cpp=$(OBJDIR)/%.o)
+$(BINDIR)/KinectViewer: $(KINECTVIEWER_SOURCES:%.cpp=$(OBJDIR)/%.o) \
+                        $(LIBDIR)/libKinect.a
 	@mkdir -p $(BINDIR)
 	@echo Linking $@...
 	@g++ -o $@ $^ $(VRUI_LINKFLAGS) -lusb-1.0
