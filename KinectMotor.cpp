@@ -37,15 +37,15 @@ void KinectMotor::setLED(LEDState newLEDState)
 
 void KinectMotor::setPitch(int pitch)
 	{
-	/* Convert the pitch value to unsigned int: */
-	if(pitch<0)
-		pitch+=65536;
-	
 	/* Limit the pitch value to valid interval to prevent motor breakage: */
 	if(pitch<-35)
 		pitch=-35;
 	if(pitch>55)
 		pitch=55;
+	
+	/* Convert the pitch value to unsigned int: */
+	if(pitch<0)
+		pitch+=65536;
 	
 	/* Write a pitch control message: */
 	writeControl(0x40,0x31,pitch,0x0000,0,0);
