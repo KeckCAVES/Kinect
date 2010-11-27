@@ -7,3 +7,6 @@ Kinect-0.01:
 Kinect-1.0:
 - Update with refactoring and additional vislet and raw viewer.
 - First "official" release.
+
+Kinect-1.1:
+- Added color camera calibration procedure to RawKinectViewer.

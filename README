@@ -14,9 +14,17 @@ Installation
 
 0. Install Vrui
 
-1. Set Vrui's installation directory in the makefile, if it was changed
-   from the default of $HOME/Vrui-2.0-001 during step 0.
+1. Set Vrui's installation directory in the makefile, either to
+   Vrui-2.0-<build> if Vrui was installed in its default location, or
+   to whatever was configured in Vrui's makefile.
 
 2. Run make
 
-3. Run ./bin/KinectViewer
+3. Run ./bin/RawKinectViewer to gather camera calibration tie points.
+
+3a. Paste console output into CalibrationData.csv.
+
+4. Run ./bin/CalibrateCameras to calibrate the color camera to the
+   depth camera.
+
+5. Run ./bin/KinectViewer.

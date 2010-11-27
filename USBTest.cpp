@@ -130,6 +130,7 @@ int main(int argc,char* argv[])
 	context.setDebugLevel(3);
 	context.startEventHandling();
 	
+	#if 0
 	{
 	/* Get the first Kinect camera device: */
 	KinectCamera kinectCamera(context,0);
@@ -149,7 +150,8 @@ int main(int argc,char* argv[])
 	/* Dump the reply: */
 	dumpControl(kinectCamera,0x40,0x00,0x0000,0x0000);
 	}
-
+	#endif
+	
 	if(argc>1&&strcmp(argv[1],"reset")==0)
 		{
 		/* Get the first Kinect camera device: */
@@ -170,6 +172,18 @@ int main(int argc,char* argv[])
 		
 		/* Set the LED state: */
 		kinectMotor.setLED((KinectMotor::LEDState)atoi(argv[2]));
+		}
+	
+	if(argc>2&&strcmp(argv[1],"pitch")==0)
+		{
+		/* Enumerate all devices: */
+		USBDeviceList deviceList(context);
+		
+		/* Get the first Kinect motor device: */
+		KinectMotor kinectMotor(context,0);
+		
+		/* Move the motor: */
+		kinectMotor.setPitch(atoi(argv[2]));
 		}
 	
 	return 0;
