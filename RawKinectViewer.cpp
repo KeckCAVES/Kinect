@@ -24,16 +24,25 @@ Software Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA
 #include <stdexcept>
 #include <iostream>
 #include <Misc/FunctionCalls.h>
+#include <Misc/File.h>
 #include <Threads/TripleBuffer.h>
+#include <Math/Math.h>
 #include <Geometry/OrthogonalTransformation.h>
+#include <Geometry/ProjectiveTransformation.h>
+#include <Geometry/Ray.h>
 #include <GL/gl.h>
+#include <GL/GLColor.h>
 #include <GL/GLContextData.h>
 #include <GL/GLObject.h>
+#include <GL/GLTransformationWrappers.h>
 #include <GLMotif/PopupMenu.h>
 #include <GLMotif/Menu.h>
 #include <GLMotif/Button.h>
 #include <GLMotif/ToggleButton.h>
 #include <Vrui/Vrui.h>
+#include <Vrui/DisplayState.h>
+#include <Vrui/Tool.h>
+#include <Vrui/GenericToolFactory.h>
 #include <Vrui/ToolManager.h>
 #include <Vrui/LocatorTool.h>
 #include <Vrui/Application.h>
@@ -41,11 +50,203 @@ Software Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA
 #include "USBContext.h"
 #include "FrameBuffer.h"
 #include "KinectCamera.h"
+#include "FindBlobs.h"
+
+/**************
+Helper classes:
+**************/
+
+template <>
+class BlobProperty<unsigned short> // Blob property accumulator for depth frames; calculates 3D centroid of reprojected depth image pixels
+	{
+	/* Embedded classes: */
+	public:
+	typedef unsigned short Pixel;
+	typedef Geometry::ProjectiveTransformation<double,3> PTransform;
+	typedef PTransform::Point Point;
+	
+	/* Elements: */
+	private:
+	static Geometry::ProjectiveTransformation<double,3> projection; // Pixel re-projection matrix
+	double pxs,pys,pzs; // Accumulated centroid
+	size_t numPixels; // Number of accumulated pixels
+	
+	/* Constructors and destructors: */
+	public:
+	static void setProjection(const PTransform& sProjection) // Sets the re-projection matrix
+		{
+		projection=sProjection;
+		}
+	BlobProperty(void) // Creates empty accumulator
+		:pxs(0.0),pys(0.0),pzs(0.0),numPixels(0)
+		{
+		}
+	
+	/* Methods: */
+	void addPixel(int x,int y,const Pixel& pixelValue)
+		{
+		/* Reproject the pixel: */
+		Point p=projection.transform(Point(double(x)+0.5,double(y+0.5),double(pixelValue)));
+		
+		/* Add the reprojected pixel to the plane equation accumulator: */
+		pxs+=p[0];
+		pys+=p[1];
+		pzs+=p[2];
+		++numPixels;
+		}
+	void merge(const BlobProperty& other)
+		{
+		/* Merge the other blob property's plane equation accumulator: */
+		pxs+=other.pxs;
+		pys+=other.pys;
+		pzs+=other.pzs;
+		numPixels+=other.numPixels;
+		}
+	Point getCentroid(void) const
+		{
+		Point result;
+		result[0]=Point::Scalar(pxs/double(numPixels));
+		result[1]=Point::Scalar(pys/double(numPixels));
+		result[2]=Point::Scalar(pzs/double(numPixels));
+		return result;
+		}
+	};
+
+/*****************************************************
+Static elements of class BlobProperty<unsigned short>:
+*****************************************************/
+
+BlobProperty<unsigned short>::PTransform BlobProperty<unsigned short>::projection;
+
+template <>
+class PixelComparer<unsigned short> // Pixel comparer for depth frames
+	{
+	/* Embedded classes: */
+	public:
+	typedef unsigned short Pixel;
+	
+	/* Elements: */
+	private:
+	Pixel minPixelValue; // Minimal similar pixel value
+	Pixel maxPixelValue; // Maximal similar pixel value
+	
+	/* Constructors and destructors: */
+	public:
+	PixelComparer(const Pixel& sPixelValue,unsigned short sThreshold)
+		{
+		if(sPixelValue>=sThreshold)
+			minPixelValue=sPixelValue-sThreshold;
+		else
+			minPixelValue=0U;
+		if(sPixelValue<=0xffffU-sThreshold)
+			maxPixelValue=sPixelValue+sThreshold;
+		else
+			maxPixelValue=0xffffU;
+		}
+	
+	/* Methods: */
+	bool operator()(const Pixel& pixel) const
+		{
+		return minPixelValue<=pixel&&pixel<=maxPixelValue;
+		}
+	};
+
+template <>
+class PixelComparer<GLColor<GLubyte,3> > // Pixel comparer for color frames
+	{
+	/* Embedded classes: */
+	public:
+	typedef GLColor<GLubyte,3> Pixel;
+	
+	/* Elements: */
+	private:
+	Pixel minPixelValue; // Minimal similar pixel value, in maximum norm
+	Pixel maxPixelValue; // Maximal similar pixel value, in maximum norm
+	
+	/* Constructors and destructors: */
+	public:
+	PixelComparer(const Pixel& sPixelValue,unsigned short sThreshold)
+		{
+		for(int i=0;i<3;++i)
+			{
+			if(sPixelValue[i]>=sThreshold)
+				minPixelValue[i]=sPixelValue[i]-sThreshold;
+			else
+				minPixelValue[i]=0U;
+			if(sPixelValue[i]<=0xffU-sThreshold)
+				maxPixelValue[i]=sPixelValue[i]+sThreshold;
+			else
+				maxPixelValue[i]=0xffU;
+			}
+		}
+	
+	/* Methods: */
+	bool operator()(const Pixel& pixel) const
+		{
+		bool result=true;
+		for(int i=0;i<3&&result;++i)
+			result=minPixelValue[i]<=pixel[i]&&pixel[i]<=maxPixelValue[i];
+		return result;
+		}
+	};
 
 class RawKinectViewer:public Vrui::Application,public GLObject
 	{
 	/* Embedded classes: */
 	private:
+	class PauseTool;
+	class TiePointTool;
+	typedef Vrui::GenericToolFactory<PauseTool> PauseToolFactory; // Tool class uses the generic factory class
+	typedef Vrui::GenericToolFactory<TiePointTool> TiePointToolFactory; // Tool class uses the generic factory class
+	
+	class PauseTool:public Vrui::Tool,public Vrui::Application::Tool<RawKinectViewer>
+		{
+		friend class Vrui::GenericToolFactory<PauseTool>;
+		
+		/* Elements: */
+		private:
+		static PauseToolFactory* factory; // Pointer to the factory object for this class
+		
+		/* Constructors and destructors: */
+		public:
+		PauseTool(const Vrui::ToolFactory* factory,const Vrui::ToolInputAssignment& inputAssignment);
+		virtual ~PauseTool(void);
+		
+		/* Methods from class Vrui::Tool: */
+		virtual const Vrui::ToolFactory* getFactory(void) const;
+		virtual void buttonCallback(int buttonSlotIndex,Vrui::InputDevice::ButtonCallbackData* cbData);
+		};
+	
+	class TiePointTool:public Vrui::Tool,public Vrui::Application::Tool<RawKinectViewer>
+		{
+		friend class Vrui::GenericToolFactory<TiePointTool>;
+		
+		/* Embedded classes: */
+		private:
+		typedef unsigned short DepthPixel;
+		typedef Blob<DepthPixel> DepthBlob;
+		typedef GLColor<GLubyte,3> ColorPixel;
+		typedef Blob<ColorPixel> ColorBlob;
+		
+		/* Elements: */
+		static TiePointToolFactory* factory; // Pointer to the factory object for this class
+		
+		bool haveDepthPoint; // Flag whether a depth point has been selected
+		DepthBlob depthPoint; // Blob containing the depth point
+		bool haveColorPoint; // Flag whether a depth point has been selected
+		ColorBlob colorPoint; // Blob containing the depth point
+		
+		/* Constructors and destructors: */
+		public:
+		TiePointTool(const Vrui::ToolFactory* factory,const Vrui::ToolInputAssignment& inputAssignment);
+		virtual ~TiePointTool(void);
+		
+		/* Methods from class Vrui::Tool: */
+		virtual const Vrui::ToolFactory* getFactory(void) const;
+		virtual void buttonCallback(int buttonSlotIndex,Vrui::InputDevice::ButtonCallbackData* cbData);
+		virtual void display(GLContextData& contextData) const;
+		};
+	
 	struct DataItem:public GLObject::DataItem
 		{
 		/* Elements: */
@@ -60,6 +261,9 @@ class RawKinectViewer:public Vrui::Application,public GLObject
 		virtual ~DataItem(void);
 		};
 	
+	friend class PauseTool;
+	friend class TiePointTool;
+	
 	/* Elements: */
 	USBContext usbContext; // USB device context
 	KinectCamera* kinectCamera; // Pointer to camera aspect of Kinect device
@@ -67,10 +271,10 @@ class RawKinectViewer:public Vrui::Application,public GLObject
 	unsigned int depthFrameVersion; // Version number of current depth frame
 	Threads::TripleBuffer<FrameBuffer> colorFrames; // Triple buffer of color frames received from the camera
 	unsigned int colorFrameVersion; // Version number of current color frame
+	bool paused; // Flag whether the video stream display is paused
 	unsigned int selectedPixel[2]; // Coordinates of the selected depth image pixel
 	unsigned short selectedPixelPulse[128]; // EKG of depth value of selected pixel
 	int selectedPixelCurrentIndex; // Index of most recent value in selected pixel's EKG
-	
 	GLMotif::PopupMenu* mainMenu; // The program's main menu
 	
 	/* Private methods: */
@@ -94,6 +298,223 @@ class RawKinectViewer:public Vrui::Application,public GLObject
 	/* Methods from GLObject: */
 	virtual void initContext(GLContextData& contextData) const;
 	};
+
+/***************************************************
+Static elements of class RawKinectViewer::PauseTool:
+***************************************************/
+
+RawKinectViewer::PauseToolFactory* RawKinectViewer::PauseTool::factory=0;
+
+/*******************************************
+Methods of class RawKinectViewer::PauseTool:
+*******************************************/
+
+RawKinectViewer::PauseTool::PauseTool(const Vrui::ToolFactory* factory,const Vrui::ToolInputAssignment& inputAssignment)
+	:Vrui::Tool(factory,inputAssignment)
+	{
+	}
+
+RawKinectViewer::PauseTool::~PauseTool(void)
+	{
+	}
+
+const Vrui::ToolFactory* RawKinectViewer::PauseTool::getFactory(void) const
+	{
+	return factory;
+	}
+
+void RawKinectViewer::PauseTool::buttonCallback(int buttonSlotIndex,Vrui::InputDevice::ButtonCallbackData* cbData)
+	{
+	if(cbData->newButtonState)
+		application->paused=!application->paused;
+	}
+
+/******************************************************
+Static elements of class RawKinectViewer::TiePointTool:
+******************************************************/
+
+RawKinectViewer::TiePointToolFactory* RawKinectViewer::TiePointTool::factory=0;
+
+/**********************************************
+Methods of class RawKinectViewer::TiePointTool:
+**********************************************/
+
+RawKinectViewer::TiePointTool::TiePointTool(const Vrui::ToolFactory* factory,const Vrui::ToolInputAssignment& inputAssignment)
+	:Vrui::Tool(factory,inputAssignment),
+	 haveDepthPoint(false),haveColorPoint(false)
+	{
+	}
+
+RawKinectViewer::TiePointTool::~TiePointTool(void)
+	{
+	}
+
+const Vrui::ToolFactory* RawKinectViewer::TiePointTool::getFactory(void) const
+	{
+	return factory;
+	}
+
+void RawKinectViewer::TiePointTool::buttonCallback(int buttonSlotIndex,Vrui::InputDevice::ButtonCallbackData* cbData)
+	{
+	if(buttonSlotIndex==0&&cbData->newButtonState)
+		{
+		/* Intersect the tool's ray with the image plane: */
+		Vrui::Ray ray=getButtonDeviceRay(0);
+		ray.transform(Vrui::getInverseNavigationTransformation());
+		if(ray.getDirection()[2]!=Vrui::Scalar(0))
+			{
+			Vrui::Scalar lambda=-ray.getOrigin()[2]/ray.getDirection()[2];
+			Vrui::Point intersection=ray(lambda);
+			int x=int(Math::floor(intersection[0]));
+			int y=int(Math::floor(intersection[1]));
+			
+			/* Check whether the intersection point is inside the depth or the color image: */
+			if(x>=-640&&x<0&&y>=0&&y<480) // It's a depth frame point
+				{
+				x+=640;
+				
+				/****************************************
+				Extract a blob around the selected pixel:
+				****************************************/
+				
+				/* Calculate a low-pass filtered depth value for the selected pixel: */
+				const DepthPixel* framePtr=static_cast<const DepthPixel*>(application->depthFrames.getLockedValue().getBuffer());
+				double avgDepth=0.0;
+				unsigned int numSamples=0;
+				for(int dy=-2;dy<=2;++dy)
+					if(y+dy>=0&&y+dy<480)
+						{
+						for(int dx=-2;dx<=2;++dx)
+							if(x+dx>=0&&x+dx<640)
+								{
+								avgDepth+=double(framePtr[(y+dy)*640+(x+dx)]);
+								++numSamples;
+								}
+						}
+				DepthPixel avg=DepthPixel(avgDepth/double(numSamples)+0.5);
+				
+				/* Extract all blobs with the average depth value: */
+				PixelComparer<DepthPixel> pc(avg,10); // 10 is just a guess for now
+				std::vector<DepthBlob> blobs=findBlobs(application->depthFrames.getLockedValue(),pc);
+				
+				/* Find the smallest blob containing the selected pixel: */
+				unsigned int minSize=~0x0U;
+				for(std::vector<DepthBlob>::iterator bIt=blobs.begin();bIt!=blobs.end();++bIt)
+					{
+					if(bIt->min[0]<=x&&x<bIt->max[0]&&bIt->min[1]<=y&&y<bIt->max[1])
+						{
+						unsigned int size=(unsigned int)(bIt->max[0]-bIt->min[0])*(unsigned int)(bIt->max[1]-bIt->min[1]);
+						if(minSize>size)
+							{
+							depthPoint=*bIt;
+							minSize=size;
+							}
+						}
+					}
+				haveDepthPoint=true;
+				}
+			else if(x>=0&&x<640&&y>=0&&y<480) // It's a color frame point
+				{
+				/****************************************
+				Extract a blob around the selected pixel:
+				****************************************/
+				
+				/* Calculate a low-pass filtered color value for the selected pixel: */
+				const ColorPixel* framePtr=static_cast<const ColorPixel*>(application->colorFrames.getLockedValue().getBuffer());
+				double avgColor[3];
+				for(int i=0;i<3;++i)
+					avgColor[i]=0.0;
+				unsigned int numSamples=0;
+				for(int dy=-2;dy<=2;++dy)
+					if(y+dy>=0&&y+dy<480)
+						{
+						for(int dx=-2;dx<=2;++dx)
+							if(x+dx>=0&&x+dx<640)
+								{
+								for(int i=0;i<3;++i)
+									avgColor[i]+=double(framePtr[(y+dy)*640+(x+dx)][i]);
+								++numSamples;
+								}
+						}
+				ColorPixel avg;
+				for(int i=0;i<3;++i)
+					avg[i]=ColorPixel::Scalar(avgColor[i]/double(numSamples)+0.5);
+				
+				/* Extract all blobs with the average color value: */
+				PixelComparer<ColorPixel> pc(avg,25); // 25 is just a guess for now
+				std::vector<ColorBlob> blobs=findBlobs(application->colorFrames.getLockedValue(),pc);
+				
+				/* Find the smallest blob containing the selected pixel: */
+				unsigned int minSize=~0x0U;
+				for(std::vector<ColorBlob>::iterator bIt=blobs.begin();bIt!=blobs.end();++bIt)
+					{
+					if(bIt->min[0]<=x&&x<bIt->max[0]&&bIt->min[1]<=y&&y<bIt->max[1])
+						{
+						unsigned int size=(unsigned int)(bIt->max[0]-bIt->min[0])*(unsigned int)(bIt->max[1]-bIt->min[1]);
+						if(minSize>size)
+							{
+							colorPoint=*bIt;
+							minSize=size;
+							}
+						}
+					}
+				haveColorPoint=true;
+				}
+			}
+		}
+	
+	if(buttonSlotIndex==1&&cbData->newButtonState&&haveDepthPoint&&haveColorPoint)
+		{
+		/* Append a tie point pair to the calibration file: */
+		BlobProperty<unsigned short>::Point p=depthPoint.blobProperty.getCentroid();
+		std::cout<<p[0]<<','<<p[1]<<','<<p[2]<<',';
+		std::cout<<colorPoint.x<<','<<colorPoint.y<<std::endl;
+		}
+	}
+
+void RawKinectViewer::TiePointTool::display(GLContextData& contextData) const
+	{
+	if(haveDepthPoint||haveColorPoint)
+		{
+		glPushAttrib(GL_ENABLE_BIT|GL_LINE_BIT);
+		glDisable(GL_LIGHTING);
+		
+		/* Go to navigation coordinates: */
+		glPushMatrix();
+		const Vrui::DisplayState& displayState=Vrui::getDisplayState(contextData);
+		glLoadMatrix(displayState.modelviewNavigational);
+		
+		if(haveDepthPoint)
+			{
+			/* Draw the depth blob: */
+			glLineWidth(1.0f);
+			glColor3f(0.0f,1.0f,0.0f);
+			glBegin(GL_LINE_LOOP);
+			glVertex3f(depthPoint.min[0]-640,depthPoint.min[1],0.01f);
+			glVertex3f(depthPoint.max[0]-640,depthPoint.min[1],0.01f);
+			glVertex3f(depthPoint.max[0]-640,depthPoint.max[1],0.01f);
+			glVertex3f(depthPoint.min[0]-640,depthPoint.max[1],0.01f);
+			glEnd();
+			}
+		
+		if(haveColorPoint)
+			{
+			/* Draw the color blob: */
+			glLineWidth(1.0f);
+			glColor3f(0.0f,1.0f,0.0f);
+			glBegin(GL_LINE_LOOP);
+			glVertex3f(colorPoint.min[0],colorPoint.min[1],0.01f);
+			glVertex3f(colorPoint.max[0],colorPoint.min[1],0.01f);
+			glVertex3f(colorPoint.max[0],colorPoint.max[1],0.01f);
+			glVertex3f(colorPoint.min[0],colorPoint.max[1],0.01f);
+			glEnd();
+			}
+		
+		glPopMatrix();
+		
+		glPopAttrib();
+		}
+	}
 
 /******************************************
 Methods of class RawKinectViewer::DataItem:
@@ -121,20 +542,26 @@ Methods of class RawKinectViewer:
 
 void RawKinectViewer::depthStreamingCallback(const FrameBuffer& frameBuffer)
 	{
-	/* Post the new frame into the depth frame triple buffer: */
-	depthFrames.postNewValue(frameBuffer);
-	
-	/* Update application state: */
-	Vrui::requestUpdate();
+	if(!paused)
+		{
+		/* Post the new frame into the depth frame triple buffer: */
+		depthFrames.postNewValue(frameBuffer);
+		
+		/* Update application state: */
+		Vrui::requestUpdate();
+		}
 	}
 
 void RawKinectViewer::colorStreamingCallback(const FrameBuffer& frameBuffer)
 	{
-	/* Post the new frame into the color frame triple buffer: */
-	colorFrames.postNewValue(frameBuffer);
-	
-	/* Update application state: */
-	Vrui::requestUpdate();
+	if(!paused)
+		{
+		/* Post the new frame into the color frame triple buffer: */
+		colorFrames.postNewValue(frameBuffer);
+		
+		/* Update application state: */
+		Vrui::requestUpdate();
+		}
 	}
 
 void RawKinectViewer::locatorButtonPressCallback(Vrui::LocatorTool::ButtonPressCallbackData* cbData)
@@ -203,8 +630,29 @@ RawKinectViewer::RawKinectViewer(int& argc,char**& argv,char**& appDefaults)
 	:Vrui::Application(argc,argv,appDefaults),
 	 kinectCamera(0),
 	 depthFrameVersion(0),colorFrameVersion(0),
+	 paused(false),
 	 mainMenu(0)
 	{
+	/* Register the custom tool class with the Vrui tool manager: */
+	PauseToolFactory* toolFactory1=new PauseToolFactory("PauseTool","Pause",0,*Vrui::getToolManager());
+	toolFactory1->setNumButtons(1);
+	toolFactory1->setButtonFunction(0,"Pause");
+	Vrui::getToolManager()->addClass(toolFactory1,Vrui::ToolManager::defaultToolFactoryDestructor);
+	
+	TiePointToolFactory* toolFactory2=new TiePointToolFactory("TiePointTool","Tie Points",0,*Vrui::getToolManager());
+	toolFactory2->setNumButtons(2);
+	toolFactory2->setButtonFunction(0,"Select Point");
+	toolFactory2->setButtonFunction(1,"Save Point Pair");
+	Vrui::getToolManager()->addClass(toolFactory2,Vrui::ToolManager::defaultToolFactoryDestructor);
+	
+	/* Open the calibration file: */
+	Misc::File calibrationFile("CameraCalibrationMatrices.dat","rb",Misc::File::LittleEndian);
+	
+	/* Read the depth projection matrix: */
+	BlobProperty<unsigned short>::PTransform projection;
+	calibrationFile.read(projection.getMatrix().getEntries(),4*4);
+	BlobProperty<unsigned short>::setProjection(projection);
+	
 	/* Enable background USB event handling: */
 	usbContext.startEventHandling();
 	
@@ -238,6 +686,9 @@ RawKinectViewer::~RawKinectViewer(void)
 
 void RawKinectViewer::toolCreationCallback(Vrui::ToolManager::ToolCreationCallbackData* cbData)
 	{
+	/* Call the base class method: */
+	Vrui::Application::toolCreationCallback(cbData);
+	
 	/* Check if the new tool is a locator tool: */
 	Vrui::LocatorTool* lt=dynamic_cast<Vrui::LocatorTool*>(cbData->tool);
 	if(lt!=0)

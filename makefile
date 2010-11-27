@@ -22,12 +22,12 @@
 
 # Root directory of the Vrui software installation. This must match the
 # same setting in Vrui's makefile. By default the directories match; if
-# the installation directory was adjusted during Vrui's installation, it
-# must be adjusted here as well.
-VRUIDIR = $(HOME)/Vrui-2.0-001
+# a different version of Vrui was installed, or Vrui's installation
+# directory was adjusted, the directory must be adjusted here as well.
+VRUIDIR = $(HOME)/Vrui-2.0-002
 
 # Set up additional flags for the C++ compiler:
-CFLAGS = 
+CFLAGS = -I.
 
 # Set up destination directories for compilation products:
 OBJDIRBASE = o
