@@ -2,7 +2,7 @@
 CalibrateCameras - Simple utility to read calibration tie points between
 a depth camera and a color camera, and calculate the optimal projective
 transformation mapping color to depth.
-Copyright (c) 2010-2011 Oliver Kreylos
+Copyright (c) 2010 Oliver Kreylos
 
 This file is part of the Kinect 3D Video Capture Project (Kinect).
 
@@ -23,9 +23,9 @@ Software Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA
 ***********************************************************************/
 
 #include <iostream>
-#include <IO/File.h>
-#include <IO/OpenFile.h>
-#include <IO/CSVSource.h>
+#include <Misc/File.h>
+#include <Misc/FileCharacterSource.h>
+#include <Misc/CSVSource.h>
 #include <Math/Math.h>
 #include <Math/Matrix.h>
 
@@ -36,8 +36,8 @@ int main(void)
 	
 	{
 	/* Open the calibration data file: */
-	IO::AutoFile dataSource(IO::openFile("CalibrationData.csv"));
-	IO::CSVSource data(*dataSource);
+	Misc::FileCharacterSource dataSource("CalibrationData.csv");
+	Misc::CSVSource data(dataSource);
 	
 	unsigned int numEntries=0;
 	while(!data.eof())
@@ -111,8 +111,8 @@ int main(void)
 	
 	{
 	/* Open the calibration data file: */
-	IO::AutoFile dataSource(IO::openFile("CalibrationData.csv"));
-	IO::CSVSource data(*dataSource);
+	Misc::FileCharacterSource dataSource("CalibrationData.csv");
+	Misc::CSVSource data(dataSource);
 	
 	/* Test the homography on all calibration data entries: */
 	while(!data.eof())
@@ -132,8 +132,7 @@ int main(void)
 	}
 	
 	/* Open the calibration file: */
-	IO::AutoFile matrixFile(IO::openFile("CameraCalibrationMatrices.dat",IO::File::WriteOnly));
-	matrixFile->setEndianness(IO::File::LittleEndian);
+	Misc::File matrixFile("CameraCalibrationMatrices.dat","wb",Misc::File::LittleEndian);
 	
 	/* Create the depth projection matrix: */
 	Math::Matrix depthProjection(4,4,0.0);
@@ -149,7 +148,7 @@ int main(void)
 	/* Save the depth projection matrix: */
 	for(unsigned int i=0;i<4;++i)
 		for(unsigned int j=0;j<4;++j)
-			matrixFile->write<double>(depthProjection(i,j));
+			matrixFile.write<double>(depthProjection(i,j));
 	
 	/* Create the color projection matrix by extending the homography: */
 	Math::Matrix colorProjection(4,4);
@@ -167,7 +166,7 @@ int main(void)
 	/* Save the color projection matrix: */
 	for(unsigned int i=0;i<4;++i)
 		for(unsigned int j=0;j<4;++j)
-			matrixFile->write<double>(colorProjection(i,j));
+			matrixFile.write<double>(colorProjection(i,j));
 	
 	return 0;
 	}
