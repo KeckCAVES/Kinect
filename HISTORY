@@ -21,10 +21,3 @@ Kinect-1.2:
   cameras.
 - Added (experimental) ability to play back previously recorded 3D video
   streams.
-
-Kinect-1.2a:
-- Adapted to new Vrui-2.1 file I/O library.
-
-Kinect-1.2b:
-- Changed code to claim Kinect USB interface from kernel driver included
-  in newer Linux distributions.
