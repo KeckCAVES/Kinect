@@ -24,6 +24,7 @@ Software Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA
 #ifndef USBDEVICE_INCLUDED
 #define USBDEVICE_INCLUDED
 
+#include <string>
 #include <vector>
 
 /* Forward declarations: */
@@ -72,6 +73,7 @@ class USBDevice
 		return device;
 		}
 	libusb_device_descriptor getDeviceDescriptor(void); // Returns the device's device descriptor
+	std::string getSerialNumber(void); // Returns the device's serial number, or the empty string if none is defined
 	libusb_config_descriptor* getActiveConfigDescriptor(void); // Returns a descriptor for the device's active configuration
 	libusb_config_descriptor* getConfigDescriptorByIndex(unsigned int index); // Returns a descriptor for the device's configuration of the given index
 	libusb_config_descriptor* getConfigDescriptorByValue(unsigned int value); // Returns a descriptor for the device's configuration of the given configuration value

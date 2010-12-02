@@ -10,3 +10,14 @@ Kinect-1.0:
 
 Kinect-1.1:
 - Added color camera calibration procedure to RawKinectViewer.
+
+Kinect-1.2:
+- Added support to merge 3D images from multiple Kinect cameras in
+  KinectViewer.
+- Added serial numbers to camera calibration files.
+- Added projector transformation files.
+- Added calibration program to align multiple Kinect cameras.
+- Added ability to save the 3D video stream from one or multiple Kinect
+  cameras.
+- Added (experimental) ability to play back previously recorded 3D video
+  streams.

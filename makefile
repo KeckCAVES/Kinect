@@ -24,7 +24,7 @@
 # same setting in Vrui's makefile. By default the directories match; if
 # a different version of Vrui was installed, or Vrui's installation
 # directory was adjusted, the directory must be adjusted here as well.
-VRUIDIR = $(HOME)/Vrui-2.0-002
+VRUIDIR = $(HOME)/Vrui-2.0
 
 # Set up additional flags for the C++ compiler:
 CFLAGS = -I.
@@ -66,6 +66,7 @@ ALL = $(LIBDIR)/libKinect.a \
       $(BINDIR)/USBTest \
       $(BINDIR)/CalibrateCameras \
       $(BINDIR)/RawKinectViewer \
+      $(BINDIR)/AlignPoints \
       $(BINDIR)/KinectViewer
 .PHONY: all
 all: $(ALL)
@@ -141,10 +142,26 @@ $(BINDIR)/RawKinectViewer: $(RAWKINECTVIEWER_SOURCES:%.cpp=$(OBJDIR)/%.o) \
 RawKinectViewer: $(BINDIR)/RawKinectViewer
 
 #
+# 3D space alignment program, based on two files containing 3D tie
+# points:
+#
+
+ALIGNPOINTS_SOURCES = AlignPoints.cpp
+
+$(BINDIR)/AlignPoints: $(ALIGNPOINTS_SOURCES:%.cpp=$(OBJDIR)/%.o)
+	@mkdir -p $(BINDIR)
+	@echo Linking $@...
+	@g++ -o $@ $^ $(VRUI_LINKFLAGS)
+.PHONY: AlignPoints
+AlignPoints: $(BINDIR)/AlignPoints
+
+#
 # Viewer for 3D image streams:
 #
 
-KINECTVIEWER_SOURCES = KinectProjector.cpp \
+KINECTVIEWER_SOURCES = KinectFrameSaver.cpp \
+                       KinectPlayback.cpp \
+                       KinectProjector.cpp \
                        KinectViewer.cpp
 
 $(BINDIR)/KinectViewer: $(KINECTVIEWER_SOURCES:%.cpp=$(OBJDIR)/%.o) \
