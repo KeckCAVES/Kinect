@@ -21,12 +21,11 @@ Software Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA
 02111-1307 USA
 ***********************************************************************/
 
-#include "USBDeviceList.h"
+#include <Kinect/USBDeviceList.h>
 
 #include <libusb-1.0/libusb.h>
 #include <Misc/ThrowStdErr.h>
-
-#include "USBContext.h"
+#include <Kinect/USBContext.h>
 
 /******************************
 Methods of class USBDeviceList:

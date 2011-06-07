@@ -2,7 +2,7 @@
 KinectFrameSaver - Helper class to save raw color and video frames from
 a Kinect camera to a time-stamped file on disk for playback and further
 processing.
-Copyright (c) 2010 Oliver Kreylos
+Copyright (c) 2010-2011 Oliver Kreylos
 
 This file is part of the Kinect 3D Video Capture Project (Kinect).
 
@@ -22,7 +22,14 @@ Software Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA
 02111-1307 USA
 ***********************************************************************/
 
-#include "KinectFrameSaver.h"
+#include <Kinect/KinectFrameSaver.h>
+
+#include <IO/File.h>
+#include <IO/OpenFile.h>
+#include <Geometry/GeometryMarshallers.h>
+#include <Kinect/KinectCamera.h>
+#include <Kinect/DepthFrameWriter.h>
+#include <Kinect/ColorFrameWriter.h>
 
 /*********************************
 Methods of class KinectFrameSaver:
@@ -32,7 +39,7 @@ void* KinectFrameSaver::depthFrameWritingThreadMethod(void)
 	{
 	while(true)
 		{
-		TimedFrameBuffer tfb;
+		FrameBuffer fb;
 		{
 		/* Wait until there is an unsaved frame in the queue: */
 		Threads::MutexCond::Lock depthFramesLock(depthFramesCond);
@@ -44,13 +51,12 @@ void* KinectFrameSaver::depthFrameWritingThreadMethod(void)
 			break;
 		
 		/* Grab the next frame: */
-		tfb=depthFrames.front();
+		fb=depthFrames.front();
 		depthFrames.pop_front();
 		}
 		
 		/* Write the next frame to the depth frame file: */
-		depthFrameFile.write<double>(tfb.first);
-		depthFrameFile.write<unsigned short>(static_cast<const unsigned short*>(tfb.second.getBuffer()),tfb.second.getSize(1)*tfb.second.getSize(0));
+		depthFrameWriter->writeFrame(fb);
 		}
 	
 	return 0;
@@ -60,7 +66,7 @@ void* KinectFrameSaver::colorFrameWritingThreadMethod(void)
 	{
 	while(true)
 		{
-		TimedFrameBuffer tfb;
+		FrameBuffer fb;
 		{
 		/* Wait until there is an unsaved frame in the queue: */
 		Threads::MutexCond::Lock colorFramesLock(colorFramesCond);
@@ -72,28 +78,50 @@ void* KinectFrameSaver::colorFrameWritingThreadMethod(void)
 			break;
 		
 		/* Grab the next frame: */
-		tfb=colorFrames.front();
+		fb=colorFrames.front();
 		colorFrames.pop_front();
 		}
 		
 		/* Write the next frame to the color frame file: */
-		colorFrameFile.write<double>(tfb.first);
-		colorFrameFile.write<unsigned char>(static_cast<const unsigned char*>(tfb.second.getBuffer()),tfb.second.getSize(1)*tfb.second.getSize(0)*3);
+		colorFrameWriter->writeFrame(fb);
 		}
 	
 	return 0;
 	}
 
-KinectFrameSaver::KinectFrameSaver(const char* depthFrameFileName,const char* colorFrameFileName)
+KinectFrameSaver::KinectFrameSaver(const KinectCamera& camera,const char* calibrationFileName,const KinectFrameSaver::Transform& projectorTransform,const char* depthFrameFileName,const char* colorFrameFileName)
 	:done(false),
-	 depthFrameFile(depthFrameFileName,"wb",Misc::File::LittleEndian),
-	 colorFrameFile(colorFrameFileName,"wb",Misc::File::LittleEndian)
+	 depthFrameFile(IO::openFile(depthFrameFileName,IO::File::WriteOnly)),
+	 depthFrameWriter(0),
+	 colorFrameFile(IO::openFile(colorFrameFileName,IO::File::WriteOnly)),
+	 colorFrameWriter(0)
 	{
-	/* Write the frame sizes to the frame files: */
-	depthFrameFile.write<unsigned int>(640);
-	depthFrameFile.write<unsigned int>(480);
-	colorFrameFile.write<unsigned int>(640);
-	colorFrameFile.write<unsigned int>(480);
+	/* Open the calibration file: */
+	IO::AutoFile calibrationFile(IO::openFile(calibrationFileName));
+	calibrationFile->setEndianness(IO::File::LittleEndian);
+	
+	/* Read the depth projection matrix: */
+	double depthMatrix[16];
+	calibrationFile->read(depthMatrix,4*4);
+	
+	/* Read the color projection matrix: */
+	double colorMatrix[16];
+	calibrationFile->read(colorMatrix,4*4);
+	
+	/* Write the depth frame file's header: */
+	depthFrameFile->setEndianness(IO::File::LittleEndian);
+	depthFrameFile->write<double>(depthMatrix,4*4);
+	Misc::Marshaller<Transform>::write(projectorTransform,*depthFrameFile);
+	
+	/* Create the depth frame writer: */
+	depthFrameWriter=new DepthFrameWriter(*depthFrameFile,camera.getActualFrameSize(KinectCamera::DEPTH));
+	
+	/* Write the color frame file's header: */
+	colorFrameFile->setEndianness(IO::File::LittleEndian);
+	colorFrameFile->write<double>(colorMatrix,4*4);
+	
+	/* Create the depth frame writer: */
+	colorFrameWriter=new ColorFrameWriter(*colorFrameFile,camera.getActualFrameSize(KinectCamera::COLOR));
 	
 	/* Start the frame writing threads: */
 	depthFrameWritingThread.start(this,&KinectFrameSaver::depthFrameWritingThreadMethod);
@@ -110,34 +138,32 @@ KinectFrameSaver::~KinectFrameSaver(void)
 	/* Wait for the frame writing threads to finish: */
 	depthFrameWritingThread.join();
 	colorFrameWritingThread.join();
+	
+	/* Delete the frame writers: */
+	delete depthFrameWriter;
+	delete colorFrameWriter;
+	
+	/* Close the output files: */
+	delete depthFrameFile;
+	delete colorFrameFile;
 	}
 
 void KinectFrameSaver::saveDepthFrame(const FrameBuffer& newFrame)
 	{
-	/* Time-stamp the depth frame: */
-	TimedFrameBuffer tfb;
-	tfb.first=frameTimer.peekTime();
-	tfb.second=newFrame;
-	
 	/* Enqueue the depth frame: */
 	{
 	Threads::MutexCond::Lock depthFramesLock(depthFramesCond);
-	depthFrames.push_back(tfb);
+	depthFrames.push_back(newFrame);
 	depthFramesCond.signal(depthFramesLock);
 	}
 	}
 
 void KinectFrameSaver::saveColorFrame(const FrameBuffer& newFrame)
 	{
-	/* Time-stamp the color frame: */
-	TimedFrameBuffer tfb;
-	tfb.first=frameTimer.peekTime();
-	tfb.second=newFrame;
-	
 	/* Enqueue the color frame: */
 	{
 	Threads::MutexCond::Lock colorFramesLock(colorFramesCond);
-	colorFrames.push_back(tfb);
+	colorFrames.push_back(newFrame);
 	colorFramesCond.signal(colorFramesLock);
 	}
 	}

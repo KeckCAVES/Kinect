@@ -21,7 +21,7 @@ Software Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA
 02111-1307 USA
 ***********************************************************************/
 
-#include "KinectCamera.h"
+#include <Kinect/KinectCamera.h>
 
 #include <string.h>
 #include <unistd.h>
@@ -29,93 +29,22 @@ Software Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA
 #include <iostream>
 #include <Misc/ThrowStdErr.h>
 #include <Misc/FunctionCalls.h>
-#include <IO/ValueSource.h>
-
-#include "USBContext.h"
-#include "USBDeviceList.h"
-#include "FrameBuffer.h"
+#include <IO/File.h>
+#include <IO/OpenFile.h>
+#include <Kinect/USBContext.h>
+#include <Kinect/USBDeviceList.h>
+#include <Kinect/FrameBuffer.h>
 
 #define KINECT_DUMP_INIT 0
-
-namespace {
-
-/****************
-Helper functions:
-****************/
-
-static int hexDigitValuesBuffer[257];
-static int* hexDigitValues=hexDigitValuesBuffer+1;
-
-void initHexDigits(void)
-	{
-	/* Initialize the hex digit value array: */
-	for(int i=-1;i<256;++i)
-		hexDigitValues[i]=-1;
-	for(int i=0;i<10;++i)
-		hexDigitValues['0'+i]=i;
-	for(int i=0;i<6;++i)
-		{
-		hexDigitValues['A'+i]=10+i;
-		hexDigitValues['a'+i]=10+i;
-		}
-	}
-
-inline unsigned int readUInt(IO::ValueSource& source)
-	{
-	unsigned int result=0x0U;
-	
-	/* Accumulate hex digits until no more hex digits are found: */
-	while(hexDigitValues[source.peekc()]>=0)
-		{
-		result<<=4;
-		result|=(unsigned int)hexDigitValues[source.getChar()];
-		}
-	source.skipWs();
-	
-	return result;
-	}
-
-inline size_t readUCharBuffer(IO::ValueSource& source,unsigned char* buffer,size_t bufferSize)
-	{
-	size_t result=0;
-	
-	/* Read pairs of hex digits and store them as unsigned characters: */
-	unsigned char* bufPtr=buffer;
-	while(hexDigitValues[source.peekc()]>=0&&result<bufferSize)
-		{
-		/* Read one or two hex digits: */
-		unsigned int val=hexDigitValues[source.getChar()]<<4;
-		if(hexDigitValues[source.peekc()]>=0)
-			val|=hexDigitValues[source.getChar()];
-		
-		/* Store the parsed character: */
-		*bufPtr=(unsigned char)val;
-		++bufPtr;
-		++result;
-		}
-	
-	/* Skip any leftover hex digits to get to a defined state in case of overflow: */
-	while(hexDigitValues[source.peekc()]>=0)
-		{
-		source.getChar();
-		if(hexDigitValues[source.peekc()]>=0)
-			source.getChar();
-		++result;
-		}
-	
-	source.skipWs();
-	
-	return result;
-	}
-
-}
+#define KINECTSTREAMER_USE_CAMERA_TIMESTAMP 0
 
 /*********************************************
 Methods of class KinectCamera::StreamingState:
 *********************************************/
 
-KinectCamera::StreamingState::StreamingState(libusb_device_handle* handle,unsigned int endpoint,int sPacketFlagBase,int sPacketSize,const int sFrameSize[2],size_t sRawFrameSize,KinectCamera::StreamingCallback* sStreamingCallback)
-	:packetFlagBase(sPacketFlagBase),
+KinectCamera::StreamingState::StreamingState(libusb_device_handle* handle,unsigned int endpoint,Misc::Timer& sFrameTimer,double& sFrameTimerOffset,int sPacketFlagBase,int sPacketSize,const unsigned int sFrameSize[2],size_t sRawFrameSize,KinectCamera::StreamingCallback* sStreamingCallback)
+	:frameTimer(sFrameTimer),frameTimerOffset(sFrameTimerOffset),
+	 packetFlagBase(sPacketFlagBase),
 	 packetSize(sPacketSize),numPackets(16),numTransfers(32),
 	 transferBuffers(0),transfers(0),numActiveTransfers(0),
 	 rawFrameSize(sRawFrameSize),rawFrameBuffer(new unsigned char[rawFrameSize*2]),
@@ -196,23 +125,39 @@ void KinectCamera::StreamingState::transferCallback(libusb_transfer* transfer)
 		for(int i=0;i<transfer->num_iso_packets;++i)
 			{
 			size_t packetSize=transfer->iso_packet_desc[i].actual_length;
-			if(packetSize>0)
+			if(packetSize>=12&&packetPtr[0]==0x52U&&packetPtr[1]==0x42U)
 				{
+				// DEBUGGING
+				//if(thisPtr->headerFile!=0)
+				//	thisPtr->headerFile->write(packetPtr,12);
+				
 				/* Parse the packet header: */
 				size_t payloadSize=packetSize-12*sizeof(unsigned char); // Each packet has a 12-byte header
 				switch(packetPtr[3]-thisPtr->packetFlagBase)
 					{
 					case 0x01: // Start of new frame
+						{
 						/* Activate the next double buffer half: */
 						thisPtr->activeBuffer=1-thisPtr->activeBuffer;
 						thisPtr->writePtr=thisPtr->rawFrameBuffer+thisPtr->rawFrameSize*thisPtr->activeBuffer;
 						thisPtr->bufferSpace=thisPtr->rawFrameSize;
+						
+						/* Time-stamp the new frame: */
+						#if KINECTSTREAMER_USE_CAMERA_TIMESTAMP
+						unsigned int timeStamp=(unsigned int)packetPtr[11];
+						for(int j=10;j>=8;--j)
+							timeStamp=(timeStamp<<8)|(unsigned int)packetPtr[j];
+						thisPtr->activeFrameTimeStamp=double(timeStamp)/2000000.0;
+						#else
+						thisPtr->activeFrameTimeStamp=thisPtr->frameTimer.peekTime()+thisPtr->frameTimerOffset;
+						#endif
 						
 						/* Copy the packet data into the raw frame buffer: */
 						memcpy(thisPtr->writePtr,packetPtr+12,payloadSize);
 						thisPtr->writePtr+=payloadSize;
 						thisPtr->bufferSpace-=payloadSize;
 						break;
+						}
 					
 					case 0x02: // Frame continuation
 					case 0x05: // End of frame
@@ -224,18 +169,26 @@ void KinectCamera::StreamingState::transferCallback(libusb_transfer* transfer)
 							thisPtr->bufferSpace-=payloadSize;
 							}
 						
-						/* Check for end of frame and correct frame size: */
-						if(packetPtr[3]-thisPtr->packetFlagBase==0x05&&thisPtr->bufferSpace==0)
+						/* Check for end of frame: */
+						if(packetPtr[3]-thisPtr->packetFlagBase==0x05)
 							{
-							/* Submit the raw frame to the frame decoder: */
 							Threads::MutexCond::Lock frameReadyLock(thisPtr->frameReadyCond);
-							thisPtr->readyFrame=thisPtr->rawFrameBuffer+thisPtr->rawFrameSize*thisPtr->activeBuffer;
-							thisPtr->frameReadyCond.signal(frameReadyLock);
+
+							/* Check if the frame was received intact: */
+							thisPtr->readyFrameIntact=thisPtr->bufferSpace==0;
+							if(thisPtr->readyFrameIntact)
+								{
+								/* Submit the raw frame to the frame decoder: */
+								thisPtr->readyFrame=thisPtr->rawFrameBuffer+thisPtr->rawFrameSize*thisPtr->activeBuffer;
+								thisPtr->readyFrameTimeStamp=thisPtr->activeFrameTimeStamp;
+								thisPtr->frameReadyCond.signal(frameReadyLock);
+								}
 							}
 						break;
 					}
 				}
 			
+			/* Go to the next packet (even if a packet is short, the next one starts at the preset offset): */
 			packetPtr+=thisPtr->packetSize;
 			}
 		
@@ -334,18 +287,21 @@ void* KinectCamera::colorDecodingThreadMethod(void)
 		{
 		/* Wait for the next color frame: */
 		unsigned char* framePtr;
+		double frameTimeStamp;
 		{
-		Threads::MutexCond::Lock frameReadyLock(colorStreamer->frameReadyCond);
-		while(colorStreamer->readyFrame==0)
-			colorStreamer->frameReadyCond.wait(frameReadyLock);
-		framePtr=colorStreamer->readyFrame;
-		colorStreamer->readyFrame=0;
+		Threads::MutexCond::Lock frameReadyLock(streamers[COLOR]->frameReadyCond);
+		while(streamers[COLOR]->readyFrame==0)
+			streamers[COLOR]->frameReadyCond.wait(frameReadyLock);
+		framePtr=streamers[COLOR]->readyFrame;
+		frameTimeStamp=streamers[COLOR]->readyFrameTimeStamp;
+		streamers[COLOR]->readyFrame=0;
 		}
 		
 		/* Allocate a new decoded color buffer: */
-		int width=colorStreamer->frameSize[0];
-		int height=colorStreamer->frameSize[1];
+		int width=streamers[COLOR]->frameSize[0];
+		int height=streamers[COLOR]->frameSize[1];
 		FrameBuffer decodedFrame(width,height,width*height*3*sizeof(unsigned char));
+		decodedFrame.timeStamp=frameTimeStamp;
 		
 		/* Decode the raw color buffer (which is in Bayer GRBG pattern): */
 		int stride=width;
@@ -364,7 +320,7 @@ void* KinectCamera::colorDecodingThreadMethod(void)
 		++rPtr;
 		
 		/* Convert the first row's central pixels: */
-		for(unsigned int x=1;x<width-1;x+=2)
+		for(int x=1;x<width-1;x+=2)
 			{
 			/* Convert the odd (R) pixel: */
 			*(cPtr++)=rPtr[0];
@@ -389,7 +345,7 @@ void* KinectCamera::colorDecodingThreadMethod(void)
 		cRowPtr-=stride*3;
 		
 		/* Convert the central rows: */
-		for(unsigned int y=1;y<height-1;y+=2)
+		for(int y=1;y<height-1;y+=2)
 			{
 			/* Convert the odd row: */
 			rPtr=rRowPtr;
@@ -402,7 +358,7 @@ void* KinectCamera::colorDecodingThreadMethod(void)
 			++rPtr;
 			
 			/* Convert the odd row's central pixels: */
-			for(unsigned x=1;x<width-1;x+=2)
+			for(int x=1;x<width-1;x+=2)
 				{
 				/* Convert the odd (G) pixel: */
 				*(cPtr++)=avg(rPtr[-stride],rPtr[stride]);
@@ -437,7 +393,7 @@ void* KinectCamera::colorDecodingThreadMethod(void)
 			++rPtr;
 			
 			/* Convert the even row's central pixels: */
-			for(unsigned x=1;x<width-1;x+=2)
+			for(int x=1;x<width-1;x+=2)
 				{
 				/* Convert the odd (R) pixel: */
 				*(cPtr++)=rPtr[0];
@@ -473,7 +429,7 @@ void* KinectCamera::colorDecodingThreadMethod(void)
 		++rPtr;
 		
 		/* Convert the last row's central pixels: */
-		for(unsigned int x=1;x<width-1;x+=2)
+		for(int x=1;x<width-1;x+=2)
 			{
 			/* Convert the odd (G) pixel: */
 			*(cPtr++)=rPtr[-stride];
@@ -494,7 +450,7 @@ void* KinectCamera::colorDecodingThreadMethod(void)
 		*(cPtr++)=rPtr[-1];
 		
 		/* Pass the decoded color buffer to the streaming callback function: */
-		(*colorStreamer->streamingCallback)(decodedFrame);
+		(*streamers[COLOR]->streamingCallback)(decodedFrame);
 		}
 	
 	return 0;
@@ -508,18 +464,21 @@ void* KinectCamera::depthDecodingThreadMethod(void)
 		{
 		/* Wait for the next depth frame: */
 		unsigned char* framePtr;
+		double frameTimeStamp;
 		{
-		Threads::MutexCond::Lock frameReadyLock(depthStreamer->frameReadyCond);
-		while(depthStreamer->readyFrame==0)
-			depthStreamer->frameReadyCond.wait(frameReadyLock);
-		framePtr=depthStreamer->readyFrame;
-		depthStreamer->readyFrame=0;
+		Threads::MutexCond::Lock frameReadyLock(streamers[DEPTH]->frameReadyCond);
+		while(streamers[DEPTH]->readyFrame==0)
+			streamers[DEPTH]->frameReadyCond.wait(frameReadyLock);
+		framePtr=streamers[DEPTH]->readyFrame;
+		frameTimeStamp=streamers[DEPTH]->readyFrameTimeStamp;
+		streamers[DEPTH]->readyFrame=0;
 		}
 		
 		/* Allocate a new decoded depth buffer: */
-		int width=depthStreamer->frameSize[0];
-		int height=depthStreamer->frameSize[1];
+		int width=streamers[DEPTH]->frameSize[0];
+		int height=streamers[DEPTH]->frameSize[1];
 		FrameBuffer decodedFrame(width,height,width*height*sizeof(unsigned short));
+		decodedFrame.timeStamp=frameTimeStamp;
 		
 		/* Decode the raw depth buffer: */
 		unsigned char* sPtr=framePtr;
@@ -558,44 +517,133 @@ void* KinectCamera::depthDecodingThreadMethod(void)
 					{
 					/* Remove background pixels: */
 					for(int i=0;i<8;++i)
-						if(dPtr[i]>=bfPtr[i])
-							dPtr[i]=invalidDepth; // Mark the pixel as invalid
+						if(dPtr[i]+backgroundRemovalFuzz>=bfPtr[i])
+							dPtr[i]=invalidDepth-1; // Mark the pixel as really far away
 					}
 				}
 			}
 		
 		if(numBackgroundFrames>0)
+			{
 			--numBackgroundFrames;
+			
+			/* Check if this was the last captured background frame, and whether to call a callback function: */
+			if(numBackgroundFrames==0&&backgroundCaptureCallback!=0)
+				{
+				/* Call the callback: */
+				(*backgroundCaptureCallback)(*this);
+				
+				/* Remove the callback object: */
+				delete backgroundCaptureCallback;
+				backgroundCaptureCallback=0;
+				}
+			}
 		
 		/* Pass the decoded depth buffer to the streaming callback function: */
-		(*depthStreamer->streamingCallback)(decodedFrame);
+		(*streamers[DEPTH]->streamingCallback)(decodedFrame);
 		}
 	
 	return 0;
 	}
 
+KinectCamera::KinectCamera(libusb_device* sDevice)
+	:USBDevice(sDevice),
+	 messageSequenceNumber(0x2000U),
+	 numBackgroundFrames(0),backgroundFrame(0),
+	 backgroundCaptureCallback(0),
+	 removeBackground(false),backgroundRemovalFuzz(5)
+	{
+	/* Initialize the camera and streamer states: */
+	frameSizes[0]=FS_640_480;
+	frameSizes[1]=FS_640_480;
+	frameRates[0]=FR_30_HZ;
+	frameRates[1]=FR_30_HZ;
+	
+	streamers[0]=0;
+	streamers[1]=0;
+	
+	// DEBUGGING
+	//headerFile=0;
+	}
+
 KinectCamera::KinectCamera(USBContext& usbContext,size_t index)
 	:messageSequenceNumber(0x2000U),
-	 colorStreamer(0),depthStreamer(0),
-	 numBackgroundFrames(0),backgroundFrame(0),removeBackground(false)
+	 frameTimerOffset(0.0),
+	 numBackgroundFrames(0),backgroundFrame(0),
+	 backgroundCaptureCallback(0),
+	 removeBackground(false),backgroundRemovalFuzz(5)
 	{
 	/* Get the index-th Kinect camera device from the context: */
 	USBDeviceList deviceList(usbContext);
 	USBDevice::operator=(deviceList.getDevice(0x045e,0x02ae,index));
 	if(!isValid())
 		Misc::throwStdErr("KinectCamera::KinectCamera: Less than %d Kinect camera devices detected",int(index));
+	
+	/* Initialize the camera and streamer states: */
+	frameSizes[0]=FS_640_480;
+	frameSizes[1]=FS_640_480;
+	frameRates[0]=FR_30_HZ;
+	frameRates[1]=FR_30_HZ;
+	
+	streamers[0]=0;
+	streamers[1]=0;
+	
+	// DEBUGGING
+	//headerFile=0;
 	}
 
 KinectCamera::~KinectCamera(void)
 	{
-	delete colorStreamer;
-	delete depthStreamer;
+	delete streamers[0];
+	delete streamers[1];
 	delete[] backgroundFrame;
+	delete backgroundCaptureCallback;
 	
 	releaseInterface(0);
 	// setConfiguration(1); // This seems to confuse the device
 	
 	// reset(); // This seems to confuse the device
+	
+	// DEBUGGING
+	//delete headerFile;
+	}
+
+void KinectCamera::setFrameSize(int camera,KinectCamera::FrameSize newFrameSize)
+	{
+	/* Set the camera's frame size: */
+	frameSizes[camera]=newFrameSize;
+	
+	/* Limit the camera's frame rate to 15 Hz if high-res frames were selected: */
+	if(newFrameSize==FS_1280_1024)
+		frameRates[camera]=FR_15_HZ;
+	}
+
+const unsigned int* KinectCamera::getActualFrameSize(int camera) const
+	{
+	static const unsigned int actualFrameSizes[2][2]={{640,480},{1280,1024}};
+	return actualFrameSizes[frameSizes[camera]];
+	}
+
+void KinectCamera::setFrameRate(int camera,KinectCamera::FrameRate newFrameRate)
+	{
+	/* Set the camera's frame rate: */
+	frameRates[camera]=newFrameRate;
+	
+	/* Limit the camera's frame size to 640x480 if 30 Hz was selected: */
+	if(newFrameRate==FR_30_HZ)
+		frameSizes[camera]=FS_640_480;
+	}
+
+unsigned int KinectCamera::getActualFrameRate(int camera) const
+	{
+	static const unsigned int actualFrameRates[2]={15,30};
+	return actualFrameRates[frameRates[camera]];
+	}
+
+void KinectCamera::resetFrameTimer(double newFrameTimerOffset)
+	{
+	frameTimer.elapse();
+	frameTimerOffset=newFrameTimerOffset;
 	}
 
 void KinectCamera::startStreaming(KinectCamera::StreamingCallback* newColorStreamingCallback,KinectCamera::StreamingCallback* newDepthStreamingCallback)
@@ -603,31 +651,7 @@ void KinectCamera::startStreaming(KinectCamera::StreamingCallback* newColorStrea
 	/* Open and prepare the device: */
 	open();
 	// setConfiguration(1); // This seems to confuse the device
-	claimInterface(0,true);
-	
-	/* Check if caller wants to receive color frames: */
-	if(newColorStreamingCallback!=0)
-		{
-		/* Create the color streaming state: */
-		const int colorFrameSize[2]={640,480};
-		size_t rawFrameSize=colorFrameSize[0]*colorFrameSize[1]; // Bayer pattern; one byte per pixel
-		colorStreamer=new StreamingState(getDeviceHandle(),0x81U,0x80U,1920,colorFrameSize,rawFrameSize,newColorStreamingCallback);
-		
-		/* Start the color decoding thread: */
-		colorStreamer->decodingThread.start(this,&KinectCamera::colorDecodingThreadMethod);
-		}
-	
-	/* Check if caller wants to receive depth frames: */
-	if(newDepthStreamingCallback!=0)
-		{
-		/* Create the depth streaming state: */
-		const int depthFrameSize[2]={640,480};
-		size_t rawFrameSize=(depthFrameSize[0]*depthFrameSize[1]*11+7)/8; // Packed bitstream; 11 bits per pixel
-		depthStreamer=new StreamingState(getDeviceHandle(),0x82U,0x70U,1760,depthFrameSize,rawFrameSize,newDepthStreamingCallback);
-		
-		/* Start the depth decoding thread: */
-		depthStreamer->decodingThread.start(this,&KinectCamera::depthDecodingThreadMethod);
-		}
+	claimInterface(0);
 	
 	/***********************************************************
 	Query the device's serial number(?) and firmware version(?):
@@ -639,33 +663,91 @@ void KinectCamera::startStreaming(KinectCamera::StreamingCallback* newColorStrea
 	
 	replySize=sendMessage(0x0005U,0,0,replyBuffer,sizeof(replyBuffer));
 	
-	/**********************************************************
-	Initialize the color and depth cameras and start streaming:
-	**********************************************************/
+	/***********************************
+	Disable the color and depth cameras:
+	***********************************/
 	
 	bool sequenceOk=true;
 	sequenceOk=sequenceOk&&sendCommand(0x0005U,0x0000U); // Disable color streaming
 	sequenceOk=sequenceOk&&sendCommand(0x0006U,0x0000U); // Disable depth streaming
-	sequenceOk=sequenceOk&&sendCommand(0x000cU,0x0000U); // Request regular color frame format
-	sequenceOk=sequenceOk&&sendCommand(0x000dU,0x0001U); // Request regular color frame format
-	sequenceOk=sequenceOk&&sendCommand(0x000eU,0x001eU); // Request Bayer-encoded color images
-	sequenceOk=sequenceOk&&sendCommand(0x0012U,0x0003U); // Request 11-bit depth images
-	sequenceOk=sequenceOk&&sendCommand(0x0013U,0x0001U); // Request regular depth frame format
-	sequenceOk=sequenceOk&&sendCommand(0x0014U,0x001eU); // Unknown semantics
+	if(!sequenceOk)
+		Misc::throwStdErr("KinectCamera: Failed to disable cameras");
+	
+	// DEBUGGING
+	//delete headerFile;
+	//std::string headerFileName="Headers-";
+	//headerFileName.append(getSerialNumber());
+	//headerFileName.append(".dat");
+	//headerFile=new Misc::File(headerFileName.c_str(),"wb",Misc::File::LittleEndian);
+	
+	/* Check if caller wants to receive color frames: */
+	if(newColorStreamingCallback!=0)
+		{
+		/* Create the color streaming state: */
+		const unsigned int* colorFrameSize=getActualFrameSize(COLOR);
+		size_t rawFrameSize=colorFrameSize[0]*colorFrameSize[1]; // Bayer pattern; one byte per pixel
+		streamers[COLOR]=new StreamingState(getDeviceHandle(),0x81U,frameTimer,frameTimerOffset,0x80U,1920,colorFrameSize,rawFrameSize,newColorStreamingCallback);
+		
+		// DEBUGGING
+		//streamers[COLOR]->headerFile=headerFile;
+		
+		/* Start the color decoding thread: */
+		streamers[COLOR]->decodingThread.start(this,&KinectCamera::colorDecodingThreadMethod);
+		}
+	
+	/* Check if caller wants to receive depth frames: */
+	if(newDepthStreamingCallback!=0)
+		{
+		/* Create the depth streaming state: */
+		const unsigned int* depthFrameSize=getActualFrameSize(DEPTH);
+		size_t rawFrameSize=(depthFrameSize[0]*depthFrameSize[1]*11+7)/8; // Packed bitstream; 11 bits per pixel
+		streamers[DEPTH]=new StreamingState(getDeviceHandle(),0x82U,frameTimer,frameTimerOffset,0x70U,1760,depthFrameSize,rawFrameSize,newDepthStreamingCallback);
+		
+		// DEBUGGING
+		//streamers[DEPTH]->headerFile=headerFile;
+		
+		/* Start the depth decoding thread: */
+		streamers[DEPTH]->decodingThread.start(this,&KinectCamera::depthDecodingThreadMethod);
+		}
+	
+	/**********************************************************
+	Initialize the color and depth cameras and start streaming:
+	**********************************************************/
+	
+	sequenceOk=true;
+	
+	/* Configure color camera: */
+	sequenceOk=sequenceOk&&sendCommand(0x000cU,0x0000U); // Request Bayer-encoded color images
+	switch(frameSizes[COLOR])
+		{
+		case FS_640_480:
+			sequenceOk=sequenceOk&&sendCommand(0x000dU,0x0001U); // Request 640x480 color images
+			break;
+		
+		case FS_1280_1024:
+			sequenceOk=sequenceOk&&sendCommand(0x000dU,0x0002U); // Request 1280x1024 color images
+			break;
+		}
+	sequenceOk=sequenceOk&&sendCommand(0x000eU,getActualFrameRate(COLOR)); // Request selected color image frame rate
+	
+	/* Configure depth camera: */
+	sequenceOk=sequenceOk&&sendCommand(0x0012U,0x0003U); // Request 11-bit packed depth images
+	sequenceOk=sequenceOk&&sendCommand(0x0013U,0x0001U); // Request 640x480 depth images
+	sequenceOk=sequenceOk&&sendCommand(0x0014U,0x001eU); // Request 30 Hz depth image frame rate
 	sequenceOk=sequenceOk&&sendCommand(0x0016U,0x0001U); // Enable depth smoothing
 	sequenceOk=sequenceOk&&sendCommand(0x0018U,0x0000U); // Unknown semantics
 	sequenceOk=sequenceOk&&sendCommand(0x0002U,0x0000U); // Unknown semantics
-	sequenceOk=sequenceOk&&sendCommand(0x0105U,0x0000U); // Unknown semantics
+	sequenceOk=sequenceOk&&sendCommand(0x0105U,0x0000U); // Disable IR pattern checking
 	sequenceOk=sequenceOk&&sendCommand(0x0024U,0x0001U); // Unknown semantics
 	sequenceOk=sequenceOk&&sendCommand(0x002dU,0x0001U); // Unknown semantics
 	
-	if(depthStreamer!=0)
+	if(streamers[DEPTH]!=0)
 		{
 		sequenceOk=sequenceOk&&sendCommand(0x0006U,0x0002U); // Enable depth streaming
 		sequenceOk=sequenceOk&&sendCommand(0x0017U,0x0000U); // Request normal orientation of depth images
 		}
 	
-	if(colorStreamer!=0)
+	if(streamers[COLOR]!=0)
 		{
 		sequenceOk=sequenceOk&&sendCommand(0x0005U,0x0001U); // Enable color streaming
 		sequenceOk=sequenceOk&&sendCommand(0x0047U,0x0000U); // Request normal orientation of color images
@@ -675,24 +757,104 @@ void KinectCamera::startStreaming(KinectCamera::StreamingCallback* newColorStrea
 		Misc::throwStdErr("KinectCamera: Failed to initialize streaming mode");
 	}
 
-void KinectCamera::captureBackground(unsigned int newNumBackgroundFrames)
+void KinectCamera::captureBackground(unsigned int newNumBackgroundFrames,KinectCamera::BackgroundCaptureCallback* newBackgroundCaptureCallback)
 	{
 	/* Bail out if there is no depth streamer: */
-	if(depthStreamer==0)
+	if(streamers[DEPTH]==0)
 		return;
 	
+	/* Remember the background capture callback: */
+	delete backgroundCaptureCallback;
+	backgroundCaptureCallback=newBackgroundCaptureCallback;
+	
 	/* Initialize the background frame buffer: */
+	const unsigned int* depthFrameSize=getActualFrameSize(DEPTH);
 	if(backgroundFrame==0)
-		backgroundFrame=new unsigned short[640*480];
+		backgroundFrame=new unsigned short[depthFrameSize[0]*depthFrameSize[1]];
 	
 	/* Initialize the background frame to "empty:" */
 	unsigned short* bfPtr=backgroundFrame;
-	for(unsigned int y=0;y<480;++y)
-		for(unsigned int x=0;x<640;++x,++bfPtr)
+	for(unsigned int y=0;y<depthFrameSize[1];++y)
+		for(unsigned int x=0;x<depthFrameSize[0];++x,++bfPtr)
 			*bfPtr=invalidDepth;
 	
 	/* Start capturing background frames: */
 	numBackgroundFrames=newNumBackgroundFrames;
+	}
+
+void KinectCamera::loadBackground(const char* fileName)
+	{
+	/* Open the background file: */
+	IO::AutoFile file(IO::openFile(fileName));
+	file->setEndianness(IO::File::LittleEndian);
+	unsigned int fileFrameSize[2];
+	file->read<unsigned int>(fileFrameSize,2);
+	
+	/* Check if the file matches the current depth buffer size: */
+	const unsigned int* depthFrameSize=getActualFrameSize(DEPTH);
+	if(fileFrameSize[0]!=depthFrameSize[0]||fileFrameSize[1]!=depthFrameSize[1])
+		Misc::throwStdErr("KinectCamera::loadBackground: Background file's size does not match camera's");
+	
+	/* Create the background frame buffer: */
+	if(backgroundFrame==0)
+		backgroundFrame=new unsigned short[depthFrameSize[0]*depthFrameSize[1]];
+	
+	/* Read the background file: */
+	file->read<unsigned short>(backgroundFrame,depthFrameSize[0]*depthFrameSize[1]);
+	}
+
+void KinectCamera::setMaxDepth(unsigned int newMaxDepth,bool replace)
+	{
+	/* Limit the depth value to the valid range: */
+	if(newMaxDepth>invalidDepth)
+		newMaxDepth=invalidDepth;
+	unsigned short nmd=(unsigned short)(newMaxDepth);
+	
+	const unsigned int* depthFrameSize=getActualFrameSize(DEPTH);
+	if(backgroundFrame==0)
+		{
+		/* Create the background frame buffer: */
+		backgroundFrame=new unsigned short[depthFrameSize[0]*depthFrameSize[1]];
+		replace=true;
+		}
+	
+	if(replace)
+		{
+		/* Initialize the background frame to the max depth value */
+		unsigned short* bfPtr=backgroundFrame;
+		for(unsigned int y=0;y<depthFrameSize[1];++y)
+			for(unsigned int x=0;x<depthFrameSize[0];++x,++bfPtr)
+				*bfPtr=nmd;
+		}
+	else
+		{
+		/* Modify the existing background frame buffer: */
+		unsigned short* bfPtr=backgroundFrame;
+		for(unsigned int y=0;y<depthFrameSize[1];++y)
+			for(unsigned int x=0;x<depthFrameSize[0];++x,++bfPtr)
+				if(*bfPtr>nmd)
+					*bfPtr=nmd;
+		}
+	}
+
+void KinectCamera::saveBackground(const char* fileNamePrefix)
+	{
+	/* Bail out if there is no background frame: */
+	if(backgroundFrame==0)
+		return;
+	
+	/* Construct the full background file name: */
+	std::string fileName=fileNamePrefix;
+	fileName.push_back('-');
+	fileName.append(getSerialNumber());
+	fileName.append(".background");
+	
+	/* Save the background file: */
+	IO::AutoFile file(IO::openFile(fileName.c_str(),IO::File::WriteOnly));
+	file->setEndianness(IO::File::LittleEndian);
+	const unsigned int* depthFrameSize=getActualFrameSize(DEPTH);
+	file->write<unsigned int>(depthFrameSize,2);
+	file->write<unsigned short>(backgroundFrame,depthFrameSize[0]*depthFrameSize[1]);
 	}
 
 void KinectCamera::setRemoveBackground(bool newRemoveBackground)
@@ -705,6 +867,11 @@ void KinectCamera::setRemoveBackground(bool newRemoveBackground)
 	removeBackground=newRemoveBackground;
 	}
 
+void KinectCamera::setBackgroundRemovalFuzz(int newBackgroundRemovalFuzz)
+	{
+	backgroundRemovalFuzz=(short int)(newBackgroundRemovalFuzz);
+	}
+
 void KinectCamera::stopStreaming(void)
 	{
 	/* Send commands to stop streaming: */
@@ -712,10 +879,11 @@ void KinectCamera::stopStreaming(void)
 	sendCommand(0x0006U,0x0000U); // Disable depth streaming (and turn off IR projector)
 	
 	/* Destroy the streaming states: */
-	delete colorStreamer;
-	colorStreamer=0;
-	delete depthStreamer;
-	depthStreamer=0;
+	for(int i=0;i<2;++i)
+		{
+		delete streamers[i];
+		streamers[i]=0;
+		}
 	
 	/* Destroy the background removal buffer: */
 	numBackgroundFrames=0;

@@ -29,12 +29,11 @@ Software Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA
 #include <Misc/ThrowStdErr.h>
 #include <Misc/Time.h>
 #include <Misc/FunctionCalls.h>
-
-#include "USBContext.h"
-#include "USBDevice.h"
-#include "USBDeviceList.h"
-#include "KinectMotor.h"
-#include "KinectCamera.h"
+#include <Kinect/USBContext.h>
+#include <Kinect/USBDevice.h>
+#include <Kinect/USBDeviceList.h>
+#include <Kinect/KinectMotor.h>
+#include <Kinect/KinectCamera.h>
 
 void dumpControl(USBDevice& device,unsigned int bmRequest,unsigned int bRequest,unsigned int wValue,unsigned int wIndex,size_t maxSize = 4096)
 	{
@@ -53,10 +52,10 @@ void dumpControl(USBDevice& device,unsigned int bmRequest,unsigned int bRequest,
 		
 		/* Process the result: */
 		std::cout<<"Received "<<resultSize<<" bytes for request "<<int(bmRequest)<<", "<<int(bRequest)<<", "<<int(wValue)<<", "<<int(wIndex)<<":"<<std::endl;
-		for(int row=0;row<resultSize;row+=8)
+		for(size_t row=0;row<resultSize;row+=8)
 			{
 			std::cout<<std::setfill('0')<<std::setw(2)<<std::hex<<int(buffer[row+0]);
-			for(int column=1;column<8&&column<resultSize-row;++column)
+			for(size_t column=1;column<8&&column<resultSize-row;++column)
 				std::cout<<"   "<<std::setfill('0')<<std::setw(2)<<std::hex<<int(buffer[row+column]);
 			std::cout<<std::dec<<std::endl;
 			}
@@ -172,7 +171,8 @@ int main(int argc,char* argv[])
 	if(argc>1&&strcmp(argv[1],"reset")==0)
 		{
 		/* Get the first Kinect camera device: */
-		KinectCamera kinectCamera(context,0);
+		int cameraIndex=atoi(argv[2]);
+		KinectCamera kinectCamera(context,cameraIndex);
 		
 		/* Open and reset the device: */
 		kinectCamera.open();
@@ -197,7 +197,7 @@ int main(int argc,char* argv[])
 		USBDeviceList deviceList(context);
 		
 		/* Get the first Kinect motor device: */
-		KinectMotor kinectMotor(context,1);
+		KinectMotor kinectMotor(context,0);
 		
 		/* Move the motor: */
 		kinectMotor.setPitch(atoi(argv[2]));

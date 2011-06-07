@@ -21,12 +21,11 @@ Software Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA
 02111-1307 USA
 ***********************************************************************/
 
-#include "KinectMotor.h"
+#include <Kinect/KinectMotor.h>
 
 #include <Misc/ThrowStdErr.h>
-
-#include "USBContext.h"
-#include "USBDeviceList.h"
+#include <Kinect/USBContext.h>
+#include <Kinect/USBDeviceList.h>
 
 /****************************
 Methods of class KinectMotor:

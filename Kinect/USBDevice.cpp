@@ -21,7 +21,7 @@ Software Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA
 02111-1307 USA
 ***********************************************************************/
 
-#include "USBDevice.h"
+#include <Kinect/USBDevice.h>
 
 #include <libusb-1.0/libusb.h>
 #include <Misc/ThrowStdErr.h>
@@ -52,7 +52,7 @@ USBDevice& USBDevice::operator=(libusb_device* sDevice)
 		{
 		/* Close and unrefence the device: */
 		if(handle!=0)
-			libusb_close(handle);
+			close();
 		if(device!=0)
 			libusb_unref_device(device);
 		
@@ -73,7 +73,7 @@ USBDevice& USBDevice::operator=(const USBDevice& source)
 		{
 		/* Close and unrefence the device: */
 		if(handle!=0)
-			libusb_close(handle);
+			close();
 		if(device!=0)
 			libusb_unref_device(device);
 		
@@ -90,17 +90,9 @@ USBDevice& USBDevice::operator=(const USBDevice& source)
 
 USBDevice::~USBDevice(void)
 	{
-	/* Release all still-claimed interfaces: */
-	for(std::vector<ClaimedInterface>::iterator ciIt=claimedInterfaces.begin();ciIt!=claimedInterfaces.end();++ciIt)
-		{
-		libusb_release_interface(handle,ciIt->interfaceNumber);
-		if(ciIt->detachedKernelDriver)
-			libusb_attach_kernel_driver(handle,ciIt->interfaceNumber);
-		}
-	
 	/* Close and unreference the device: */
 	if(handle!=0)
-		libusb_close(handle);
+		close();
 	if(device!=0)
 		libusb_unref_device(device);
 	}
@@ -460,4 +452,5 @@ void USBDevice::close(void)
 	
 	/* Close the device: */
 	libusb_close(handle);
+	handle=0;
 	}

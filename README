@@ -1,12 +1,12 @@
 ========================================================================
-README for Kinect 3D Video Capture Project version 1.2
+README for Kinect 3D Video Capture Project version 1.3
 Copyright (c) 2010-2011 Oliver Kreylos
 ========================================================================
 
 Requirements
 ============
 
-This software requires the Vrui VR toolkit, version 2.0-001 or later. It
+This software requires the Vrui VR toolkit, version 2.1-001 or later. It
 also requires libusb version 1.0.
 
 Installation
@@ -15,78 +15,117 @@ Installation
 0. Install Vrui (ideally, just run make followed by make install).
 
 1. Set Vrui's installation directory in the makefile, either to
-   Vrui-2.0 if Vrui was installed in its default location, or to
-   whatever was configured in Vrui's makefile. For Vrui-2.0 build 001
-   or 002, that is ~/Vrui-2.0-<build>, for Vrui-2.0 build 003 and later,
-   it's simply ~/Vrui-2.0.
+   Vrui-2.1 if Vrui was installed in its default location, or to
+   whatever was configured in Vrui's makefile.
 
 2. Run make.
 
-3. Run ./bin/RawKinectViewer > CalibrationData.csv to gather camera
-   calibration tie points, and write them into the calibration data
-   file. This step requires a calibration object and manual interaction;
-   see the video "Software Release and Kinect Camera Calibration" at
-   http://www.youtube.com/watch?v=7TGF30-5KuQ for a step-by-step guide.
+3. (Optional) If you want to create a vislet to display live 3D video in
+   otherwise unaware Vrui applications, or have installed Vrui's
+   collaboration infrastructure and want to transmit 3D video between
+   collaborating sites, run make install to copy the respective plug-ins
+   to their destination directories.
 
-4. Run ./bin/CalibrateCameras to calibrate the color camera to the
-   depth camera.
+Use
+===
 
-5. Rename the CameraCalibrationMatrices.dat file created by
-   CalibrateCameras to CameraCalibrationMatrices-<serial number>.dat,
-   where <serial number> is the Kinect camera's serial number, as
-   displayed by lsusb -v. This is to associate calibration matrices with
-   individual devices when using multiple Kinects, as they all seem to
-   be different.
+1. Run ./bin/RawKinectViewer <camera index> to intrinsically calibrate
+   the <camera index>-th Kinect device on the host's USB bus (with the
+   first device having index 0), using a semi-transparent checkerboard
+   calibration target. This generates a binary
+   CameraCalibrationMatrices-<serial number>.dat file.
 
-6. Create a ProjectorTransform-<serial number>.txt file, initially only
-   containing "identity" (without the quotes). These files are used to
-   merge 3D images from multiple Kinects into a single representation.
+Step 1 only has to be performed once for each Kinect device, unless the
+resulting calibration proves unsatisfactory. Kinect devices typically
+retain their intrinsic calibration over time.
 
-7. Run ./bin/KinectViewer <camera index>, where <camera index> is the
-   zero-based index of the Kinect camera to use if there are multiple
+2. Create a ProjectorTransform-<serial number>.txt file using the same
+   serial number as the one in the file generated in step 3, initially
+   only containing the string "identity" (without the quotes). Transform
+   files are used to merge 3D images from multiple Kinect devices into a
+   single representation.
+
+Step 2 creates a "dummy" transformation useful only for viewing 3D video
+from a single Kinect device. See the next section on how to calibrate
+any number of Kinect devices to a desired world coordinate system.
+
+3. Run ./bin/KinectViewer <camera index>, where <camera index> is the
+   zero-based index of the Kinect device to use if there are multiple
    ones. If no index is specified, KinectViewer will use the first (or
-   only) camera.
+   only) device.
 
 Merging 3D Facades from Multiple Kinects
 ========================================
 
 To merge the 3D reconstructions of multiple Kinect cameras, first
-internally calibrate each one using RawKinectViewer and
-CalibrateCameras, as shown in the video. Then place an easily-measured
-target object (such as a printed checkerboard) into the field of view of
-all Kinect cameras, and measure the 3D positions of a number of
-easily-identified points on the target (such as checkerboard tile
-corners) using KinectViewer and a Vrui Measurement Tool. Using the
-Measurement tool will create a MeasurementToolXXXX.dat file containing
-all measured points; edit that file to only retain the x, y, z position
-values and rename it to something like Kinect-0-Points.csv (note that
-using the default calibration matrix, the reported positions are in
-centimeters). Then create another csv file containing the "idealized"
-positions of the same points you just measured, in the same order. Run
-those two files through AlignPoints:
+intrinsically calibrate each one using RawKinectViewer, as described
+above and shown in the video. Then extrinsically calibrate all Kinect
+devices with respect to an arbitrarily chosen world coordinate system:
 
-AlignPoints -OG Kinect-0-Points.csv ReferencePoints.csv
+1. Place calibration target into field of view of all Kinect devices to
+   be calibrated (use RawKinectViewer on each to check).
 
-which will print a result transformation to the console. This
-transformation describes how to transform the points from the first file
-to the points in the second file; i.e., it describes the transformation
-from "Kinect space" to "idealized space". Put that transformation into
-ProjectorTransform-<serial number>.txt.
+2. For each Kinect device:
 
-Note: Since the default projection matrix creates 3D positions in
-centimeters, your idealized target points need to be in centimeters as
-well. If they are not, you can account for that by passing a pre-scale
-value to AlignPoints, which will transform units. For example, if
-ReferencePoints.csv contains points measured in inches, you would run
+   2a. Run RawKinectViewer and fit a grid to the calibration target's
+       image in the depth stream (it is not necessary to fit to the
+       color stream).
 
-AlignPoints -OG -S 0.3937 Kinect-0-Points.csv ReferencePoints.csv
+   2b. Save and unproject the grid to receive a list of 3D tie points on
+       the console.
 
-(0.3937 is the length of a centimeter expressed in inches). Other unit
-conversions are left as an exercise to the reader.
+   2c. Copy the tie points into a file KinectPoints-<serial number>.csv.
 
-Repeat this process for all Kinects, ensuring not to move the
-calibration target between measurements. After creating all
-transformation files and editing KinectViewer.cpp to load multiple
-cameras, which is currently hard-coded, running KinectViewer should show
-a merged 3D image with relatively good alignment. Use the main menu to
-select camera-linked views and toggle cameras as shown in the video.
+3. Create a file TargetPoints.csv, containing the 3D interior corner
+   positions of the calibration target, in some arbitrary right-handed
+   world coordinate system using an arbitrary unit of measurement, in
+   the same order as printed by RawKinectViewer (going from left to
+   right, and then bottom to top). See example target file below.
+
+4. For each Kinect device:
+
+   4a. Run the Kinect device's tie points and the target points through
+       AlignPoints:
+       AlignPoints -OG KinectPoints-<serial number>.csv TargetPoints.csv
+
+   4b. Observe the mismatches between purple camera points and green
+       target points in AlignPoints' display. If the discrepancies are
+       too large, or there is no fit at all, repeat step two for the
+       Kinect device.
+
+   4c. Paste the final best fitting transform displayed by AlignPoints
+       (everything after the "Best transformation:" header) into a
+       ProjectorTransform-<serial number>.txt file.
+
+5. Run KinectViewer on all Kinect devices. This will show all individual
+   3D video streams matching more or less seamlessly, depending on how
+   much care was taken during intrinsic and extrinsic calibration. Under
+   ideal circumstances, there should be no noticeable mismatches between
+   individual streams.
+
+Unlike intrinsic calibration, extrinsic calibration has to be repeated
+any time any of the calibrated Kinect devices are moved, even by very
+little. It is recommended to rigidly attach all Kinect devices to a
+sturdy frame before attempting precise extrinsic calibration in a
+production setting. If precision is paramount, it might even be
+necessary to repeat calibration periodically if nothing changed, to
+account for time-varying deformations inside the devices themselves.
+
+An example TargetPoints.csv file, for a 5x4 calibration grid with a tile
+size of 3" (a 5x4 grid has 4x3 interior corners):
+
+0, 0, 0
+3, 0, 0
+6, 0, 0
+9, 0, 0
+0, 3, 0
+3, 3, 0
+6, 3, 0
+9, 3, 0
+0, 6, 0
+3, 6, 0
+6, 6, 0
+9, 6, 0
+
+The resulting world space will use whatever units were used to define
+the target points; in the example above, world space will use inches.

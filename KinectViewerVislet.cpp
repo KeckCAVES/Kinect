@@ -31,9 +31,8 @@ Software Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA
 #include <GL/GLTransformationWrappers.h>
 #include <Vrui/Vrui.h>
 #include <Vrui/VisletManager.h>
-
-#include "KinectCamera.h"
-#include "KinectProjector.h"
+#include <Kinect/KinectCamera.h>
+#include <Kinect/KinectProjector.h>
 
 /******************************************
 Methods of class KinectViewerVisletFactory:
@@ -184,6 +183,7 @@ void KinectViewerVislet::frame(void)
 void KinectViewerVislet::display(GLContextData& contextData) const
 	{
 	/* Move the Kinect camera's reconstruction 3D space into Vrui physical space: */
+	glPushMatrix();
 	glMultMatrix(factory->kinectTransform);
 	
 	/* Draw the current depth image: */

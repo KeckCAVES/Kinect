@@ -2,7 +2,7 @@
 KinectFrameSaver - Helper class to save raw color and video frames from
 a Kinect camera to a time-stamped file on disk for playback and further
 processing.
-Copyright (c) 2010 Oliver Kreylos
+Copyright (c) 2010-2011 Oliver Kreylos
 
 This file is part of the Kinect 3D Video Capture Project (Kinect).
 
@@ -27,28 +27,37 @@ Software Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA
 
 #include <deque>
 #include <Misc/Timer.h>
-#include <Misc/File.h>
 #include <Threads/MutexCond.h>
 #include <Threads/Thread.h>
+#include <Geometry/OrthogonalTransformation.h>
+#include <Kinect/FrameBuffer.h>
 
-#include "FrameBuffer.h"
+/* Forward declarations: */
+namespace IO {
+class File;
+}
+class KinectCamera;
+class DepthFrameWriter;
+class ColorFrameWriter;
 
 class KinectFrameSaver
 	{
 	/* Embedded classes: */
-	private:
-	typedef std::pair<double,FrameBuffer> TimedFrameBuffer; // Frame buffer with time stamp
+	public:
+	typedef Geometry::OrthogonalTransformation<double,3> Transform; // Type for projector transformations
 	
 	/* Elements: */
-	Misc::Timer frameTimer; // Free-running timer to stamp incoming depth and color frames
+	private:
 	volatile bool done; // Flag set when all frames have been queued for saving
 	Threads::MutexCond depthFramesCond; // Condition variable to signal new frames in the depth queue
-	std::deque<TimedFrameBuffer> depthFrames; // Queue of depth frames still to be saved
-	Misc::File depthFrameFile; // File receiving depth frames
+	std::deque<FrameBuffer> depthFrames; // Queue of depth frames still to be saved
+	IO::File* depthFrameFile; // File receiving depth frames
+	DepthFrameWriter* depthFrameWriter; // Helper object to compress and write depth frames
 	Threads::Thread depthFrameWritingThread; // Thread saving depth frames
 	Threads::MutexCond colorFramesCond; // Condition variable to signal new frames in the depth queue
-	std::deque<TimedFrameBuffer> colorFrames; // Queue of color frames still to be saved
-	Misc::File colorFrameFile; // File receiving color frames
+	std::deque<FrameBuffer> colorFrames; // Queue of color frames still to be saved
+	IO::File* colorFrameFile; // File receiving color frames
+	ColorFrameWriter* colorFrameWriter; // Helper object to compress and write color frames
 	Threads::Thread colorFrameWritingThread; // Thread saving color frames
 	
 	/* Private methods: */
@@ -57,7 +66,7 @@ class KinectFrameSaver
 	
 	/* Constructors and destructors: */
 	public:
-	KinectFrameSaver(const char* depthFrameFileName,const char* colorFrameFileName); // Creates frame saver writing to the two given files
+	KinectFrameSaver(const KinectCamera& camera,const char* calibrationFileName,const Transform& projectorTransform,const char* depthFrameFileName,const char* colorFrameFileName); // Creates frame saver writing to the two given files
 	~KinectFrameSaver(void);
 	
 	/* Methods: */

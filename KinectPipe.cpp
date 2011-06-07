@@ -1,6 +1,6 @@
 /***********************************************************************
-KinectMotor - Wrapper class to represent the motor and accelerometer
-interface aspect of the Kinect sensor.
+KinectPipe - Common interface between a Kinect server and a Kinect
+client in the Vrui collaboration infrastructure.
 Copyright (c) 2010 Oliver Kreylos
 
 This file is part of the Kinect 3D Video Capture Project (Kinect).
@@ -21,34 +21,11 @@ Software Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA
 02111-1307 USA
 ***********************************************************************/
 
-#ifndef KINECTMOTOR_INCLUDED
-#define KINECTMOTOR_INCLUDED
+#include "KinectPipe.h"
 
-#include "USBDevice.h"
+/************************************
+Static elements of struct KinectPipe:
+************************************/
 
-/* Forward declarations: */
-class USBContext;
-
-class KinectMotor:public USBDevice
-	{
-	/* Embedded classes: */
-	public:
-	enum LEDState // Enumerated type for Kinect's LED states
-		{
-		LED_OFF=0x0,
-		LED_GREEN,LED_RED,LED_YELLOW,
-		LED_BLINK_YELLOW,LED_BLINK_GREEN,
-		LED_RED_YELLOW,LED_RED_GREEN
-		};
-	
-	/* Constructors and destructors: */
-	public:
-	KinectMotor(USBContext& usbContext,size_t index =0); // Opens the index-th Kinect motor device on the given USB context
-	
-	/* Methods: */
-	void setLED(LEDState newLEDState); // Sets the state of the Kinect's LED
-	void setPitch(int pitch); // Sets the motor's pitch angle
-	void readAccelerometers(float accels[3]); // Writes the Kinect's accelerometer readings into the given array
-	};
-
-#endif
+const char* KinectPipe::protocolName="Kinect";
+const unsigned int KinectPipe::numProtocolMessages=0;

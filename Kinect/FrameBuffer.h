@@ -62,16 +62,18 @@ class FrameBuffer
 	private:
 	int size[2]; // Width and height of the frame
 	void* buffer; // Pointer to the reference-counted frame buffer
+	public:
+	double timeStamp; // Frame's time stamp in originating camera's own clock
 	
 	/* Constructors and destructors: */
 	public:
 	FrameBuffer(void) // Creates invalid frame buffer
-		:buffer(0)
+		:buffer(0),timeStamp(0.0)
 		{
 		size[0]=size[1]=0;
 		}
 	FrameBuffer(int sizeX,int sizeY,size_t bufferSize) // Allocates a new frame buffer of the given frame size and size in bytes
-		:buffer(0)
+		:buffer(0),timeStamp(0.0)
 		{
 		/* Copy the frame size: */
 		size[0]=sizeX;
@@ -88,7 +90,7 @@ class FrameBuffer
 		buffer=paddedBuffer+sizeof(BufferHeader);
 		}
 	FrameBuffer(const FrameBuffer& source) // Copy constructor
-		:buffer(source.buffer)
+		:buffer(source.buffer),timeStamp(source.timeStamp)
 		{
 		/* Copy the frame size: */
 		size[0]=source.size[0];
@@ -121,7 +123,11 @@ class FrameBuffer
 			buffer=source.buffer;
 			if(buffer!=0)
 				static_cast<BufferHeader*>(buffer)[-1].ref();
+			
+			/* Copy the time stamp: */
+			timeStamp=source.timeStamp;
 			}
+		return *this;
 		}
 	~FrameBuffer(void)
 		{

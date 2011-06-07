@@ -2,7 +2,7 @@
 KinectProjector - Class to project a depth frame captured from a Kinect
 camera back into calibrated 3D camera space, and texture-map it with a
 matching color frame.
-Copyright (c) 2010 Oliver Kreylos
+Copyright (c) 2010-2011 Oliver Kreylos
 
 This file is part of the Kinect 3D Video Capture Project (Kinect).
 
@@ -29,8 +29,14 @@ Software Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA
 #include <GL/gl.h>
 #include <GL/GLVertex.h>
 #include <GL/GLObject.h>
+#include <Kinect/FrameBuffer.h>
 
-#include "FrameBuffer.h"
+/* Forward declarations: */
+namespace IO {
+class File;
+}
+
+#define FILTERING
 
 class KinectProjector:public GLObject
 	{
@@ -60,12 +66,18 @@ class KinectProjector:public GLObject
 	PTransform colorProjection; // Projection transformation from color image space into 3D camera space
 	FrameBuffer depthFrame; // Current depth frame
 	unsigned int depthFrameVersion; // Version number of current depth frame
+	#ifdef FILTERING
+	float* filteredDepthFrame; // Filtered depth frame, same version number as current depth frame
+	#endif
 	FrameBuffer colorFrame; // Current color frame
 	unsigned int colorFrameVersion; // Version number of current color frame
 	
 	/* Constructors and destructors: */
 	public:
-	KinectProjector(const char* calibrationFileName); // Creates a Kinect projector from the given calibration data file
+	KinectProjector(const char* calibrationFileName); // Creates a Kinect projector from the calibration data file of the given name
+	KinectProjector(IO::File& calibrationFile); // Creates a Kinect projector from the given calibration data file
+	KinectProjector(const double depthMatrix[16],const double colorMatrix[16]); // Creates a Kinect projector from the given calibration matrices
+	~KinectProjector(void);
 	
 	/* Methods from GLObject: */
 	virtual void initContext(GLContextData& contextData) const;

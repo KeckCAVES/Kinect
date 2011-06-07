@@ -26,8 +26,7 @@ Software Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA
 #define FINDBLOBS_INCLUDED
 
 #include <vector>
-
-#include "FrameBuffer.h"
+#include <Kinect/FrameBuffer.h>
 
 template <class PixelParam>
 class BlobProperty // Class to accumulate additional pixel properties along with blobs

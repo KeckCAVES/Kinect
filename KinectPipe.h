@@ -1,5 +1,6 @@
 /***********************************************************************
-USBConfigDescriptor - Class representing a USB configuration descriptor.
+KinectPipe - Common interface between a Kinect server and a Kinect
+client in the Vrui collaboration infrastructure.
 Copyright (c) 2010 Oliver Kreylos
 
 This file is part of the Kinect 3D Video Capture Project (Kinect).
@@ -20,15 +21,17 @@ Software Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA
 02111-1307 USA
 ***********************************************************************/
 
-#include "USBConfigDescriptor.h"
+#ifndef KINECTPIPE_INCLUDED
+#define KINECTPIPE_INCLUDED
 
-#include <libusb-1.0/libusb.h>
+#include <Collaboration/CollaborationPipe.h>
 
-/************************************
-Methods of class USBConfigDescriptor:
-************************************/
-
-USBConfigDescriptor::~USBConfigDescriptor(void)
+struct KinectPipe
 	{
-	libusb_free_config_descriptor(descriptor);
-	}
+	/* Elements: */
+	public:
+	static const char* protocolName; // Network name of Kinect protocol
+	static const unsigned int numProtocolMessages; // Number of Kinect-specific protocol messages
+	};
+
+#endif

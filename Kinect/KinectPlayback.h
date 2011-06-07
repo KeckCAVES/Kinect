@@ -25,30 +25,39 @@ Software Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA
 #define KINECTPLAYBACK_INCLUDED
 
 #include <Misc/Timer.h>
-#include <Misc/File.h>
 #include <Threads/Thread.h>
-
-#include "FrameBuffer.h"
+#include <Geometry/OrthogonalTransformation.h>
+#include <Kinect/FrameBuffer.h>
 
 /* Forward declarations: */
 namespace Misc {
 template <class ParameterParam>
 class FunctionCall;
 }
+namespace IO {
+class File;
+}
+class DepthFrameReader;
+class ColorFrameReader;
 
 class KinectPlayback
 	{
 	/* Embedded classes: */
 	public:
+	typedef Geometry::OrthogonalTransformation<double,3> Transform; // Type for projector transformations
 	typedef Misc::FunctionCall<const FrameBuffer&> StreamingCallback; // Function call type for streaming color or depth image capture callback
 	
-	private:
-	typedef std::pair<double,FrameBuffer> TimedFrameBuffer; // Frame buffer with time stamp
-	
 	/* Elements: */
+	private:
 	Misc::Timer frameTimer; // Free-running timer to synchronize playback of depth and color frames
-	Misc::File depthFrameFile; // File containing depth frames
-	Misc::File colorFrameFile; // File containing color frames
+	IO::File* depthFrameFile; // File containing depth frames
+	double depthMatrix[16]; // Depth calibration matrix read from depth frame file
+	Transform projectorTransform; // Projector transformation read from depth frame file
+	DepthFrameReader* depthFrameReader; // Reader for depth frames
+	IO::File* colorFrameFile; // File containing color frames
+	double colorMatrix[16]; // Color calibration matrix read from color frame file
+	ColorFrameReader* colorFrameReader; // Reader for color frames
+	unsigned int depthSize[2]; // Frame size of depth frames
 	Threads::Thread playbackThread; // Thread playing back depth and color frames
 	StreamingCallback* depthStreamingCallback; // Callback to be called when a new depth frame has been loaded
 	StreamingCallback* colorStreamingCallback; // Callback to be called when a new color frame has been loaded
@@ -65,6 +74,19 @@ class KinectPlayback
 	~KinectPlayback(void);
 	
 	/* Methods: */
+	const double* getDepthMatrix(void) const // Returns the depth calibration matrix
+		{
+		return depthMatrix;
+		}
+	const Transform& getProjectorTransform(void) const // Returns the projector transformation
+		{
+		return projectorTransform;
+		}
+	const double* getColorMatrix(void) const // Returns the color calibration matrix
+		{
+		return colorMatrix;
+		}
+	void resetFrameTimer(void); // Resets the internal frame timer
 	void startStreaming(StreamingCallback* newColorStreamingCallback,StreamingCallback* newDepthStreamingCallback); // Installs the given streaming callback and starts loading color and depth frames from the files
 	void captureBackground(unsigned int newNumBackgroundFrames); // Captures the given number of frames to create a background removal buffer
 	void setRemoveBackground(bool newRemoveBackground); // Enables or disables background removal
