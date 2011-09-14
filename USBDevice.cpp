@@ -2,6 +2,23 @@
 USBDevice - Class representing a USB device and optionally a handle
 resulting from opening the device.
 Copyright (c) 2010 Oliver Kreylos
+
+This file is part of the Kinect 3D Video Capture Project (Kinect).
+
+The Kinect 3D Video Capture Project is free software; you can
+redistribute it and/or modify it under the terms of the GNU General
+Public License as published by the Free Software Foundation; either
+version 2 of the License, or (at your option) any later version.
+
+The Kinect 3D Video Capture Project is distributed in the hope that it
+will be useful, but WITHOUT ANY WARRANTY; without even the implied
+warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See
+the GNU General Public License for more details.
+
+You should have received a copy of the GNU General Public License along
+with the Kinect 3D Video Capture Project; if not, write to the Free
+Software Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA
+02111-1307 USA
 ***********************************************************************/
 
 #include "USBDevice.h"
@@ -94,6 +111,42 @@ libusb_device_descriptor USBDevice::getDeviceDescriptor(void)
 	if(libusb_get_device_descriptor(device,&result)!=0)
 		Misc::throwStdErr("USBDevice::getDeviceDescriptor: Error while querying device descriptor");
 	return result;
+	}
+
+std::string USBDevice::getSerialNumber(void)
+	{
+	/* Get the device descriptor: */
+	libusb_device_descriptor dd;
+	if(libusb_get_device_descriptor(device,&dd)!=0)
+		Misc::throwStdErr("USBDevice::getSerialNumber: Error while querying device descriptor");
+	
+	/* Check if the serial number is set: */
+	if(dd.iSerialNumber==0)
+		return "";
+	
+	/* Temporarily open the device if it is not open already: */
+	bool tempOpen=handle==0;
+	if(tempOpen)
+		open();
+	
+	/* Retrieve the serial number string: */
+	unsigned char stringBuffer[256];
+	int stringLength=libusb_get_string_descriptor_ascii(handle,dd.iSerialNumber,stringBuffer,sizeof(stringBuffer));
+	if(stringLength<0)
+		{
+		/* Close the device again if it wasn't open to begin with: */
+		if(tempOpen)
+			close();
+		
+		Misc::throwStdErr("USBDevice::getSerialNumber: Error while querying serial number string");
+		}
+	
+	/* Close the device again if it wasn't open to begin with: */
+	if(tempOpen)
+		close();
+	
+	/* Return the serial number: */
+	return std::string(stringBuffer,stringBuffer+stringLength);
 	}
 
 libusb_config_descriptor* USBDevice::getActiveConfigDescriptor(void)

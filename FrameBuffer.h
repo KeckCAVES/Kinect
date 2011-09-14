@@ -24,8 +24,40 @@ Software Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA
 #ifndef FRAMEBUFFER_INCLUDED
 #define FRAMEBUFFER_INCLUDED
 
+#include <new>
+#include <Threads/Mutex.h>
+
 class FrameBuffer
 	{
+	/* Embedded classes: */
+	private:
+	struct BufferHeader
+		{
+		/* Elements: */
+		public:
+		Threads::Mutex refCountMutex; // Mutex protecting the reference counter
+		unsigned int refCount; // Reference counter
+		
+		/* Constructors and destructors: */
+		BufferHeader(void)
+			:refCount(0)
+			{
+			}
+		
+		/* Methods: */
+		void ref(void) // References the buffer
+			{
+			Threads::Mutex::Lock refCountLock(refCountMutex);
+			++refCount;
+			}
+		bool unref(void) // Unreferences the buffer; returns true if buffer becomes orphaned
+			{
+			Threads::Mutex::Lock refCountLock(refCountMutex);
+			--refCount;
+			return refCount==0;
+			}
+		};
+	
 	/* Elements: */
 	private:
 	int size[2]; // Width and height of the frame
@@ -46,11 +78,14 @@ class FrameBuffer
 		size[1]=sizeY;
 		
 		/* Allocate the enlarged frame buffer: */
-		unsigned int* paddedBuffer=new unsigned int[(bufferSize+sizeof(unsigned int)-1)/sizeof(unsigned int)+1];
-		buffer=paddedBuffer+1;
+		unsigned char* paddedBuffer=new unsigned char[bufferSize+sizeof(BufferHeader)];
+		BufferHeader* header=new(paddedBuffer) BufferHeader;
 		
 		/* Initialize the buffer's reference count: */
-		paddedBuffer[0]=1;
+		header->ref();
+		
+		/* Store the actual buffer pointer: */
+		buffer=paddedBuffer+sizeof(BufferHeader);
 		}
 	FrameBuffer(const FrameBuffer& source) // Copy constructor
 		:buffer(source.buffer)
@@ -61,17 +96,21 @@ class FrameBuffer
 		
 		/* Reference the source's buffer: */
 		if(buffer!=0)
-			++(static_cast<unsigned int*>(buffer)[-1]);
+			static_cast<BufferHeader*>(buffer)[-1].ref();
 		}
 	FrameBuffer& operator=(const FrameBuffer& source) // Assignment operator
 		{
 		if(buffer!=source.buffer)
 			{
 			/* Unreference the current buffer: */
-			if(buffer!=0&&--static_cast<unsigned int*>(buffer)[-1]==0)
+			if(buffer!=0)
 				{
-				/* Delete the unused buffer: */
-				delete[] (static_cast<unsigned int*>(buffer)-1);
+				if(static_cast<BufferHeader*>(buffer)[-1].unref())
+					{
+					/* Delete the unused buffer: */
+					static_cast<BufferHeader*>(buffer)[-1].~BufferHeader();
+					delete[] (static_cast<unsigned char*>(buffer)-sizeof(BufferHeader));
+					}
 				}
 			
 			/* Copy the frame size: */
@@ -81,16 +120,20 @@ class FrameBuffer
 			/* Reference the source's buffer: */
 			buffer=source.buffer;
 			if(buffer!=0)
-				++(static_cast<unsigned int*>(buffer)[-1]);
+				static_cast<BufferHeader*>(buffer)[-1].ref();
 			}
 		}
 	~FrameBuffer(void)
 		{
 		/* Unreference the current buffer: */
-		if(buffer!=0&&(--(static_cast<unsigned int*>(buffer)[-1]))==0)
+		if(buffer!=0)
 			{
-			/* Delete the unused buffer: */
-			delete[] (static_cast<unsigned int*>(buffer)-1);
+			if(static_cast<BufferHeader*>(buffer)[-1].unref())
+				{
+				/* Delete the unused buffer: */
+				static_cast<BufferHeader*>(buffer)[-1].~BufferHeader();
+				delete[] (static_cast<unsigned char*>(buffer)-sizeof(BufferHeader));
+				}
 			}
 		}
 	

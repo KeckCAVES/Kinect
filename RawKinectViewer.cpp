@@ -656,8 +656,11 @@ RawKinectViewer::RawKinectViewer(int& argc,char**& argv,char**& appDefaults)
 	/* Enable background USB event handling: */
 	usbContext.startEventHandling();
 	
-	/* Connect to first Kinect camera device on the host: */
-	kinectCamera=new KinectCamera(usbContext);
+	/* Connect to the given Kinect camera device on the host: */
+	int cameraIndex=0;
+	if(argc>=2)
+		cameraIndex=atoi(argv[1]);
+	kinectCamera=new KinectCamera(usbContext,cameraIndex);
 	
 	/* Create the main menu: */
 	mainMenu=createMainMenu();

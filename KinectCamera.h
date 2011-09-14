@@ -1,7 +1,7 @@
 /***********************************************************************
 KinectCamera - Wrapper class to represent the color and depth camera
 interface aspects of the Kinect sensor.
-Copyright (c) 2010 Oliver Kreylos
+Copyright (c) 2010-2011 Oliver Kreylos
 
 This file is part of the Kinect 3D Video Capture Project (Kinect).
 
