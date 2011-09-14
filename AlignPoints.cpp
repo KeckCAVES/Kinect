@@ -1,7 +1,7 @@
 /***********************************************************************
 AlignPoints - Utility to align two sets of measurements of the same set
 of points using a variety of transformation types.
-Copyright (c) 2009-2010 Oliver Kreylos
+Copyright (c) 2009-2011 Oliver Kreylos
 
 This file is part of the Kinect 3D Video Capture Project (Kinect).
 
@@ -26,8 +26,9 @@ Software Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA
 #include <iostream>
 #include <vector>
 #include <Misc/File.h>
-#include <Misc/FileCharacterSource.h>
-#include <Misc/ValueSource.h>
+#include <IO/File.h>
+#include <IO/OpenFile.h>
+#include <IO/ValueSource.h>
 #include <Math/Constants.h>
 #define GEOMETRY_NONSTANDARD_TEMPLATES
 #include <Geometry/Point.h>
@@ -164,8 +165,8 @@ AlignPoints::AlignPoints(int& argc,char**& argv,char**& appDefaults)
 	for(int pointSet=0;pointSet<2;++pointSet)
 		{
 		/* Open the input file: */
-		Misc::FileCharacterSource file(fileName[pointSet]);
-		Misc::ValueSource reader(file);
+		IO::AutoFile file(IO::openFile(fileName[pointSet]));
+		IO::ValueSource reader(*file);
 		reader.setWhitespace(',',true);
 		reader.setPunctuation('\n',true);
 		reader.skipWs();

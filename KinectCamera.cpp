@@ -1,7 +1,7 @@
 /***********************************************************************
 KinectCamera - Wrapper class to represent the color and depth camera
 interface aspects of the Kinect sensor.
-Copyright (c) 2010 Oliver Kreylos
+Copyright (c) 2010-2011 Oliver Kreylos
 
 This file is part of the Kinect 3D Video Capture Project (Kinect).
 
@@ -29,8 +29,7 @@ Software Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA
 #include <iostream>
 #include <Misc/ThrowStdErr.h>
 #include <Misc/FunctionCalls.h>
-#include <Misc/FileCharacterSource.h>
-#include <Misc/ValueSource.h>
+#include <IO/ValueSource.h>
 
 #include "USBContext.h"
 #include "USBDeviceList.h"
@@ -61,7 +60,7 @@ void initHexDigits(void)
 		}
 	}
 
-inline unsigned int readUInt(Misc::ValueSource& source)
+inline unsigned int readUInt(IO::ValueSource& source)
 	{
 	unsigned int result=0x0U;
 	
@@ -76,7 +75,7 @@ inline unsigned int readUInt(Misc::ValueSource& source)
 	return result;
 	}
 
-inline size_t readUCharBuffer(Misc::ValueSource& source,unsigned char* buffer,size_t bufferSize)
+inline size_t readUCharBuffer(IO::ValueSource& source,unsigned char* buffer,size_t bufferSize)
 	{
 	size_t result=0;
 	

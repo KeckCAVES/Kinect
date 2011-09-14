@@ -24,7 +24,7 @@
 # same setting in Vrui's makefile. By default the directories match; if
 # a different version of Vrui was installed, or Vrui's installation
 # directory was adjusted, the directory must be adjusted here as well.
-VRUIDIR = $(HOME)/Vrui-2.0
+VRUIDIR = $(HOME)/Vrui-2.1
 
 # Set up additional flags for the C++ compiler:
 CFLAGS = -I.
