@@ -1,6 +1,6 @@
 ========================================================================
 README for Kinect 3D Video Capture Project version 1.2
-Copyright (c) 2010 Oliver Kreylos
+Copyright (c) 2010-2011 Oliver Kreylos
 ========================================================================
 
 Requirements
@@ -24,7 +24,9 @@ Installation
 
 3. Run ./bin/RawKinectViewer > CalibrationData.csv to gather camera
    calibration tie points, and write them into the calibration data
-   file.
+   file. This step requires a calibration object and manual interaction;
+   see the video "Software Release and Kinect Camera Calibration" at
+   http://www.youtube.com/watch?v=7TGF30-5KuQ for a step-by-step guide.
 
 4. Run ./bin/CalibrateCameras to calibrate the color camera to the
    depth camera.

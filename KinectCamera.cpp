@@ -603,7 +603,7 @@ void KinectCamera::startStreaming(KinectCamera::StreamingCallback* newColorStrea
 	/* Open and prepare the device: */
 	open();
 	// setConfiguration(1); // This seems to confuse the device
-	claimInterface(0);
+	claimInterface(0,true);
 	
 	/* Check if caller wants to receive color frames: */
 	if(newColorStreamingCallback!=0)
