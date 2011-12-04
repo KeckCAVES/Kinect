@@ -40,6 +40,9 @@ namespace Misc {
 template <class ParameterParam>
 class FunctionCall;
 }
+namespace IO {
+class File;
+}
 class USBContext;
 class FrameBuffer;
 
@@ -91,6 +94,7 @@ class KinectCamera:public USBDevice
 		bool readyFrameIntact; // Flag whether the completed frame was received intact
 		unsigned char* volatile readyFrame; // Pointer to buffer half containing the completed frame
 		double readyFrameTimeStamp; // Time stamp of completed frame
+		volatile bool cancelDecoding; // Flag to cancel the deocding thread
 		Threads::Thread decodingThread; // Thread to decode raw frames into user-visible format
 		
 		StreamingCallback* streamingCallback; // Callback to be called when a new frame has been decoded
@@ -116,6 +120,7 @@ class KinectCamera:public USBDevice
 	unsigned short messageSequenceNumber; // Incrementing sequence number for command messages to the camera
 	Misc::Timer frameTimer; // Free-running timer to time-stamp depth and color frames
 	double frameTimerOffset; // Time offset to apply to cameras' timers
+	bool compressDepthFrames; // Flag whether to request RLE/differential compressed depth frames from the depth camera
 	StreamingState* streamers[2]; // Streaming states for color and depth frames
 	unsigned int numBackgroundFrames; // Number of background frames left to capture
 	unsigned short* backgroundFrame; // Frame containing minimal depth values for a captured background
@@ -131,6 +136,7 @@ class KinectCamera:public USBDevice
 	bool sendCommand(unsigned short command,unsigned short value); // Sends a command message to the camera device; returns true if command was processed properly
 	void* colorDecodingThreadMethod(void); // The color decoding thread method
 	void* depthDecodingThreadMethod(void); // The depth decoding thread method
+	void* compressedDepthDecodingThreadMethod(void); // The depth decoding thread method for RLE/differential-compressed frames
 	
 	/* Constructors and destructors: */
 	public:
@@ -152,9 +158,11 @@ class KinectCamera:public USBDevice
 		}
 	unsigned int getActualFrameRate(int camera) const; // Returns the selected frame rate of the color or depth camera in Hz
 	void resetFrameTimer(double newFrameTimerOffset =0.0); // Resets the frame timer to zero
+	void setCompressDepthFrames(bool newCompressDepthFrames); // Enables or disables depth frame compression for the next streaming operation
 	void startStreaming(StreamingCallback* newColorStreamingCallback,StreamingCallback* newDepthStreamingCallback); // Installs the given streaming callback and starts receiving color and depth data from the camera
-	void captureBackground(unsigned int newNumBackgroundFrames,BackgroundCaptureCallback* newBackgroundCaptureCallback =0); // Captures the given number of frames to create a background removal buffer and calls optional callback upon completion
-	void loadBackground(const char* fileName); // Loads a background removal buffer from the given file
+	void captureBackground(unsigned int newNumBackgroundFrames,bool replace,BackgroundCaptureCallback* newBackgroundCaptureCallback =0); // Captures the given number of frames to create a background removal buffer and calls optional callback upon completion
+	void loadBackground(const char* fileNamePrefix); // Loads a background removal buffer from a file with the given prefix
+	void loadBackground(IO::File& file); // Ditto, from already opened file
 	void setMaxDepth(unsigned int newMaxDepth,bool replace =false); // Sets a depth value beyond which all pixels are considered background
 	void saveBackground(const char* fileNamePrefix); // Saves the current background frame to a file with the given prefix
 	void setRemoveBackground(bool newRemoveBackground); // Enables or disables background removal

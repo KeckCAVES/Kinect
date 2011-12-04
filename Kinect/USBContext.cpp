@@ -32,7 +32,8 @@ Methods of class USBContext:
 void* USBContext::eventHandlingThreadMethod(void)
 	{
 	Threads::Thread::setCancelState(Threads::Thread::CANCEL_ENABLE);
-	Threads::Thread::setCancelType(Threads::Thread::CANCEL_ASYNCHRONOUS);
+	// Threads::Thread::setCancelType(Threads::Thread::CANCEL_ASYNCHRONOUS);
+	
 	while(true)
 		{
 		/* Block until the next USB event and handle it: */

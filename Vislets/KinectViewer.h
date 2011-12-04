@@ -1,7 +1,7 @@
 /***********************************************************************
-KinectViewerVislet - Vislet to draw 3D reconstructions captured from a
-Kinect device in 3D space.
-Copyright (c) 2010 Oliver Kreylos
+KinectViewer - Vislet to draw 3D reconstructions captured from a Kinect
+device in 3D space.
+Copyright (c) 2010-2011 Oliver Kreylos
 
 This file is part of the Kinect 3D Video Capture Project (Kinect).
 
@@ -21,8 +21,8 @@ Software Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA
 02111-1307 USA
 ***********************************************************************/
 
-#ifndef KINECTVIEWERVISLET_INCLUDED
-#define KINECTVIEWERVISLET_INCLUDED
+#ifndef VISLETS_KINECTVIEWER_INCLUDED
+#define VISLETS_KINECTVIEWER_INCLUDED
 
 #include <string>
 #include <Threads/TripleBuffer.h>
@@ -36,11 +36,11 @@ Software Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA
 class KinectCamera;
 class KinectProjector;
 
-class KinectViewerVislet;
+class KinectViewer;
 
-class KinectViewerVisletFactory:public Vrui::VisletFactory
+class KinectViewerFactory:public Vrui::VisletFactory
 	{
-	friend class KinectViewerVislet;
+	friend class KinectViewer;
 	
 	/* Elements: */
 	private:
@@ -49,21 +49,21 @@ class KinectViewerVisletFactory:public Vrui::VisletFactory
 	
 	/* Constructors and destructors: */
 	public:
-	KinectViewerVisletFactory(Vrui::VisletManager& visletManager);
-	virtual ~KinectViewerVisletFactory(void);
+	KinectViewerFactory(Vrui::VisletManager& visletManager);
+	virtual ~KinectViewerFactory(void);
 	
 	/* Methods from Vrui::Vislet: */
 	virtual Vrui::Vislet* createVislet(int numVisletArguments,const char* const visletArguments[]) const;
 	virtual void destroyVislet(Vrui::Vislet* vislet) const;
 	};
 
-class KinectViewerVislet:public Vrui::Vislet
+class KinectViewer:public Vrui::Vislet
 	{
-	friend class KinectViewerVisletFactory;
+	friend class KinectViewerFactory;
 	
 	/* Elements: */
 	private:
-	static KinectViewerVisletFactory* factory; // Pointer to the class' factory object
+	static KinectViewerFactory* factory; // Pointer to the class' factory object
 	
 	USBContext usbContext; // USB device context
 	KinectCamera* kinectCamera; // Pointer to camera aspect of Kinect device
@@ -77,8 +77,8 @@ class KinectViewerVislet:public Vrui::Vislet
 	
 	/* Constructors and destructors: */
 	public:
-	KinectViewerVislet(int numArguments,const char* const arguments[]);
-	virtual ~KinectViewerVislet(void);
+	KinectViewer(int numArguments,const char* const arguments[]);
+	virtual ~KinectViewer(void);
 	
 	/* Methods from Vrui::Vislet: */
 	virtual Vrui::VisletFactory* getFactory(void) const;

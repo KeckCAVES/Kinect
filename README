@@ -1,12 +1,12 @@
 ========================================================================
-README for Kinect 3D Video Capture Project version 1.3
+README for Kinect 3D Video Capture Project version 1.4
 Copyright (c) 2010-2011 Oliver Kreylos
 ========================================================================
 
 Requirements
 ============
 
-This software requires the Vrui VR toolkit, version 2.1-001 or later. It
+This software requires the Vrui VR toolkit, version 2.2-001 or later. It
 also requires libusb version 1.0.
 
 Installation
@@ -15,7 +15,7 @@ Installation
 0. Install Vrui (ideally, just run make followed by make install).
 
 1. Set Vrui's installation directory in the makefile, either to
-   Vrui-2.1 if Vrui was installed in its default location, or to
+   Vrui-2.2 if Vrui was installed in its default location, or to
    whatever was configured in Vrui's makefile.
 
 2. Run make.

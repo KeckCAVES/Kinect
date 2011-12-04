@@ -845,6 +845,83 @@ void RawKinectViewer::GridTool::initHoms(void)
 	homs[1]=calcHomography(lastDraggedPoints,imagePoints);
 	}
 
+void RawKinectViewer::GridTool::startDrag(void)
+	{
+	/* Get the interaction point: */
+	Point p=getPoint();
+	
+	draggingMode=IDLE;
+	double minDist2=Math::Constants<double>::max;
+	
+	/* Calculate the distance to the grids' move handles: */
+	for(int hom=0;hom<2;++hom)
+		{
+		Point mh=homs[hom].transform(Point(double(gridSize[0])*0.5,double(gridSize[1])*0.5));
+		double mhDist2=Geometry::sqrDist(p,mh);
+		if(minDist2>mhDist2)
+			{
+			minDist2=mhDist2;
+			draggingMode=MOVE;
+			draggedHom=hom;
+			dragOffset=mh-p;
+			}
+		}
+	
+	/* Calculate the distance to the grids' rotation handles: */
+	for(int hom=0;hom<2;++hom)
+		{
+		Point rh=homs[hom].transform(Point(double(gridSize[0]+1),double(gridSize[1])*0.5));
+		double rhDist2=Geometry::sqrDist(p,rh);
+		if(minDist2>rhDist2)
+			{
+			minDist2=rhDist2;
+			draggingMode=ROTATE;
+			draggedHom=hom;
+			dragOffset=rh-p;
+			}
+		}
+	
+	/* Find the grid point closest to the interaction point: */
+	Point draggedPoint(0,0);
+	for(int y=0;y<=gridSize[1];++y)
+		for(int x=0;x<=gridSize[0];++x)
+			{
+			Point gp=Point(x,y);
+			for(int hom=0;hom<2;++hom)
+				{
+				Point ip=homs[hom].transform(gp);
+				double ipDist2=Geometry::sqrDist(p,ip);
+				if(minDist2>ipDist2)
+					{
+					minDist2=ipDist2;
+					draggingMode=VERTEX;
+					draggedHom=hom;
+					draggedPoint=gp;
+					dragOffset=ip-p;
+					}
+				}
+			}
+	
+	if(draggingMode==VERTEX)
+		{
+		/* Determine which previously dragged point to replace: */
+		draggedPointIndex=0;
+		double dpDist2=Geometry::sqrDist(lastDraggedPoints[0],draggedPoint);
+		for(int i=1;i<4;++i)
+			{
+			double dist2=Geometry::sqrDist(lastDraggedPoints[i],draggedPoint);
+			if(dpDist2>dist2)
+				{
+				draggedPointIndex=i;
+				dpDist2=dist2;
+				}
+			}
+		
+		/* Replace the dragged point: */
+		lastDraggedPoints[draggedPointIndex]=draggedPoint;
+		}
+	}
+
 void RawKinectViewer::GridTool::createTiePoint(void)
 	{
 	/* Calculate the grid's plane equation in depth image space: */
@@ -1184,8 +1261,8 @@ void RawKinectViewer::GridTool::calibrate(void)
 	calibFileName.append(application->kinectCamera->getSerialNumber());
 	calibFileName.append(".dat");
 	std::cout<<"Writing calibration file "<<calibFileName<<std::endl;
-	IO::AutoFile calibFile(IO::openFile(calibFileName.c_str(),IO::File::WriteOnly));
-	calibFile->setEndianness(IO::File::LittleEndian);
+	IO::FilePtr calibFile(IO::openFile(calibFileName.c_str(),IO::File::WriteOnly));
+	calibFile->setEndianness(Misc::LittleEndian);
 	for(int i=0;i<4;++i)
 		for(int j=0;j<4;++j)
 			calibFile->write<double>(depthProj(i,j));
@@ -1208,8 +1285,8 @@ void RawKinectViewer::GridTool::printWorldPoints(void)
 	std::string calibFileName="CameraCalibrationMatrices-";
 	calibFileName.append(application->kinectCamera->getSerialNumber());
 	calibFileName.append(".dat");
-	IO::AutoFile calibFile(IO::openFile(calibFileName.c_str()));
-	calibFile->setEndianness(IO::File::LittleEndian);
+	IO::FilePtr calibFile(IO::openFile(calibFileName.c_str()));
+	calibFile->setEndianness(Misc::LittleEndian);
 	double mat[16];
 	calibFile->read<double>(mat,16);
 	PTransform depthProj=PTransform::fromRowMajor(mat);
@@ -1230,8 +1307,9 @@ void RawKinectViewer::GridTool::printWorldPoints(void)
 			}
 	}
 
-void RawKinectViewer::GridTool::drawGrid(const RawKinectViewer::GridTool::Homography& hom)
+void RawKinectViewer::GridTool::drawGrid(const RawKinectViewer::GridTool::Homography& hom,bool active)
 	{
+	/* Draw the grid: */
 	glBegin(GL_LINES);
 	for(int x=0;x<=gridSize[0];++x)
 		{
@@ -1249,10 +1327,22 @@ void RawKinectViewer::GridTool::drawGrid(const RawKinectViewer::GridTool::Homogr
 		}
 	glEnd();
 	
-	glBegin(GL_POINTS);
-	Point ip=hom.transform(Point(0.5,0.5));
-	glVertex3d(ip[0],ip[1],0.01);
+	if(active)
+		{
+		/* Draw the "origin point" and move/rotation handles: */
+		glBegin(GL_POINTS);
+		Point op=hom.transform(Point(0.5,0.5));
+		glVertex3d(op[0],op[1],0.01);
+		Point mh=hom.transform(Point(double(gridSize[0])*0.5,double(gridSize[1])*0.5));
+		glVertex3d(mh[0],mh[1],0.01);
+		Point rh=hom.transform(Point(double(gridSize[0]+1),double(gridSize[1])*0.5));
+		glVertex3d(rh[0],rh[1],0.01);
+		glEnd();
+		}
+	
 	#if 0
+	/* Draw all grid vertices: */
+	glBegin(GL_POINTS);
 	for(int y=0;y<gridSize[1];++y)
 		for(int x=0;x<gridSize[0];++x)
 			if((x+y)%2==0)
@@ -1260,13 +1350,13 @@ void RawKinectViewer::GridTool::drawGrid(const RawKinectViewer::GridTool::Homogr
 				Point ip=hom.transform(Point(double(x)+0.5,double(y)+0.5));
 				glVertex3d(ip[0],ip[1],0.01);
 				}
-	#endif
 	glEnd();
+	#endif
 	}
 
 RawKinectViewer::GridTool::GridTool(const Vrui::ToolFactory* factory,const Vrui::ToolInputAssignment& inputAssignment)
 	:Vrui::Tool(factory,inputAssignment),
-	 dragging(false),
+	 draggingMode(IDLE),
 	 showTiePoints(false)
 	{
 	}
@@ -1314,59 +1404,24 @@ void RawKinectViewer::GridTool::buttonCallback(int buttonSlotIndex,Vrui::InputDe
 		{
 		if(buttonSlotIndex==0)
 			{
-			/* Get the interaction point: */
-			Point p=getPoint();
-			
-			/* Find the grid point closest to the interaction point: */
-			double minDist2=Math::Constants<double>::max;
-			for(int y=0;y<=gridSize[1];++y)
-				for(int x=0;x<=gridSize[0];++x)
-					{
-					Point gp=Point(x,y);
-					for(int hom=0;hom<2;++hom)
-						{
-						Point ip=homs[hom].transform(gp);
-						double ipDist2=Geometry::sqrDist(p,ip);
-						if(minDist2>ipDist2)
-							{
-							minDist2=ipDist2;
-							draggedHom=hom;
-							draggedPoint=gp;
-							dragOffset=ip-p;
-							}
-						}
-					}
-			
-			/* Determine which previously dragged point to replace: */
-			draggedPointIndex=0;
-			double dpDist2=Geometry::sqrDist(lastDraggedPoints[0],draggedPoint);
-			for(int i=1;i<4;++i)
-				{
-				double dist2=Geometry::sqrDist(lastDraggedPoints[i],draggedPoint);
-				if(dpDist2>dist2)
-					{
-					draggedPointIndex=i;
-					dpDist2=dist2;
-					}
-				}
-			
-			/* Start dragging: */
-			lastDraggedPoints[draggedPointIndex]=draggedPoint;
-			dragging=true;
+			/* Try entering dragging mode: */
+			startDrag();
 			}
 		else if(buttonSlotIndex==1)
 			{
+			/* Store the current grids as an intrinsic calibration tie point: */
 			createTiePoint();
 			}
 		else if(buttonSlotIndex==2)
 			{
+			/* Toggle display of previously collected tie points: */
 			showTiePoints=!showTiePoints;
 			}
 		else if(buttonSlotIndex==3)
 			{
 			/* Write all tie points to a file: */
-			IO::AutoFile tiePointFile(IO::openFile("CalibrationTiePoints.dat",IO::File::WriteOnly));
-			tiePointFile->setEndianness(IO::File::LittleEndian);
+			IO::FilePtr tiePointFile(IO::openFile("CalibrationTiePoints.dat",IO::File::WriteOnly));
+			tiePointFile->setEndianness(Misc::LittleEndian);
 			tiePointFile->write<int>(gridSize,2);
 			tiePointFile->write<double>(tileSize,2);
 			tiePointFile->write<unsigned int>(application->depthFrameSize,2);
@@ -1379,12 +1434,12 @@ void RawKinectViewer::GridTool::buttonCallback(int buttonSlotIndex,Vrui::InputDe
 				Misc::Marshaller<Homography>::write(tpIt->colorHom,*tiePointFile);
 				}
 			
-			/* Perform the calibration: */
+			/* Perform intrinsic calibration: */
 			calibrate();
 			}
 		else if(buttonSlotIndex==4)
 			{
-			/* Print the world positions of the last tie point: */
+			/* Print the world positions of the most recently saved tie point for extrinsic calibration: */
 			printWorldPoints();
 			}
 		}
@@ -1393,23 +1448,72 @@ void RawKinectViewer::GridTool::buttonCallback(int buttonSlotIndex,Vrui::InputDe
 		if(buttonSlotIndex==0)
 			{
 			/* Stop dragging: */
-			dragging=false;
+			draggingMode=IDLE;
 			}
 		}
 	}
 
 void RawKinectViewer::GridTool::frame(void)
 	{
-	if(dragging)
+	if(draggingMode!=IDLE)
 		{
 		/* Get the current interaction point: */
 		Point p=getPoint();
 		
-		/* Recalculate the dragged homography: */
+		/* Calculate the image-space positions of the four most recently dragged vertices: */
 		Point imagePoints[4];
 		for(int i=0;i<4;++i)
 			imagePoints[i]=homs[draggedHom].transform(lastDraggedPoints[i]);
-		imagePoints[draggedPointIndex]=p+dragOffset;
+		
+		switch(draggingMode)
+			{
+			case VERTEX:
+				{
+				imagePoints[draggedPointIndex]=p+dragOffset;
+				break;
+				}
+			
+			case MOVE:
+				{
+				/* Calculate the image-space position of the image center and the displacement vector: */
+				Point imageCenter=homs[draggedHom].transform(Point(double(gridSize[0])*0.5,double(gridSize[1])*0.5));
+				Vector delta=(p+dragOffset)-imageCenter;
+				
+				/* Move all image points: */
+				for(int i=0;i<4;++i)
+					imagePoints[i]+=delta;
+				break;
+				}
+				
+			case ROTATE:
+				{
+				/* Calculate the image-space positions of the grid center and rotation handle: */
+				Point imageCenter=homs[draggedHom].transform(Point(double(gridSize[0])*0.5,double(gridSize[1])*0.5));
+				Point imageRh=homs[draggedHom].transform(Point(double(gridSize[0]+1),double(gridSize[1])*0.5));
+				
+				/* Calculate the rotation angle: */
+				Vector d1=imageRh-imageCenter;
+				double d1Len=Geometry::mag(d1);
+				Vector d1n=Geometry::normal(d1);
+				double d1nLen=Geometry::mag(d1n);
+				Vector d2=(p+dragOffset)-imageCenter;
+				double angle=Math::atan2((d1n*d2)/d1nLen,(d1*d2)/d1Len);
+				
+				/* Rotate all image points: */
+				for(int i=0;i<4;++i)
+					{
+					Vector d=imagePoints[i]-imageCenter;
+					imagePoints[i]=imageCenter+Vector(d[0]*Math::cos(angle)-d[1]*Math::sin(angle),d[0]*Math::sin(angle)+d[1]*Math::cos(angle));
+					}
+				
+				break;
+				}
+			
+			default:
+				;
+			}
+		
+		/* Recalculate the dragged homography: */
 		homs[draggedHom]=calcHomography(lastDraggedPoints,imagePoints);
 		}
 	}
@@ -1432,15 +1536,15 @@ void RawKinectViewer::GridTool::display(GLContextData& contextData) const
 		glColor3f(0.0f,0.333f,0.0f);
 		for(std::vector<TiePoint>::const_iterator tpIt=tiePoints.begin();tpIt!=tiePoints.end();++tpIt)
 			{
-			drawGrid(tpIt->depthHom);
-			drawGrid(tpIt->colorHom);
+			drawGrid(tpIt->depthHom,false);
+			drawGrid(tpIt->colorHom,false);
 			}
 		}
 	
 	/* Draw the current depth and color grids: */
 	glColor3f(0.0f,1.0f,0.0f);
 	for(int i=0;i<2;++i)
-		drawGrid(homs[i]);
+		drawGrid(homs[i],true);
 	
 	glPopMatrix();
 	
@@ -1521,7 +1625,7 @@ void RawKinectViewer::locatorButtonPressCallback(Vrui::LocatorTool::ButtonPressC
 void RawKinectViewer::captureBackgroundCallback(Misc::CallbackData* cbData)
 	{
 	/* Capture five seconds worth of background frames: */
-	kinectCamera->captureBackground(150);
+	kinectCamera->captureBackground(150,true);
 	}
 
 void RawKinectViewer::removeBackgroundCallback(GLMotif::ToggleButton::ValueChangedCallbackData* cbData)
@@ -1629,12 +1733,15 @@ RawKinectViewer::RawKinectViewer(int& argc,char**& argv,char**& appDefaults)
 	/* Parse the command line: */
 	int cameraIndex=0; // Use first Kinect camera device on USB bus
 	KinectCamera::FrameSize selectedColorFrameSize=KinectCamera::FS_640_480;
+	bool compressDepthFrames=false;
 	for(int i=1;i<argc;++i)
 		{
 		if(argv[i][0]=='-')
 			{
 			if(strcasecmp(argv[i]+1,"high")==0)
 				selectedColorFrameSize=KinectCamera::FS_1280_1024;
+			else if(strcasecmp(argv[i]+1,"compress")==0)
+				compressDepthFrames=true;
 			else if(strcasecmp(argv[i]+1,"gridSize")==0)
 				{
 				for(int j=0;j<2;++j)
@@ -1680,7 +1787,7 @@ RawKinectViewer::RawKinectViewer(int& argc,char**& argv,char**& appDefaults)
 	/* Set the color camera's frame size: */
 	kinectCamera->setFrameSize(KinectCamera::COLOR,selectedColorFrameSize);
 	
-	/* Get the cameras' frame sizes: */
+	/* Get the cameras' actual frame sizes: */
 	depthFrameSize=kinectCamera->getActualFrameSize(KinectCamera::DEPTH);
 	colorFrameSize=kinectCamera->getActualFrameSize(KinectCamera::COLOR);
 	
@@ -1688,12 +1795,15 @@ RawKinectViewer::RawKinectViewer(int& argc,char**& argv,char**& appDefaults)
 	averageFrameDepth=new float[depthFrameSize[0]*depthFrameSize[1]];
 	averageFrameForeground=new float[depthFrameSize[0]*depthFrameSize[1]];
 	
+	/* Set depth frame compression: */
+	kinectCamera->setCompressDepthFrames(compressDepthFrames);
+	
 	/* Create the main menu: */
 	mainMenu=createMainMenu();
 	Vrui::setMainMenu(mainMenu);
 	
 	/* Start streaming: */
-	kinectCamera->startStreaming(new Misc::VoidMethodCall<const FrameBuffer&,RawKinectViewer>(this,&RawKinectViewer::colorStreamingCallback),new Misc::VoidMethodCall<const FrameBuffer&,RawKinectViewer>(this,&RawKinectViewer::depthStreamingCallback));
+	kinectCamera->startStreaming(Misc::createFunctionCall(this,&RawKinectViewer::colorStreamingCallback),Misc::createFunctionCall(this,&RawKinectViewer::depthStreamingCallback));
 	
 	/* Select an invalid pixel: */
 	selectedPixel[0]=selectedPixel[1]=~0x0U;

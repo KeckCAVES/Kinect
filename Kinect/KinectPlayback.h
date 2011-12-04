@@ -25,6 +25,7 @@ Software Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA
 #define KINECTPLAYBACK_INCLUDED
 
 #include <Misc/Timer.h>
+#include <IO/File.h>
 #include <Threads/Thread.h>
 #include <Geometry/OrthogonalTransformation.h>
 #include <Kinect/FrameBuffer.h>
@@ -33,9 +34,6 @@ Software Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA
 namespace Misc {
 template <class ParameterParam>
 class FunctionCall;
-}
-namespace IO {
-class File;
 }
 class DepthFrameReader;
 class ColorFrameReader;
@@ -50,11 +48,11 @@ class KinectPlayback
 	/* Elements: */
 	private:
 	Misc::Timer frameTimer; // Free-running timer to synchronize playback of depth and color frames
-	IO::File* depthFrameFile; // File containing depth frames
+	IO::FilePtr depthFrameFile; // File containing depth frames
 	double depthMatrix[16]; // Depth calibration matrix read from depth frame file
 	Transform projectorTransform; // Projector transformation read from depth frame file
 	DepthFrameReader* depthFrameReader; // Reader for depth frames
-	IO::File* colorFrameFile; // File containing color frames
+	IO::FilePtr colorFrameFile; // File containing color frames
 	double colorMatrix[16]; // Color calibration matrix read from color frame file
 	ColorFrameReader* colorFrameReader; // Reader for color frames
 	unsigned int depthSize[2]; // Frame size of depth frames

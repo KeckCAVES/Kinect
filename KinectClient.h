@@ -19,12 +19,20 @@ You should have received a copy of the GNU General Public License along
 with the Kinect 3D Video Capture Project; if not, write to the Free
 Software Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA
 02111-1307 USA
-***********************************************************************/
+**********************************************************************/
 
 #ifndef KINECTCLIENT_INCLUDED
 #define KINECTCLIENT_INCLUDED
 
+#define KINECTCLIENT_DELAY 0
+
+#if KINECTCLIENT_DELAY
+#include <deque>
+#include <Threads/Spinlock.h>
+#endif
+#include <IO/File.h>
 #include <Threads/Thread.h>
+#include <Threads/TripleBuffer.h>
 #include <Geometry/OrthogonalTransformation.h>
 #include <Geometry/ProjectiveTransformation.h>
 #include <Kinect/FrameBuffer.h>
@@ -33,11 +41,8 @@ Software Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA
 #include <Kinect/KinectProjector.h>
 
 /* Forward declarations: */
-namespace IO {
-class File;
-}
-namespace Comm {
-class MulticastPipeMultiplexer;
+namespace Cluster {
+class Multiplexer;
 }
 class GLContextData;
 
@@ -56,26 +61,26 @@ class KinectClient
 		ColorFrameReader colorDecompressor; // Decompressor for color frames
 		KinectProjector projector; // Projector to reproject and render the camera's facade
 		OGTransform facadeTransform; // The camera's facade transform
-		FrameBuffer depthFrame; // The depth frame belonging to the most recently completed meta frame
-		FrameBuffer colorFrame; // The color frame belonging to the most recently completed meta frame
-		FrameBuffer nextDepthFrame; // The depth frame belonging to the current meta frame
-		FrameBuffer nextColorFrame; // The color frame belonging to the current meta frame
 		
 		/* Constructors and destructors: */
-		CameraState(IO::File* source); // Initializes camera state by reading from given data source
+		CameraState(IO::File& source); // Initializes camera state by reading from given data source
 		~CameraState(void);
 		};
 	
 	/* Elements: */
-	bool master; // Flag whether the client is on a stand-alone host or on the master node of a cluster
-	IO::File* source; // Data source receiving depth and color frames from the Kinect server
+	IO::FilePtr source; // Data source receiving depth and color frames from the Kinect server
 	unsigned int numCameras; // Number of Kinect cameras served by the server
 	CameraState** cameraStates; // Array of pointers to camera state objects
 	Threads::Thread receivingThread; // Thread receiving frame data from the server
+	#if KINECTCLIENT_DELAY
+	Threads::Spinlock metaFrameQueueMutex; // Mutex serializing access to the metaframe queue
+	std::deque<FrameBuffer*> metaFrameQueue; // Queoe of complete metaframes waiting to be displayed
+	#else
+	Threads::TripleBuffer<FrameBuffer*> metaFrames; // Triple buffer holding complete metaframes (depth and color interleaved)
+	#endif
 	unsigned int currentMetaFrameIndex; // Index of the meta frame currently being received from the server
 	unsigned int numMissingDepthFrames; // Number of depth frames still missing from the current meta frame
 	unsigned int numMissingColorFrames; // Number of color frames still missing from the current meta frame
-	volatile bool metaFrameComplete; // Flag indicating that all frames for the current meta frame have been received
 	volatile bool keepReceiving; // Flag to cleanly shut down the receiving thread
 	
 	/* Private methods: */
@@ -83,7 +88,7 @@ class KinectClient
 	
 	/* Constructors and destructors: */
 	public:
-	KinectClient(const char* kinectServerHostName,int kinectServerPortId,Comm::MulticastPipeMultiplexer* multiplexer =0); // Creates Kinect client connected to the given Kinect server; adds cluster distribution if given multiplexer is not 0
+	KinectClient(const char* kinectServerHostName,int kinectServerPortId,Cluster::Multiplexer* multiplexer =0); // Creates Kinect client connected to the given Kinect server; adds cluster distribution if given multiplexer is not 0
 	~KinectClient(void);
 	
 	/* Methods: */

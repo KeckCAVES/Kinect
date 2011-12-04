@@ -1,7 +1,7 @@
 /***********************************************************************
-KinectPipe - Common interface between a Kinect server and a Kinect
+KinectProtocol - Common interface between a Kinect server and a Kinect
 client in the Vrui collaboration infrastructure.
-Copyright (c) 2010 Oliver Kreylos
+Copyright (c) 2010-2011 Oliver Kreylos
 
 This file is part of the Kinect 3D Video Capture Project (Kinect).
 
@@ -21,17 +21,11 @@ Software Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA
 02111-1307 USA
 ***********************************************************************/
 
-#ifndef KINECTPIPE_INCLUDED
-#define KINECTPIPE_INCLUDED
+#include "KinectProtocol.h"
 
-#include <Collaboration/CollaborationPipe.h>
+/****************************************
+Static elements of struct KinectProtocol:
+****************************************/
 
-struct KinectPipe
-	{
-	/* Elements: */
-	public:
-	static const char* protocolName; // Network name of Kinect protocol
-	static const unsigned int numProtocolMessages; // Number of Kinect-specific protocol messages
-	};
-
-#endif
+const char* KinectProtocol::protocolName="Kinect";
+const unsigned int KinectProtocol::protocolVersion=(1U<<16)+0U; // Version 1.0

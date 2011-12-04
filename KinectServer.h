@@ -29,7 +29,7 @@ Software Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA
 #include <Threads/Mutex.h>
 #include <Threads/MutexCond.h>
 #include <Threads/TripleBuffer.h>
-#include <Comm/TCPSocket.h>
+#include <Comm/ListeningTCPSocket.h>
 #include <Geometry/OrthogonalTransformation.h>
 #include <Geometry/ProjectiveTransformation.h>
 #include <Kinect/KinectCamera.h>
@@ -41,7 +41,7 @@ namespace Misc {
 class ConfigurationFileSection;
 }
 namespace Comm {
-class BufferedTCPSocket;
+class TCPPipe;
 }
 class USBContext;
 class FrameBuffer;
@@ -106,7 +106,7 @@ class KinectServer
 		
 		/* Methods: */
 		void startStreaming(void); // Starts streaming from the Kinect camera
-		void writeHeaders(Comm::BufferedTCPSocket& socket) const; // Writes the camera's streaming headers to the given TCP socket
+		void writeHeaders(Comm::TCPPipe& socket) const; // Writes the camera's streaming headers to the given TCP socket
 		};
 	
 	/* Elements: */
@@ -114,9 +114,9 @@ class KinectServer
 	unsigned int numCameras; // Number of Kinect cameras served by the server
 	CameraState** cameraStates; // Array of pointers to camera state objects
 	Threads::MutexCond newFrameCond; // Condition variable to signal a new depth or color frame
-	Comm::TCPSocket listeningSocket; // Socket listening for incoming client connections
+	Comm::ListeningTCPSocket listeningSocket; // Socket listening for incoming client connections
 	Threads::Mutex clientListMutex; // Mutex protecting access to the client list
-	std::vector<Comm::BufferedTCPSocket*> clients; // List of TCP sockets for currently connected clients
+	std::vector<Comm::TCPPipe*> clients; // List of TCP sockets for currently connected clients
 	Threads::Thread listeningThread; // Thread to listen for incoming client connections
 	unsigned int metaFrameIndex; // Index of the current meta-frame
 	unsigned int numMissingDepthFrames; // Number of outstanding depth frames for this meta-frame

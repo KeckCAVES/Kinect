@@ -134,7 +134,7 @@ KinectStreamer::~KinectStreamer(void)
 void KinectStreamer::startStreaming(void)
 	{
 	/* Start streaming: */
-	camera->startStreaming(new Misc::VoidMethodCall<const FrameBuffer&,KinectStreamer>(this,&KinectStreamer::colorStreamingCallback),new Misc::VoidMethodCall<const FrameBuffer&,KinectStreamer>(this,&KinectStreamer::depthStreamingCallback));
+	camera->startStreaming(Misc::createFunctionCall(this,&KinectStreamer::colorStreamingCallback),Misc::createFunctionCall(this,&KinectStreamer::depthStreamingCallback));
 	}
 
 /*************
@@ -221,9 +221,9 @@ int main(int argc,char* argv[])
 		for(std::vector<KinectStreamer*>::iterator sIt=streamers.begin();sIt!=streamers.end();++sIt)
 			{
 			if(backgroundFileNamePrefix!=0)
-				(*sIt)->getCamera()->captureBackground(numBackgroundFrames,new Misc::VoidFunctionCall<KinectCamera&>(saveBackground));
+				(*sIt)->getCamera()->captureBackground(numBackgroundFrames,true,Misc::createFunctionCall(saveBackground));
 			else
-				(*sIt)->getCamera()->captureBackground(numBackgroundFrames);
+				(*sIt)->getCamera()->captureBackground(numBackgroundFrames,true);
 			
 			if(maxDepth>0)
 				(*sIt)->getCamera()->setMaxDepth(maxDepth);
@@ -237,11 +237,7 @@ int main(int argc,char* argv[])
 		/* Load a background file and enable background removal on all cameras: */
 		for(std::vector<KinectStreamer*>::iterator sIt=streamers.begin();sIt!=streamers.end();++sIt)
 			{
-			std::string backgroundFileName=backgroundFileNamePrefix;
-			backgroundFileName.push_back('-');
-			backgroundFileName.append((*sIt)->serialNumber);
-			backgroundFileName.append(".background");
-			(*sIt)->getCamera()->loadBackground(backgroundFileName.c_str());
+			(*sIt)->getCamera()->loadBackground(backgroundFileNamePrefix);
 			(*sIt)->getCamera()->setRemoveBackground(true);
 			(*sIt)->getCamera()->setBackgroundRemovalFuzz(backgroundRemovalFuzz);
 			}

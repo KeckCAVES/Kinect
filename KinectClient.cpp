@@ -27,10 +27,10 @@ Software Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA
 #include <iostream>
 #endif
 #include <Misc/ThrowStdErr.h>
-#include <Comm/BufferedTCPSocket.h>
-#include <Comm/MulticastPipeMultiplexer.h>
-#include <Comm/BufferedMulticastPipe.h>
-#include <Comm/ClusterBufferedTCPSocket.h>
+#include <Comm/TCPPipe.h>
+#include <Cluster/Multiplexer.h>
+#include <Cluster/OpenPipe.h>
+#include <Geometry/GeometryMarshallers.h>
 #include <GL/gl.h>
 #include <GL/GLTransformationWrappers.h>
 #include <Vrui/Vrui.h>
@@ -40,18 +40,12 @@ Software Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA
 Methods of class KinectClient::CameraState:
 ******************************************/
 
-KinectClient::CameraState::CameraState(IO::File* source)
-	:depthDecompressor(*source),
-	 colorDecompressor(*source),
-	 projector(*source)
+KinectClient::CameraState::CameraState(IO::File& source)
+	:depthDecompressor(source),
+	 colorDecompressor(source),
+	 projector(source),
+	 facadeTransform(Misc::Marshaller<OGTransform>::read(source))
 	{
-	/* Read the facade transform: */
-	OGTransform::Vector translation;
-	source->read(translation.getComponents(),3);
-	OGTransform::Scalar quaternion[4];
-	source->read(quaternion,4);
-	OGTransform::Scalar scaling=source->read<OGTransform::Scalar>();
-	facadeTransform=OGTransform(translation,OGTransform::Rotation::fromQuaternion(quaternion),scaling);
 	}
 
 KinectClient::CameraState::~CameraState(void)
@@ -65,7 +59,14 @@ Methods of class KinectClient:
 void* KinectClient::receivingThreadMethod(void)
 	{
 	Threads::Thread::setCancelState(Threads::Thread::CANCEL_ENABLE);
-	Threads::Thread::setCancelType(Threads::Thread::CANCEL_ASYNCHRONOUS);
+	// Threads::Thread::setCancelType(Threads::Thread::CANCEL_ASYNCHRONOUS);
+	
+	/* Get the first metaframe: */
+	#if KINECTCLIENT_DELAY
+	FrameBuffer* frameBuffers=new FrameBuffer[numCameras*2];
+	#else
+	FrameBuffer* frameBuffers=metaFrames.startNewValue();
+	#endif
 	
 	while(keepReceiving)
 		{
@@ -93,36 +94,45 @@ void* KinectClient::receivingThreadMethod(void)
 		if(frameId&0x1U)
 			{
 			/* Receive a color frame: */
-			cameraStates[cameraIndex]->nextColorFrame=cameraStates[cameraIndex]->colorDecompressor.readNextFrame();
+			frameBuffers[cameraIndex*2+1]=cameraStates[cameraIndex]->colorDecompressor.readNextFrame();
 			--numMissingColorFrames;
 			
 			#ifdef VVERBOSE
-			std::cout<<cameraStates[cameraIndex]->nextColorFrame.timeStamp<<std::endl;
+			std::cout<<frameBuffers[cameraIndex*2+1].timeStamp<<std::endl;
 			#endif
 			}
 		else
 			{
 			/* Receive a depth frame: */
-			cameraStates[cameraIndex]->nextDepthFrame=cameraStates[cameraIndex]->depthDecompressor.readNextFrame();
+			frameBuffers[cameraIndex*2+0]=cameraStates[cameraIndex]->depthDecompressor.readNextFrame();
 			--numMissingDepthFrames;
 			
 			#ifdef VVERBOSE
-			std::cout<<cameraStates[cameraIndex]->nextDepthFrame.timeStamp<<std::endl;
+			std::cout<<frameBuffers[cameraIndex*2+0].timeStamp<<std::endl;
 			#endif
 			}
 		
 		/* Check if the current meta frame is complete: */
 		if(keepReceiving&&numMissingDepthFrames==0&&numMissingColorFrames==0)
 			{
-			/* Update all camera's frames for the just-completed meta frame: */
-			for(unsigned int i=0;i<numCameras;++i)
-				{
-				cameraStates[i]->depthFrame=cameraStates[i]->nextDepthFrame;
-				cameraStates[i]->colorFrame=cameraStates[i]->nextColorFrame;
-				}
+			/* Push the completed metaframe to the projectors: */
+			#if KINECTCLIENT_DELAY
+			for(unsigned int i=0;i<numCameras*2;++i)
+				frameBuffers[i].timeStamp=Vrui::getApplicationTime()+5.0;
+			
+			{
+			Threads::Spinlock::Lock metaFrameQueueLock(metaFrameQueueMutex);
+			metaFrameQueue.push_back(frameBuffers);
+			}
+			
+			/* Create the next frame buffer: */
+			frameBuffers=new FrameBuffer[numCameras*2];
+			#else
+			metaFrames.postNewValue();
+			frameBuffers=metaFrames.startNewValue();
+			#endif
 			
 			/* Tell the main thread that the current meta frame is complete: */
-			metaFrameComplete=true;
 			Vrui::requestUpdate();
 			}
 		}
@@ -130,27 +140,11 @@ void* KinectClient::receivingThreadMethod(void)
 	return 0;
 	}
 
-KinectClient::KinectClient(const char* kinectServerHostName,int kinectServerPortId,Comm::MulticastPipeMultiplexer* multiplexer)
-	:master(multiplexer==0||multiplexer->isMaster()),
-	 source(0),
-	 numCameras(0),cameraStates(0)
+KinectClient::KinectClient(const char* kinectServerHostName,int kinectServerPortId,Cluster::Multiplexer* multiplexer)
+	:numCameras(0),cameraStates(0)
 	{
 	/* Connect to the Kinect server: */
-	if(multiplexer==0)
-		{
-		/* Create a regular TCP socket: */
-		source=new Comm::BufferedTCPSocket(kinectServerHostName,kinectServerPortId);
-		}
-	else if(multiplexer->isMaster())
-		{
-		/* Create a cluster-forwarding TCP socket: */
-		source=new Comm::ClusterBufferedTCPSocket(kinectServerHostName,kinectServerPortId,multiplexer);
-		}
-	else
-		{
-		/* Create a slave-side buffered multicast pipe: */
-		source=new Comm::BufferedMulticastPipe(multiplexer);
-		}
+	source=Cluster::openTCPPipe(multiplexer,kinectServerHostName,kinectServerPortId);
 	
 	/* Determine server's endianness: */
 	unsigned int endiannessFlag=source->read<unsigned int>();
@@ -164,18 +158,23 @@ KinectClient::KinectClient(const char* kinectServerHostName,int kinectServerPort
 	
 	/* Initialize all camera states: */
 	#ifdef VERBOSE
-	if(master)
+	if(multiplexer==0||multiplexer->isMaster())
 		std::cout<<"KinectClient: Initializing "<<numCameras<<" cameras"<<std::endl;
 	#endif
 	cameraStates=new CameraState*[numCameras];
 	for(unsigned int i=0;i<numCameras;++i)
-		cameraStates[i]=new CameraState(source);
+		cameraStates[i]=new CameraState(*source);
+	
+	#if !KINECTCLIENT_DELAY
+	/* Create the metaframe triple buffer: */
+	for(int i=0;i<3;++i)
+		metaFrames.getBuffer(i)=new FrameBuffer[numCameras*2]; // One depth and color frame per camera
+	#endif
 	
 	/* Initialize streaming state: */
 	currentMetaFrameIndex=0;
 	numMissingDepthFrames=numCameras;
 	numMissingColorFrames=numCameras;
-	metaFrameComplete=false;
 	
 	/* Start the receiving thread: */
 	keepReceiving=true;
@@ -185,16 +184,7 @@ KinectClient::KinectClient(const char* kinectServerHostName,int kinectServerPort
 KinectClient::~KinectClient(void)
 	{
 	/* Shut down the receiving thread: */
-	if(master)
-		{
-		/* Shut the thread down gently: */
-		keepReceiving=false;
-		}
-	else
-		{
-		/* Kill the thread brutally: */
-		receivingThread.cancel();
-		}
+	receivingThread.cancel();
 	receivingThread.join();
 	
 	/* Delete all camera states: */
@@ -202,30 +192,53 @@ KinectClient::~KinectClient(void)
 		delete cameraStates[i];
 	delete[] cameraStates;
 	
-	if(master)
-		{
-		/* Send the disconnect request and shut down the server pipe: */
-		source->write<unsigned int>(0);
-		source->flush();
-		}
+	#if KINECTCLIENT_DELAY
+	for(std::deque<FrameBuffer*>::iterator mfqIt=metaFrameQueue.begin();mfqIt!=metaFrameQueue.end();++mfqIt)
+		delete[] *mfqIt;
+	#else
+	/* Clear the metaframe triple buffer: */
+	for(int i=0;i<3;++i)
+		delete[] metaFrames.getBuffer(i);
+	#endif
 	
-	/* Close the connection to the server: */
-	delete source;
+	/* Send the disconnect request and shut down the server pipe: */
+	source->write<unsigned int>(0);
+	source->flush();
 	}
 
 void KinectClient::frame(void)
 	{
-	if(metaFrameComplete)
+	/* Check if a new metaframe has been completed: */
+	#if KINECTCLIENT_DELAY
+	{
+	Threads::Spinlock::Lock metaFrameQueueLock(metaFrameQueueMutex);
+	if(!metaFrameQueue.empty()&&metaFrameQueue.front()[0].timeStamp<=Vrui::getApplicationTime())
 		{
+		FrameBuffer* fbs=metaFrameQueue.front();
 		/* Update all Kinect projectors: */
 		for(unsigned int i=0;i<numCameras;++i)
 			{
-			cameraStates[i]->projector.setDepthFrame(cameraStates[i]->depthFrame);
-			cameraStates[i]->projector.setColorFrame(cameraStates[i]->colorFrame);
+			cameraStates[i]->projector.setDepthFrame(fbs[i*2+0]);
+			cameraStates[i]->projector.setColorFrame(fbs[i*2+1]);
 			}
 		
-		metaFrameComplete=false;
+		/* Remove the metaframe: */
+		delete[] fbs;
+		metaFrameQueue.pop_front();
 		}
+	}
+	#else
+	if(metaFrames.lockNewValue())
+		{
+		/* Update all Kinect projectors: */
+		FrameBuffer* fbs=metaFrames.getLockedValue();
+		for(unsigned int i=0;i<numCameras;++i)
+			{
+			cameraStates[i]->projector.setDepthFrame(fbs[i*2+0]);
+			cameraStates[i]->projector.setColorFrame(fbs[i*2+1]);
+			}
+		}
+	#endif
 	}
 
 void KinectClient::glRenderAction(GLContextData& contextData) const

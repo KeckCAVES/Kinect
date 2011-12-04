@@ -1,7 +1,7 @@
 /***********************************************************************
 KinectServerPlugin - Server object to implement the Kinect 3D video
 tele-immersion protocol for the Vrui collaboration infrastructure.
-Copyright (c) 2010 Oliver Kreylos
+Copyright (c) 2010-2011 Oliver Kreylos
 
 This file is part of the Kinect 3D Video Capture Project (Kinect).
 
@@ -25,6 +25,7 @@ Software Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA
 
 #include <Misc/ThrowStdErr.h>
 #include <Misc/StandardMarshallers.h>
+#include <Comm/NetPipe.h>
 
 /************************************************
 Methods of class KinectServerPlugin::ClientState:
@@ -48,19 +49,21 @@ const char* KinectServerPlugin::getName(void) const
 	return protocolName;
 	}
 
-unsigned int KinectServerPlugin::getNumMessages(void) const
+KinectServerPlugin::ClientState* KinectServerPlugin::receiveConnectRequest(unsigned int protocolMessageLength,Comm::NetPipe& pipe)
 	{
-	return numProtocolMessages;
-	}
-
-KinectServerPlugin::ClientState* KinectServerPlugin::receiveConnectRequest(unsigned int protocolMessageLength,Collaboration::CollaborationPipe& pipe)
-	{
+	/* Read the client's Kinect protocol version: */
+	unsigned int clientProtocolVersion=pipe.read<Card>();
+	
+	/* Check for the correct version number: */
+	if(clientProtocolVersion!=protocolVersion)
+		return 0;
+	
 	/* Read the remote client's Kinect server's host name and port number: */
-	std::string clientKinectServerHostName=Misc::Marshaller<std::string>::read(pipe);
-	int clientKinectServerPortId=pipe.read<int>();
+	std::string clientKinectServerHostName=read<std::string>(pipe);
+	int clientKinectServerPortId=pipe.read<Misc::SInt32>();
 	
 	/* Check for correctness: */
-	if(protocolMessageLength!=Misc::Marshaller<std::string>::getSize(clientKinectServerHostName)+sizeof(unsigned int))
+	if(protocolMessageLength!=sizeof(Card)+Misc::Marshaller<std::string>::getSize(clientKinectServerHostName)+sizeof(Misc::SInt32))
 		{
 		/* Must be a protocol error; signal failure: */
 		return 0;
@@ -75,7 +78,7 @@ KinectServerPlugin::ClientState* KinectServerPlugin::receiveConnectRequest(unsig
 	return result;
 	}
 
-void KinectServerPlugin::receiveClientUpdate(Collaboration::ProtocolServer::ClientState* cs,Collaboration::CollaborationPipe& pipe)
+void KinectServerPlugin::receiveClientUpdate(Collaboration::ProtocolServer::ClientState* cs,Comm::NetPipe& pipe)
 	{
 	/* Get a handle on the source client's state object: */
 	ClientState* myCs=dynamic_cast<ClientState*>(cs);
@@ -85,11 +88,11 @@ void KinectServerPlugin::receiveClientUpdate(Collaboration::ProtocolServer::Clie
 	if(myCs->hasServer)
 		{
 		/* Read the client's new inverse navigation transformation: */
-		myCs->inverseNavigationTransform=pipe.readTrackerState();
+		read(myCs->inverseNavigationTransform,pipe);
 		}
 	}
 
-void KinectServerPlugin::sendClientConnect(Collaboration::ProtocolServer::ClientState* sourceCs,Collaboration::ProtocolServer::ClientState* destCs,Collaboration::CollaborationPipe& pipe)
+void KinectServerPlugin::sendClientConnect(Collaboration::ProtocolServer::ClientState* sourceCs,Collaboration::ProtocolServer::ClientState* destCs,Comm::NetPipe& pipe)
 	{
 	/* Get a handle on the source client's state object: */
 	ClientState* mySourceCs=dynamic_cast<ClientState*>(sourceCs);
@@ -97,11 +100,11 @@ void KinectServerPlugin::sendClientConnect(Collaboration::ProtocolServer::Client
 		Misc::throwStdErr("KinectServerPlugin::sendClientConnect: Client state object has mismatching type");
 	
 	/* Write the source client's Kinect server's host name and port number: */
-	Misc::Marshaller<std::string>::write(mySourceCs->kinectServerHostName,pipe);
-	pipe.write<int>(mySourceCs->kinectServerPortId);
+	write(mySourceCs->kinectServerHostName,pipe);
+	pipe.write<Misc::SInt32>(mySourceCs->kinectServerPortId);
 	}
 
-void KinectServerPlugin::sendServerUpdate(Collaboration::ProtocolServer::ClientState* sourceCs,Collaboration::ProtocolServer::ClientState* destCs,Collaboration::CollaborationPipe& pipe)
+void KinectServerPlugin::sendServerUpdate(Collaboration::ProtocolServer::ClientState* sourceCs,Collaboration::ProtocolServer::ClientState* destCs,Comm::NetPipe& pipe)
 	{
 	/* Get a handle on the source client's state object: */
 	ClientState* mySourceCs=dynamic_cast<ClientState*>(sourceCs);
@@ -111,7 +114,7 @@ void KinectServerPlugin::sendServerUpdate(Collaboration::ProtocolServer::ClientS
 	if(mySourceCs->hasServer)
 		{
 		/* Write the client's current inverse navigation transformation: */
-		pipe.writeTrackerState(mySourceCs->inverseNavigationTransform);
+		write(mySourceCs->inverseNavigationTransform,pipe);
 		}
 	}
 

@@ -1,7 +1,7 @@
 /***********************************************************************
 KinectClientPlugin - Client object to implement the Kinect 3D video
 tele-immersion protocol for the Vrui collaboration infrastructure.
-Copyright (c) 2010 Oliver Kreylos
+Copyright (c) 2010-2011 Oliver Kreylos
 
 This file is part of the Kinect 3D Video Capture Project (Kinect).
 
@@ -29,6 +29,7 @@ Software Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA
 #include <Misc/StandardMarshallers.h>
 #include <Misc/StandardValueCoders.h>
 #include <Misc/ConfigurationFile.h>
+#include <Comm/NetPipe.h>
 #include <GL/gl.h>
 #include <GL/GLTransformationWrappers.h>
 #include <Vrui/Vrui.h>
@@ -42,7 +43,7 @@ Methods of class KinectClientPlugin::RemoteClientState:
 void* KinectClientPlugin::RemoteClientState::initializationThreadMethod(void)
 	{
 	Threads::Thread::setCancelState(Threads::Thread::CANCEL_ENABLE);
-	Threads::Thread::setCancelType(Threads::Thread::CANCEL_ASYNCHRONOUS);
+	// Threads::Thread::setCancelType(Threads::Thread::CANCEL_ASYNCHRONOUS);
 	
 	KinectClient* newClient=0;
 	try
@@ -51,7 +52,7 @@ void* KinectClientPlugin::RemoteClientState::initializationThreadMethod(void)
 		#ifdef VERBOSE
 		std::cout<<"KinectClient: Connecting to remote Kinect server on host "<<kinectServerHostName<<", port "<<kinectServerPortId<<std::endl;
 		#endif
-		newClient=new KinectClient(kinectServerHostName.c_str(),kinectServerPortId,Vrui::getMulticastPipeMultiplexer());
+		newClient=new KinectClient(kinectServerHostName.c_str(),kinectServerPortId,Vrui::getClusterMultiplexer());
 		
 		/* Success; now hand the Kinect client to the rest of the plugin: */
 		client=newClient;
@@ -89,7 +90,7 @@ KinectClientPlugin::RemoteClientState::RemoteClientState(std::string sKinectServ
 		#ifdef VERBOSE
 		std::cout<<"KinectClient: Connecting to remote Kinect server on host "<<kinectServerHostName<<", port "<<kinectServerPortId<<std::endl;
 		#endif
-		client=new KinectClient(kinectServerHostName.c_str(),kinectServerPortId,Vrui::getMulticastPipeMultiplexer());
+		client=new KinectClient(kinectServerHostName.c_str(),kinectServerPortId,Vrui::getClusterMultiplexer());
 		clientReady=true;
 		
 		#endif
@@ -131,13 +132,11 @@ const char* KinectClientPlugin::getName(void) const
 	return protocolName;
 	}
 
-unsigned int KinectClientPlugin::getNumMessages(void) const
+void KinectClientPlugin::initialize(Collaboration::CollaborationClient* sClient,Misc::ConfigurationFileSection& configFileSection)
 	{
-	return numProtocolMessages;
-	}
-
-void KinectClientPlugin::initialize(Collaboration::CollaborationClient& collaborationClient,Misc::ConfigurationFileSection& configFileSection)
-	{
+	/* Call the base class method: */
+	ProtocolClient::initialize(sClient,configFileSection);
+	
 	/* Read the Kinect server's host name and port number: */
 	kinectServerHostName=configFileSection.retrieveString("./kinectServerHostName",kinectServerHostName);
 	kinectServerPortId=configFileSection.retrieveValue<int>("./kinectServerPort",kinectServerPortId);
@@ -153,35 +152,29 @@ void KinectClientPlugin::initialize(Collaboration::CollaborationClient& collabor
 	#endif
 	}
 
-void KinectClientPlugin::sendConnectRequest(Collaboration::CollaborationPipe& pipe)
+void KinectClientPlugin::sendConnectRequest(Comm::NetPipe& pipe)
 	{
 	#ifdef VERBOSE
 	std::cout<<"KinectClient: Sending connect request to server"<<std::endl;
 	#endif
 	
 	/* Send the length of the following message: */
-	unsigned int messageLength=Misc::Marshaller<std::string>::getSize(kinectServerHostName)+sizeof(unsigned int);
-	pipe.write<unsigned int>(messageLength);
+	unsigned int messageLength=sizeof(Card)+Misc::Marshaller<std::string>::getSize(kinectServerHostName)+sizeof(Misc::SInt32);
+	pipe.write<Card>(messageLength);
+	
+	/* Write the protocol version number: */
+	pipe.write<Card>(protocolVersion);
 	
 	/* Write the Kinect server's host name and port number: */
-	Misc::Marshaller<std::string>::write(kinectServerHostName,pipe);
-	pipe.write<int>(kinectServerPortId);
+	write(kinectServerHostName,pipe);
+	pipe.write<Misc::SInt32>(kinectServerPortId);
 	}
 
-void KinectClientPlugin::sendClientUpdate(Collaboration::CollaborationPipe& pipe)
-	{
-	if(haveServer)
-		{
-		/* Send the current inverse navigation transformation: */
-		pipe.writeTrackerState(Vrui::getInverseNavigationTransformation());
-		}
-	}
-
-KinectClientPlugin::RemoteClientState* KinectClientPlugin::receiveClientConnect(Collaboration::CollaborationPipe& pipe)
+KinectClientPlugin::RemoteClientState* KinectClientPlugin::receiveClientConnect(Comm::NetPipe& pipe)
 	{
 	/* Read the remote client's Kinect server's host name and port number: */
-	std::string clientKinectServerHostName=Misc::Marshaller<std::string>::read(pipe);
-	int clientKinectServerPortId=pipe.read<int>();
+	std::string clientKinectServerHostName=read<std::string>(pipe);
+	int clientKinectServerPortId=pipe.read<Misc::SInt32>();
 	
 	/* Create the remote client state object: */
 	RemoteClientState* result=new RemoteClientState(clientKinectServerHostName,clientKinectServerPortId);
@@ -189,8 +182,10 @@ KinectClientPlugin::RemoteClientState* KinectClientPlugin::receiveClientConnect(
 	return result;
 	}
 
-void KinectClientPlugin::receiveServerUpdate(Collaboration::ProtocolClient::RemoteClientState* rcs,Collaboration::CollaborationPipe& pipe)
+bool KinectClientPlugin::receiveServerUpdate(Collaboration::ProtocolClient::RemoteClientState* rcs,Comm::NetPipe& pipe)
 	{
+	bool result=false;
+	
 	RemoteClientState* myRcs=dynamic_cast<RemoteClientState*>(rcs);
 	if(myRcs==0)
 		Misc::throwStdErr("KinectClientPlugin::receiveServerUpdate: Mismatching remote client state object type");
@@ -198,7 +193,22 @@ void KinectClientPlugin::receiveServerUpdate(Collaboration::ProtocolClient::Remo
 	if(myRcs->hasServer)
 		{
 		/* Read a new inverse navigation transformation from the server: */
-		myRcs->inverseNavigationTransform.postNewValue(pipe.readTrackerState());
+		OGTransform& invNav=myRcs->inverseNavigationTransform.startNewValue();
+		read(invNav,pipe);
+		myRcs->inverseNavigationTransform.postNewValue();
+		
+		result=true;
+		}
+	
+	return result;
+	}
+
+void KinectClientPlugin::sendClientUpdate(Comm::NetPipe& pipe)
+	{
+	if(haveServer)
+		{
+		/* Send the current inverse navigation transformation: */
+		write(OGTransform(Vrui::getInverseNavigationTransformation()),pipe);
 		}
 	}
 

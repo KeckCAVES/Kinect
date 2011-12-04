@@ -52,7 +52,7 @@ KinectClientTest::KinectClientTest(int& argc,char**& argv,char**& appDefaults)
 	 client(0)
 	{
 	/* Connect to the Kinect server: */
-	client=new KinectClient(argv[1],atoi(argv[2]),Vrui::getMulticastPipeMultiplexer());
+	client=new KinectClient(argv[1],atoi(argv[2]),Vrui::getClusterMultiplexer());
 	}
 
 KinectClientTest::~KinectClientTest(void)

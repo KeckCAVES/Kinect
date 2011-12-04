@@ -31,8 +31,9 @@ Software Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA
 #include <Misc/ConfigurationFile.h>
 #include <IO/File.h>
 #include <IO/OpenFile.h>
-#include <Comm/BufferedTCPSocket.h>
+#include <Comm/TCPPipe.h>
 #include <Geometry/GeometryValueCoders.h>
+#include <Geometry/GeometryMarshallers.h>
 #include <Kinect/USBContext.h>
 #include <Kinect/USBDeviceList.h>
 #include <Kinect/FrameBuffer.h>
@@ -92,10 +93,10 @@ KinectServer::CameraState::~CameraState(void)
 void KinectServer::CameraState::startStreaming(void)
 	{
 	/* Start streaming: */
-	camera.startStreaming(new Misc::VoidMethodCall<const FrameBuffer&,KinectServer::CameraState>(this,&KinectServer::CameraState::colorStreamingCallback),new Misc::VoidMethodCall<const FrameBuffer&,KinectServer::CameraState>(this,&KinectServer::CameraState::depthStreamingCallback));
+	camera.startStreaming(Misc::createFunctionCall(this,&KinectServer::CameraState::colorStreamingCallback),Misc::createFunctionCall(this,&KinectServer::CameraState::depthStreamingCallback));
 	}
 
-void KinectServer::CameraState::writeHeaders(Comm::BufferedTCPSocket& socket) const
+void KinectServer::CameraState::writeHeaders(Comm::TCPPipe& socket) const
 	{
 	/* Write the depth and color compression headers: */
 	depthHeaders.writeToSink(socket);
@@ -106,9 +107,7 @@ void KinectServer::CameraState::writeHeaders(Comm::BufferedTCPSocket& socket) co
 	socket.write(colorMatrix.getMatrix().getEntries(),4*4);
 	
 	/* Write the facade transformation: */
-	socket.write(facadeTransform.getTranslation().getComponents(),3);
-	socket.write(facadeTransform.getRotation().getQuaternion(),4);
-	socket.write(facadeTransform.getScaling());
+	Misc::Marshaller<OGTransform>::write(facadeTransform,socket);
 	}
 
 /*****************************
@@ -118,26 +117,30 @@ Methods of class KinectServer:
 void* KinectServer::listeningThreadMethod(void)
 	{
 	Threads::Thread::setCancelState(Threads::Thread::CANCEL_ENABLE);
-	Threads::Thread::setCancelType(Threads::Thread::CANCEL_ASYNCHRONOUS);
+	// Threads::Thread::setCancelType(Threads::Thread::CANCEL_ASYNCHRONOUS);
 	
 	while(true)
 		{
 		/* Wait for the next incoming connection: */
-		Comm::BufferedTCPSocket* newClientSocket=0;
+		Comm::TCPPipe* newClientSocket=0;
 		try
 			{
 			#ifdef VERBOSE
 			std::cout<<"KinectServer: Waiting for client connection"<<std::endl<<std::flush;
 			#endif
-			newClientSocket=new Comm::BufferedTCPSocket(listeningSocket);
+			newClientSocket=new Comm::TCPPipe(listeningSocket);
 			#ifdef VERBOSE
 			std::cout<<"KinectServer: Connecting new client from host "<<newClientSocket->getPeerHostName()<<", port "<<newClientSocket->getPeerPortId()<<std::endl<<std::flush;
 			#endif
 			}
+		catch(std::runtime_error err)
+			{
+			std::cerr<<"KinectServer: Caught exception "<<err.what()<<" while waiting for new client connection"<<std::endl;
+			}
 		catch(...)
 			{
-			/* Terminate the thread: */
-			break;
+			std::cerr<<"KinectServer: Caught spurious exception while waiting for new client connection; terminating"<<std::endl;
+			throw;
 			}
 		
 		try
@@ -168,8 +171,9 @@ void* KinectServer::listeningThreadMethod(void)
 			}
 		catch(...)
 			{
-			std::cerr<<"KinectServer: Disconnecting new client due to spurious exception"<<std::endl<<std::flush;
+			std::cerr<<"KinectServer: Disconnecting new client due to spurious exception; terminating"<<std::endl<<std::flush;
 			delete newClientSocket;
+			throw;
 			}
 		}
 	
@@ -247,11 +251,12 @@ void* KinectServer::streamingThreadMethod(void)
 							}
 						catch(...)
 							{
-							std::cerr<<"Disconnecting client from "<<clients[j]->getPeerHostName()<<", port "<<clients[j]->getPeerPortId()<<" due to spurious exception"<<std::endl;
+							std::cerr<<"Disconnecting client from "<<clients[j]->getPeerHostName()<<", port "<<clients[j]->getPeerPortId()<<" due to spurious exception; terminating"<<std::endl;
 							delete clients[j];
 							clients.erase(clients.begin()+j);
 							--numClients;
 							--j;
+							throw;
 							}
 						}
 					}
@@ -313,11 +318,12 @@ void* KinectServer::streamingThreadMethod(void)
 							}
 						catch(...)
 							{
-							std::cerr<<"Disconnecting client from "<<clients[j]->getPeerHostName()<<", port "<<clients[j]->getPeerPortId()<<" due to spurious exception"<<std::endl;
+							std::cerr<<"Disconnecting client from "<<clients[j]->getPeerHostName()<<", port "<<clients[j]->getPeerPortId()<<" due to spurious exception; terminating"<<std::endl;
 							delete clients[j];
 							clients.erase(clients.begin()+j);
 							--numClients;
 							--j;
+							throw;
 							}
 						}
 					}
@@ -396,13 +402,49 @@ KinectServer::KinectServer(USBContext& usbContext,Misc::ConfigurationFileSection
 			std::string calibrationFileName="CameraCalibrationMatrices-";
 			calibrationFileName.append(serialNumber);
 			calibrationFileName.append(".dat");
-			IO::AutoFile calibrationFile(IO::openFile(calibrationFileName.c_str()));
-			calibrationFile->setEndianness(IO::File::LittleEndian);
+			IO::FilePtr calibrationFile(IO::openFile(calibrationFileName.c_str()));
+			calibrationFile->setEndianness(Misc::LittleEndian);
 			calibrationFile->read(cameraStates[numFoundCameras]->depthMatrix.getMatrix().getEntries(),4*4);
 			calibrationFile->read(cameraStates[numFoundCameras]->colorMatrix.getMatrix().getEntries(),4*4);
 			
 			/* Read the camera's facade transformation: */
 			cameraStates[numFoundCameras]->facadeTransform=cameraSection.retrieveValue<OGTransform>("./projectorTransformation",OGTransform::identity);
+			
+			/* Check if camera is to remove background: */
+			if(cameraSection.retrieveValue<bool>("./removeBackground",true))
+				{
+				KinectCamera& camera=cameraStates[numFoundCameras]->camera;
+				
+				/* Check whether to load a previously saved background file: */
+				std::string backgroundFile=cameraSection.retrieveValue<std::string>("./backgroundFile",std::string());
+				if(!backgroundFile.empty())
+					{
+					/* Load the background file: */
+					camera.loadBackground(backgroundFile.c_str());
+					}
+				
+				/* Check whether to capture background: */
+				unsigned int captureBackgroundFrames=cameraSection.retrieveValue<unsigned int>("./captureBackgroundFrames",0);
+				if(captureBackgroundFrames>0)
+					{
+					/* Request background capture: */
+					camera.captureBackground(captureBackgroundFrames,false);
+					}
+				
+				/* Check whether to set a maximum depth value: */
+				unsigned int maxDepth=cameraSection.retrieveValue<unsigned int>("./maxDepth",0);
+				if(maxDepth>0)
+					{
+					/* Set the maximum depth: */
+					camera.setMaxDepth(maxDepth,false);
+					}
+				
+				/* Set the background removal fuzz value: */
+				camera.setBackgroundRemovalFuzz(cameraSection.retrieveValue<int>("./backgroundFuzz",camera.getBackgroundRemovalFuzz()));
+				
+				/* Enable background removal: */
+				camera.setRemoveBackground(true);
+				}
 			
 			++numFoundCameras;
 			}
@@ -427,13 +469,6 @@ KinectServer::KinectServer(USBContext& usbContext,Misc::ConfigurationFileSection
 	/* Start streaming on all connected cameras: */
 	for(unsigned int i=0;i<numCameras;++i)
 		cameraStates[i]->startStreaming();
-	
-	/* Enable background removal on all cameras: */
-	for(unsigned int i=0;i<numCameras;++i)
-		{
-		cameraStates[i]->camera.captureBackground(150);
-		cameraStates[i]->camera.setRemoveBackground(true);
-		}
 	}
 
 KinectServer::~KinectServer(void)
@@ -443,21 +478,51 @@ KinectServer::~KinectServer(void)
 	#endif
 	
 	/* Stop the listening thread: */
-	listeningThread.cancel();
-	listeningThread.join();
+	try
+		{
+		listeningThread.cancel();
+		listeningThread.join();
+		}
+	catch(std::runtime_error err)
+		{
+		std::cerr<<"Caught exception "<<err.what()<<" while shutting down listening thread"<<std::endl;
+		}
+	catch(...)
+		{
+		std::cerr<<"Caught spurious exception while shutting down listening thread"<<std::endl;
+		}
 	
 	/* Stop the streaming thread: */
 	if(numCameras>0)
 		{
-		streamingThread.cancel();
-		streamingThread.join();
+		try
+			{
+			streamingThread.cancel();
+			streamingThread.join();
+			}
+		catch(std::runtime_error err)
+			{
+			std::cerr<<"Caught exception "<<err.what()<<" while shutting down streaming thread"<<std::endl;
+			}
+		catch(...)
+			{
+			std::cerr<<"Caught spurious exception while shutting down streaming thread"<<std::endl;
+			}
 		}
+	
+	/* Delete all camera states: */
+	#ifdef VERBOSE
+	std::cout<<"KinectServer: Disconnecting from all cameras"<<std::endl;
+	#endif
+	for(unsigned int i=0;i<numCameras;++i)
+		delete cameraStates[i];
+	delete[] cameraStates;
 	
 	/* Disconnect all clients: */
 	#ifdef VERBOSE
 	std::cout<<"KinectServer: Disconnecting all clients"<<std::endl;
 	#endif
-	for(std::vector<Comm::BufferedTCPSocket*>::iterator cIt=clients.begin();cIt!=clients.end();++cIt)
+	for(std::vector<Comm::TCPPipe*>::iterator cIt=clients.begin();cIt!=clients.end();++cIt)
 		{
 		try
 			{
@@ -472,12 +537,4 @@ KinectServer::~KinectServer(void)
 			std::cerr<<"Caught spurious exception while forcefully disconnecting client from "<<(*cIt)->getPeerHostName()<<", port "<<(*cIt)->getPeerPortId()<<std::endl;
 			}
 		}
-	
-	/* Delete all camera states: */
-	#ifdef VERBOSE
-	std::cout<<"KinectServer: Disconnecting from all cameras"<<std::endl;
-	#endif
-	for(unsigned int i=0;i<numCameras;++i)
-		delete cameraStates[i];
-	delete[] cameraStates;
 	}

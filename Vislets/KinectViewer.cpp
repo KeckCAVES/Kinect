@@ -1,7 +1,7 @@
 /***********************************************************************
-KinectViewerVislet - Vislet to draw 3D reconstructions captured from a
-Kinect device in 3D space.
-Copyright (c) 2010 Oliver Kreylos
+KinectViewer - Vislet to draw 3D reconstructions captured from a Kinect
+device in 3D space.
+Copyright (c) 2010-2011 Oliver Kreylos
 
 This file is part of the Kinect 3D Video Capture Project (Kinect).
 
@@ -21,7 +21,7 @@ Software Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA
 02111-1307 USA
 ***********************************************************************/
 
-#include "KinectViewerVislet.h"
+#include "Vislets/KinectViewer.h"
 
 #include <Misc/FunctionCalls.h>
 #include <Misc/StandardValueCoders.h>
@@ -34,12 +34,12 @@ Software Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA
 #include <Kinect/KinectCamera.h>
 #include <Kinect/KinectProjector.h>
 
-/******************************************
-Methods of class KinectViewerVisletFactory:
-******************************************/
+/************************************
+Methods of class KinectViewerFactory:
+************************************/
 
-KinectViewerVisletFactory::KinectViewerVisletFactory(Vrui::VisletManager& visletManager)
-	:Vrui::VisletFactory("KinectViewerVislet",visletManager),
+KinectViewerFactory::KinectViewerFactory(Vrui::VisletManager& visletManager)
+	:Vrui::VisletFactory("KinectViewer",visletManager),
 	 kinectTransform(Vrui::OGTransform::identity),
 	 calibrationFileName("CalibrationMatrices.dat")
 	{
@@ -56,26 +56,26 @@ KinectViewerVisletFactory::KinectViewerVisletFactory(Vrui::VisletManager& vislet
 	calibrationFileName=cfs.retrieveString("./calibrationFileName",calibrationFileName);
 	
 	/* Set tool class' factory pointer: */
-	KinectViewerVislet::factory=this;
+	KinectViewer::factory=this;
 	}
 
-KinectViewerVisletFactory::~KinectViewerVisletFactory(void)
+KinectViewerFactory::~KinectViewerFactory(void)
 	{
 	/* Reset tool class' factory pointer: */
-	KinectViewerVislet::factory=0;
+	KinectViewer::factory=0;
 	}
 
-Vrui::Vislet* KinectViewerVisletFactory::createVislet(int numArguments,const char* const arguments[]) const
+Vrui::Vislet* KinectViewerFactory::createVislet(int numArguments,const char* const arguments[]) const
 	{
-	return new KinectViewerVislet(numArguments,arguments);
+	return new KinectViewer(numArguments,arguments);
 	}
 
-void KinectViewerVisletFactory::destroyVislet(Vrui::Vislet* vislet) const
+void KinectViewerFactory::destroyVislet(Vrui::Vislet* vislet) const
 	{
 	delete vislet;
 	}
 
-extern "C" void resolveKinectViewerVisletDependencies(Plugins::FactoryManager<Vrui::VisletFactory>& manager)
+extern "C" void resolveKinectViewerDependencies(Plugins::FactoryManager<Vrui::VisletFactory>& manager)
 	{
 	#if 0
 	/* Load base classes: */
@@ -83,34 +83,34 @@ extern "C" void resolveKinectViewerVisletDependencies(Plugins::FactoryManager<Vr
 	#endif
 	}
 
-extern "C" Vrui::VisletFactory* createKinectViewerVisletFactory(Plugins::FactoryManager<Vrui::VisletFactory>& manager)
+extern "C" Vrui::VisletFactory* createKinectViewerFactory(Plugins::FactoryManager<Vrui::VisletFactory>& manager)
 	{
 	/* Get pointer to vislet manager: */
 	Vrui::VisletManager* visletManager=static_cast<Vrui::VisletManager*>(&manager);
 	
 	/* Create factory object and insert it into class hierarchy: */
-	KinectViewerVisletFactory* kinectViewerVisletFactory=new KinectViewerVisletFactory(*visletManager);
+	KinectViewerFactory* kinectViewerFactory=new KinectViewerFactory(*visletManager);
 	
 	/* Return factory object: */
-	return kinectViewerVisletFactory;
+	return kinectViewerFactory;
 	}
 
-extern "C" void destroyKinectViewerVisletFactory(Vrui::VisletFactory* factory)
+extern "C" void destroyKinectViewerFactory(Vrui::VisletFactory* factory)
 	{
 	delete factory;
 	}
 
-/*******************************************
-Static elements of class KinectViewerVislet:
-*******************************************/
+/*************************************
+Static elements of class KinectViewer:
+*************************************/
 
-KinectViewerVisletFactory* KinectViewerVislet::factory=0;
+KinectViewerFactory* KinectViewer::factory=0;
 
-/***********************************
-Methods of class KinectViewerVislet:
-***********************************/
+/*****************************
+Methods of class KinectViewer:
+*****************************/
 
-void KinectViewerVislet::depthStreamingCallback(const FrameBuffer& frameBuffer)
+void KinectViewer::depthStreamingCallback(const FrameBuffer& frameBuffer)
 	{
 	/* Post the new frame into the depth frame triple buffer: */
 	depthFrames.postNewValue(frameBuffer);
@@ -119,7 +119,7 @@ void KinectViewerVislet::depthStreamingCallback(const FrameBuffer& frameBuffer)
 	Vrui::requestUpdate();
 	}
 
-void KinectViewerVislet::colorStreamingCallback(const FrameBuffer& frameBuffer)
+void KinectViewer::colorStreamingCallback(const FrameBuffer& frameBuffer)
 	{
 	/* Post the new frame into the color frame triple buffer: */
 	colorFrames.postNewValue(frameBuffer);
@@ -128,7 +128,7 @@ void KinectViewerVislet::colorStreamingCallback(const FrameBuffer& frameBuffer)
 	Vrui::requestUpdate();
 	}
 
-KinectViewerVislet::KinectViewerVislet(int numArguments,const char* const arguments[])
+KinectViewer::KinectViewer(int numArguments,const char* const arguments[])
 	:kinectCamera(0),
 	 kinectProjector(0)
 	{
@@ -142,12 +142,10 @@ KinectViewerVislet::KinectViewerVislet(int numArguments,const char* const argume
 	kinectProjector=new KinectProjector(factory->calibrationFileName.c_str());
 	
 	/* Start streaming: */
-	KinectCamera::StreamingCallback* colorCallback=new Misc::VoidMethodCall<const FrameBuffer&,KinectViewerVislet>(this,&KinectViewerVislet::colorStreamingCallback);
-	KinectCamera::StreamingCallback* depthCallback=new Misc::VoidMethodCall<const FrameBuffer&,KinectViewerVislet>(this,&KinectViewerVislet::depthStreamingCallback);
-	kinectCamera->startStreaming(colorCallback,depthCallback);
+	kinectCamera->startStreaming(Misc::createFunctionCall(this,&KinectViewer::colorStreamingCallback),Misc::createFunctionCall(this,&KinectViewer::depthStreamingCallback));
 	}
 
-KinectViewerVislet::~KinectViewerVislet(void)
+KinectViewer::~KinectViewer(void)
 	{
 	/* Stop streaming: */
 	kinectCamera->stopStreaming();
@@ -158,12 +156,12 @@ KinectViewerVislet::~KinectViewerVislet(void)
 	delete kinectCamera;
 	}
 
-Vrui::VisletFactory* KinectViewerVislet::getFactory(void) const
+Vrui::VisletFactory* KinectViewer::getFactory(void) const
 	{
 	return factory;
 	}
 
-void KinectViewerVislet::frame(void)
+void KinectViewer::frame(void)
 	{
 	/* Lock the most recent frame in the depth frame triple buffer: */
 	if(depthFrames.lockNewValue())
@@ -180,7 +178,7 @@ void KinectViewerVislet::frame(void)
 		}
 	}
 
-void KinectViewerVislet::display(GLContextData& contextData) const
+void KinectViewer::display(GLContextData& contextData) const
 	{
 	/* Move the Kinect camera's reconstruction 3D space into Vrui physical space: */
 	glPushMatrix();

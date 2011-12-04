@@ -254,6 +254,11 @@ class RawKinectViewer:public Vrui::Application,public GLObject
 			Homography colorHom; // Color homography
 			};
 		
+		enum DraggingMode // Enumerated type for grid dragging modes
+			{
+			IDLE,VERTEX,MOVE,ROTATE
+			};
+		
 		/* Elements: */
 		private:
 		static GridToolFactory* factory; // Pointer to the factory object for this class
@@ -263,9 +268,8 @@ class RawKinectViewer:public Vrui::Application,public GLObject
 		std::vector<TiePoint> tiePoints; // List of already-created tie points
 		Homography homs[2]; // Homographies in depth image and color image
 		Point lastDraggedPoints[4]; // Last four dragged points in grid coordinates
-		bool dragging; // Flag whether a grid point is being dragged
+		DraggingMode draggingMode; // Tool's current dragging mode
 		int draggedHom; // Flag which homography is being dragged
-		Point draggedPoint; // Position of dragged point in grid coordinates
 		int draggedPointIndex; // Index of dragged point in list of previously dragged points
 		Vector dragOffset; // Offset from input device to dragged point
 		bool showTiePoints; // Flag whether to draw stored tie points
@@ -274,10 +278,11 @@ class RawKinectViewer:public Vrui::Application,public GLObject
 		Point getPoint(void) const;
 		static Homography calcHomography(const Point gridPoints[4],const Point imagePoints[4]);
 		void initHoms(void);
+		void startDrag(void);
 		void createTiePoint(void);
 		void calibrate(void);
 		void printWorldPoints(void);
-		static void drawGrid(const Homography& hom);
+		static void drawGrid(const Homography& hom,bool active);
 		
 		/* Constructors and destructors: */
 		public:

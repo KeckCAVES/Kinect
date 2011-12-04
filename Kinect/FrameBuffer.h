@@ -24,7 +24,15 @@ Software Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA
 #ifndef FRAMEBUFFER_INCLUDED
 #define FRAMEBUFFER_INCLUDED
 
+#define FRAMEBUFFER_DEBUGLOCK 0
+
+#if FRAMEBUFFER_DEBUGLOCK
+#include <assert.h>
+#endif
 #include <new>
+#if FRAMEBUFFER_DEBUGLOCK
+#include <iostream>
+#endif
 #include <Threads/Mutex.h>
 
 class FrameBuffer
@@ -37,21 +45,39 @@ class FrameBuffer
 		public:
 		Threads::Mutex refCountMutex; // Mutex protecting the reference counter
 		unsigned int refCount; // Reference counter
+		#if FRAMEBUFFER_DEBUGLOCK
+		int destroyed;
+		#endif
 		
 		/* Constructors and destructors: */
 		BufferHeader(void)
-			:refCount(0)
+			:refCount(1)
+			#if FRAMEBUFFER_DEBUGLOCK
+			 ,destroyed(0)
+			#endif
 			{
+			}
+		~BufferHeader(void)
+			{
+			#if FRAMEBUFFER_DEBUGLOCK
+			destroyed=1;
+			#endif
 			}
 		
 		/* Methods: */
 		void ref(void) // References the buffer
 			{
+			#if FRAMEBUFFER_DEBUGLOCK
+			assert(destroyed==0);
+			#endif
 			Threads::Mutex::Lock refCountLock(refCountMutex);
 			++refCount;
 			}
 		bool unref(void) // Unreferences the buffer; returns true if buffer becomes orphaned
 			{
+			#if FRAMEBUFFER_DEBUGLOCK
+			assert(destroyed==0);
+			#endif
 			Threads::Mutex::Lock refCountLock(refCountMutex);
 			--refCount;
 			return refCount==0;
@@ -81,10 +107,7 @@ class FrameBuffer
 		
 		/* Allocate the enlarged frame buffer: */
 		unsigned char* paddedBuffer=new unsigned char[bufferSize+sizeof(BufferHeader)];
-		BufferHeader* header=new(paddedBuffer) BufferHeader;
-		
-		/* Initialize the buffer's reference count: */
-		header->ref();
+		new(paddedBuffer) BufferHeader;
 		
 		/* Store the actual buffer pointer: */
 		buffer=paddedBuffer+sizeof(BufferHeader);
@@ -104,6 +127,10 @@ class FrameBuffer
 		{
 		if(buffer!=source.buffer)
 			{
+			#if FRAMEBUFFER_DEBUGLOCK
+			void* oldBuffer=buffer;
+			#endif
+			
 			/* Unreference the current buffer: */
 			if(buffer!=0)
 				{

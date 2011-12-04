@@ -1,7 +1,7 @@
 /***********************************************************************
 KinectServerPlugin - Server object to implement the Kinect 3D video
 tele-immersion protocol for the Vrui collaboration infrastructure.
-Copyright (c) 2010 Oliver Kreylos
+Copyright (c) 2010-2011 Oliver Kreylos
 
 This file is part of the Kinect 3D Video Capture Project (Kinect).
 
@@ -27,9 +27,9 @@ Software Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA
 #include <string>
 #include <Collaboration/ProtocolServer.h>
 
-#include "KinectPipe.h"
+#include "KinectProtocol.h"
 
-class KinectServerPlugin:public Collaboration::ProtocolServer,public KinectPipe
+class KinectServerPlugin:public Collaboration::ProtocolServer,private KinectProtocol
 	{
 	/* Embedded classes: */
 	private:
@@ -40,7 +40,7 @@ class KinectServerPlugin:public Collaboration::ProtocolServer,public KinectPipe
 		std::string kinectServerHostName; // Host name of client's Kinect server
 		int kinectServerPortId; // Port number of client's Kinect server
 		bool hasServer; // Flag whether the client has its own Kinect server
-		Collaboration::CollaborationPipe::OGTransform inverseNavigationTransform; // Client's current inverse navigation transformation
+		OGTransform inverseNavigationTransform; // Client's current inverse navigation transformation
 		
 		/* Constructors and destructors: */
 		public:
@@ -51,11 +51,10 @@ class KinectServerPlugin:public Collaboration::ProtocolServer,public KinectPipe
 	/* Methods from Collaboration::ProtocolServer: */
 	public:
 	const char* getName(void) const;
-	virtual unsigned int getNumMessages(void) const;
-	virtual ClientState* receiveConnectRequest(unsigned int protocolMessageLength,Collaboration::CollaborationPipe& pipe);
-	virtual void receiveClientUpdate(Collaboration::ProtocolServer::ClientState* cs,Collaboration::CollaborationPipe& pipe);
-	virtual void sendClientConnect(Collaboration::ProtocolServer::ClientState* sourceCs,Collaboration::ProtocolServer::ClientState* destCs,Collaboration::CollaborationPipe& pipe);
-	virtual void sendServerUpdate(Collaboration::ProtocolServer::ClientState* sourceCs,Collaboration::ProtocolServer::ClientState* destCs,Collaboration::CollaborationPipe& pipe);
+	virtual ClientState* receiveConnectRequest(unsigned int protocolMessageLength,Comm::NetPipe& pipe);
+	virtual void receiveClientUpdate(Collaboration::ProtocolServer::ClientState* cs,Comm::NetPipe& pipe);
+	virtual void sendClientConnect(Collaboration::ProtocolServer::ClientState* sourceCs,Collaboration::ProtocolServer::ClientState* destCs,Comm::NetPipe& pipe);
+	virtual void sendServerUpdate(Collaboration::ProtocolServer::ClientState* sourceCs,Collaboration::ProtocolServer::ClientState* destCs,Comm::NetPipe& pipe);
 	};
 
 #endif

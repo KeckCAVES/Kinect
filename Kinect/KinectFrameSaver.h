@@ -27,15 +27,13 @@ Software Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA
 
 #include <deque>
 #include <Misc/Timer.h>
+#include <IO/File.h>
 #include <Threads/MutexCond.h>
 #include <Threads/Thread.h>
 #include <Geometry/OrthogonalTransformation.h>
 #include <Kinect/FrameBuffer.h>
 
 /* Forward declarations: */
-namespace IO {
-class File;
-}
 class KinectCamera;
 class DepthFrameWriter;
 class ColorFrameWriter;
@@ -51,12 +49,12 @@ class KinectFrameSaver
 	volatile bool done; // Flag set when all frames have been queued for saving
 	Threads::MutexCond depthFramesCond; // Condition variable to signal new frames in the depth queue
 	std::deque<FrameBuffer> depthFrames; // Queue of depth frames still to be saved
-	IO::File* depthFrameFile; // File receiving depth frames
+	IO::FilePtr depthFrameFile; // File receiving depth frames
 	DepthFrameWriter* depthFrameWriter; // Helper object to compress and write depth frames
 	Threads::Thread depthFrameWritingThread; // Thread saving depth frames
 	Threads::MutexCond colorFramesCond; // Condition variable to signal new frames in the depth queue
 	std::deque<FrameBuffer> colorFrames; // Queue of color frames still to be saved
-	IO::File* colorFrameFile; // File receiving color frames
+	IO::FilePtr colorFrameFile; // File receiving color frames
 	ColorFrameWriter* colorFrameWriter; // Helper object to compress and write color frames
 	Threads::Thread colorFrameWritingThread; // Thread saving color frames
 	

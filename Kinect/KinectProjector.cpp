@@ -84,8 +84,8 @@ KinectProjector::KinectProjector(const char* calibrationFileName)
 	 colorFrameVersion(0)
 	{
 	/* Open the calibration file: */
-	IO::AutoFile calibrationFile(IO::openFile(calibrationFileName));
-	calibrationFile->setEndianness(IO::File::LittleEndian);
+	IO::FilePtr calibrationFile(IO::openFile(calibrationFileName));
+	calibrationFile->setEndianness(Misc::LittleEndian);
 	
 	/* Read the depth projection matrix: */
 	calibrationFile->read(depthProjection.getMatrix().getEntries(),4*4);

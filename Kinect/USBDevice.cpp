@@ -97,6 +97,16 @@ USBDevice::~USBDevice(void)
 		libusb_unref_device(device);
 	}
 
+unsigned int USBDevice::getBusNumber(void) const
+	{
+	return libusb_get_bus_number(device);
+	}
+
+unsigned int USBDevice::getAddress(void) const
+	{
+	return libusb_get_device_address(device);
+	}
+
 libusb_device_descriptor USBDevice::getDeviceDescriptor(void)
 	{
 	libusb_device_descriptor result;

@@ -97,8 +97,8 @@ KinectFrameSaver::KinectFrameSaver(const KinectCamera& camera,const char* calibr
 	 colorFrameWriter(0)
 	{
 	/* Open the calibration file: */
-	IO::AutoFile calibrationFile(IO::openFile(calibrationFileName));
-	calibrationFile->setEndianness(IO::File::LittleEndian);
+	IO::FilePtr calibrationFile(IO::openFile(calibrationFileName));
+	calibrationFile->setEndianness(Misc::LittleEndian);
 	
 	/* Read the depth projection matrix: */
 	double depthMatrix[16];
@@ -109,7 +109,7 @@ KinectFrameSaver::KinectFrameSaver(const KinectCamera& camera,const char* calibr
 	calibrationFile->read(colorMatrix,4*4);
 	
 	/* Write the depth frame file's header: */
-	depthFrameFile->setEndianness(IO::File::LittleEndian);
+	depthFrameFile->setEndianness(Misc::LittleEndian);
 	depthFrameFile->write<double>(depthMatrix,4*4);
 	Misc::Marshaller<Transform>::write(projectorTransform,*depthFrameFile);
 	
@@ -117,7 +117,7 @@ KinectFrameSaver::KinectFrameSaver(const KinectCamera& camera,const char* calibr
 	depthFrameWriter=new DepthFrameWriter(*depthFrameFile,camera.getActualFrameSize(KinectCamera::DEPTH));
 	
 	/* Write the color frame file's header: */
-	colorFrameFile->setEndianness(IO::File::LittleEndian);
+	colorFrameFile->setEndianness(Misc::LittleEndian);
 	colorFrameFile->write<double>(colorMatrix,4*4);
 	
 	/* Create the depth frame writer: */
@@ -142,10 +142,6 @@ KinectFrameSaver::~KinectFrameSaver(void)
 	/* Delete the frame writers: */
 	delete depthFrameWriter;
 	delete colorFrameWriter;
-	
-	/* Close the output files: */
-	delete depthFrameFile;
-	delete colorFrameFile;
 	}
 
 void KinectFrameSaver::saveDepthFrame(const FrameBuffer& newFrame)
@@ -154,7 +150,7 @@ void KinectFrameSaver::saveDepthFrame(const FrameBuffer& newFrame)
 	{
 	Threads::MutexCond::Lock depthFramesLock(depthFramesCond);
 	depthFrames.push_back(newFrame);
-	depthFramesCond.signal(depthFramesLock);
+	depthFramesCond.signal();
 	}
 	}
 
@@ -164,6 +160,6 @@ void KinectFrameSaver::saveColorFrame(const FrameBuffer& newFrame)
 	{
 	Threads::MutexCond::Lock colorFramesLock(colorFramesCond);
 	colorFrames.push_back(newFrame);
-	colorFramesCond.signal(colorFramesLock);
+	colorFramesCond.signal();
 	}
 	}

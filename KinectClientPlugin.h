@@ -1,7 +1,7 @@
 /***********************************************************************
 KinectClientPlugin - Client object to implement the Kinect 3D video
 tele-immersion protocol for the Vrui collaboration infrastructure.
-Copyright (c) 2010 Oliver Kreylos
+Copyright (c) 2010-2011 Oliver Kreylos
 
 This file is part of the Kinect 3D Video Capture Project (Kinect).
 
@@ -29,12 +29,12 @@ Software Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA
 #include <Threads/TripleBuffer.h>
 #include <Collaboration/ProtocolClient.h>
 
-#include "KinectPipe.h"
+#include "KinectProtocol.h"
 
 /* Forward declarations: */
 class KinectClient;
 
-class KinectClientPlugin:public Collaboration::ProtocolClient,public KinectPipe
+class KinectClientPlugin:public Collaboration::ProtocolClient,private KinectProtocol
 	{
 	/* Embedded classes: */
 	private:
@@ -48,7 +48,7 @@ class KinectClientPlugin:public Collaboration::ProtocolClient,public KinectPipe
 		KinectClient* client; // Client object to receive 3D video from a stand-alone Kinect server
 		volatile bool clientReady; // Flag whether the client has been initialized by the background thread
 		Threads::Thread initializationThread; // Thread to establish a connection to the remote client's local Kinect server in the background
-		Threads::TripleBuffer<Collaboration::CollaborationPipe::OGTransform> inverseNavigationTransform; // The remote client's current inverse navigation transformation
+		Threads::TripleBuffer<OGTransform> inverseNavigationTransform; // The remote client's current inverse navigation transformation
 		
 		/* Private methods: */
 		void* initializationThreadMethod(void); // Thread method to establish a connection to the remote client's local Kinect server in the background
@@ -72,12 +72,11 @@ class KinectClientPlugin:public Collaboration::ProtocolClient,public KinectPipe
 	
 	/* Methods from Collaboration::ProtocolClient: */
 	virtual const char* getName(void) const;
-	virtual unsigned int getNumMessages(void) const;
-	virtual void initialize(Collaboration::CollaborationClient& collaborationClient,Misc::ConfigurationFileSection& configFileSection);
-	virtual void sendConnectRequest(Collaboration::CollaborationPipe& pipe);
-	virtual void sendClientUpdate(Collaboration::CollaborationPipe& pipe);
-	virtual RemoteClientState* receiveClientConnect(Collaboration::CollaborationPipe& pipe);
-	virtual void receiveServerUpdate(Collaboration::ProtocolClient::RemoteClientState* rcs,Collaboration::CollaborationPipe& pipe);
+	virtual void initialize(Collaboration::CollaborationClient* sClient,Misc::ConfigurationFileSection& configFileSection);
+	virtual void sendConnectRequest(Comm::NetPipe& pipe);
+	virtual RemoteClientState* receiveClientConnect(Comm::NetPipe& pipe);
+	virtual bool receiveServerUpdate(Collaboration::ProtocolClient::RemoteClientState* rcs,Comm::NetPipe& pipe);
+	virtual void sendClientUpdate(Comm::NetPipe& pipe);
 	virtual void frame(Collaboration::ProtocolClient::RemoteClientState* rcs);
 	virtual void glRenderAction(const Collaboration::ProtocolClient::RemoteClientState* rcs,GLContextData& contextData) const;
 	};

@@ -20,204 +20,247 @@
 # 02111-1307 USA
 ########################################################################
 
-# Root directory of the Vrui software installation. This must match the
-# same setting in Vrui's makefile. By default the directories match; if
-# a different version of Vrui was installed, or Vrui's installation
-# directory was adjusted, the directory must be adjusted here as well.
-VRUIDIR = $(HOME)/Vrui-2.1
+# Directory containing the Vrui build system. The directory below
+# matches the default Vrui installation; if Vrui's installation
+# directory was changed during Vrui's installation, the directory below
+# must be adapted.
+VRUI_MAKEDIR := $(HOME)/Vrui-2.2/share/make
+
+########################################################################
+# Everything below here should not have to be changed
+########################################################################
+
+# Define the root of the toolkit source tree
+PACKAGEROOT := $(shell pwd)
+
+# Specify version of created dynamic shared libraries
+KINECT_VERSION = 1004
+MAJORLIBVERSION = 1
+MINORLIBVERSION = 4
+KINECT_NAME := Kinect-$(MAJORLIBVERSION).$(MINORLIBVERSION)
+
+# Root directory for Kinect configuration data underneath Vrui's
+# configuration directory:
+KINECTCONFIGDIREXT = $(KINECT_NAME)
+
+# Include definitions for the system environment and system-provided
+# packages
+include $(VRUI_MAKEDIR)/SystemDefinitions
+include $(VRUI_MAKEDIR)/Packages.System
+include $(VRUI_MAKEDIR)/Configuration.Vrui
+include $(VRUI_MAKEDIR)/Packages.Vrui
+include $(PACKAGEROOT)/BuildRoot/Packages.Kinect
+
+# Override the include file and library search directories:
+EXTRACINCLUDEFLAGS += -I$(PACKAGEROOT)
+EXTRALINKDIRFLAGS += -L$(PACKAGEROOT)/$(MYLIBEXT)
+
+# Set destination directory for libraries and plugins:
+LIBDESTDIR := $(PACKAGEROOT)/$(MYLIBEXT)
+VISLETDESTDIR := $(LIBDESTDIR)/Vislets
+PLUGINDESTDIR := $(LIBDESTDIR)/Plugins
+
+########################################################################
+# Specify additional compiler and linker flags
+########################################################################
+
+CFLAGS += -Wall -pedantic
+
+# Set flags to distinguish between static and shared libraries
+ifdef STATIC_LINK
+  LIBRARYNAME = $(LIBDESTDIR)/$(1).$(LDEXT).a
+  OBJDIREXT = Static
+else
+  CFLAGS += $(CDSOFLAGS)
+  LIBRARYNAME=$(LIBDESTDIR)/$(call FULLDSONAME,$(1))
+endif
+VISLETNAME = $(VISLETDESTDIR)/lib$(1).$(PLUGINFILEEXT)
+PLUGINNAME = $(PLUGINDESTDIR)/lib$(1).$(PLUGINFILEEXT)
+
+########################################################################
+# List packages used by this project
+# (Supported packages can be found in
+# $(VRUI_MAKEDIR)/BuildRoot/Packages)
+########################################################################
+
+PACKAGES = MYTHREADS MYMISC
+
+########################################################################
+# Specify all final targets
+########################################################################
+
+LIBRARIES = 
+PLUGINS = 
+VISLETS = 
+EXECUTABLES = 
 
 #
-# Everything underneath here should not need to be changed
+# The Kinect driver library:
 #
 
-# Check if Vrui's collaboration infrastructure is installed:
-ifneq ($(strip $(wildcard $(VRUIDIR)/include/Collaboration/*)),)
-  HAVE_COLLABORATION = 1
-else
-  HAVE_COLLABORATION = 0
-endif
+LIBRARY_NAMES = libKinect
 
-# Set up additional flags for the C++ compiler:
-CFLAGS = -I.
+LIBRARIES += $(LIBRARY_NAMES:%=$(call LIBRARYNAME,%))
 
-# Set up destination directories for compilation products:
-OBJDIRBASE = o
-LIBDIRBASE = lib
-BINDIRBASE = bin
+#
+# The Kinect vislets:
+#
 
-# Create debug or fully optimized versions of the software:
-ifdef DEBUG
-  # Include the debug version of the Vrui application makefile fragment:
-  include $(VRUIDIR)/share/Vrui.debug.makeinclude
-  # Enable debugging and disable optimization:
-  CFLAGS += -g3 -O0
-  # Set destination directories for created objects:
-  OBJDIR = $(OBJDIRBASE)/debug
-  LIBDIR = $(LIBDIRBASE)/debug
-  BINDIR = $(BINDIRBASE)/debug
-else
-  # Include the release version of the Vrui application makefile fragment:
-  include $(VRUIDIR)/share/Vrui.makeinclude
-  # Disable debugging and enable optimization:
-  CFLAGS += -g0 -O3 -DNDEBUG
-  # Set destination directories for created objects:
-  OBJDIR = $(OBJDIRBASE)
-  LIBDIR = $(LIBDIRBASE)
-  BINDIR = $(BINDIRBASE)
-endif
+VISLET_NAMES = KinectViewer \
+               KinectRecorder \
+               KinectPlayer
 
-# Set up installation destinations:
-PLUGININSTALLDIR = $(VRUI_LIBDIR)/CollaborationPlugins
+VISLETS += $(VISLET_NAMES:%=$(call VISLETNAME,%))
 
-# Pattern rule to compile C++ sources:
-$(OBJDIR)/%.o: %.cpp
-	@mkdir -p $(OBJDIR)/$(*D)
-	@echo Compiling $<...
-	@g++ -c -o $@ $(VRUI_CFLAGS) $(CFLAGS) $<
+EXECUTABLES += $(EXEDIR)/USBTest \
+               $(EXEDIR)/KinectUtil \
+               $(EXEDIR)/RawKinectViewer \
+               $(EXEDIR)/KinectRecorder \
+               $(EXEDIR)/KinectViewer \
+               $(EXEDIR)/CompressDepthFile \
+               $(EXEDIR)/DepthCompressionTest \
+               $(EXEDIR)/ColorCompressionTest \
+               $(EXEDIR)/CalibrateDepth \
+               $(EXEDIR)/CalibrateCameras \
+               $(EXEDIR)/NewCalibrateCameras \
+               $(EXEDIR)/AlignPoints \
+               $(EXEDIR)/TestAlignment \
+               $(EXEDIR)/KinectServer \
+               $(EXEDIR)/KinectClientTest
 
-# Pattern rule to compile C++ sources as position-independent code:
-$(OBJDIR)/pic/%.o: %.cpp
-	@mkdir -p $(OBJDIR)/pic/$(*D)
-	@echo Compiling $<...
-	@g++ -c -o $@ $(VRUI_CFLAGS) $(VRUI_PLUGINCFLAGS) $(CFLAGS) $<
-
-# Pattern rule to link executables:
-$(BINDIR)/%: $(OBJDIR)/%.o
-	@mkdir -p $(BINDIR)
-	@echo Linking $@...
-	@g++ -o $@ $^ $(VRUI_LINKFLAGS)
-
-# Rule to build all Kinect 3D Video Capture Project components:
-ALL = $(LIBDIR)/libKinect.a \
-      $(BINDIR)/USBTest \
-      $(BINDIR)/RawKinectViewer \
-      $(BINDIR)/AlignPoints \
-      $(BINDIR)/KinectRecorder \
-      $(BINDIR)/KinectViewer \
-      $(BINDIR)/KinectServer \
-      $(BINDIR)/KinectClientTest \
-      $(LIBDIR)/libKinectViewerVislet.$(VRUI_PLUGINFILEEXT)
-ifneq ($(HAVE_COLLABORATION),0)
-  ALL += $(LIBDIR)/libKinectServer.$(VRUI_PLUGINFILEEXT) \
-         $(LIBDIR)/libKinectClient.$(VRUI_PLUGINFILEEXT)
-endif
+ALL = $(LIBRARIES) $(EXECUTABLES) $(PLUGINS) $(VISLETS)
 
 .PHONY: all
 all: $(ALL)
 
-# Rule to remove build results:
-clean:
-	-rm -f $(OBJDIR)/Kinect/*.o $(OBJDIR)/*.o
-	-rm -f $(OBJDIR)/pic/Kinect/*.o $(OBJDIR)/pic/*.o
+# Make all components depend on Kinect driver library:
+$(VISLETS) $(PLUGINS) $(EXECUTABLES): $(call LIBRARYNAME,libKinect)
+
+########################################################################
+# Specify other actions to be performed on a `make clean'
+########################################################################
+
+.PHONY: extraclean
+extraclean:
+	-rm -f $(LIBRARY_NAMES:%=$(LIBDESTDIR)/$(call DSONAME,%))
+	-rm -f $(LIBRARY_NAMES:%=$(LIBDESTDIR)/$(call LINKDSONAME,%))
+	-rm -f $(VISLET_NAMES:%=$(call VISLETNAME,%))
+	-rm -f $(PLUGIN_NAMES:%=$(call PLUGINNAME,%))
+
+.PHONY: extrasqueakyclean
+extrasqueakyclean:
 	-rm -f $(ALL)
+	-rm -rf $(PACKAGEROOT)/$(LIBEXT)
 
-# Rule to clean the source directory for packaging:
-distclean:
-	-rm -rf $(OBJDIRBASE)
-	-rm -rf $(LIBDIRBASE)
-	-rm -rf $(BINDIRBASE)
+# Include basic makefile
+include $(VRUI_MAKEDIR)/BasicMakefile
 
-#
-# Library containing basic USB and Kinect classes:
-#
+########################################################################
+# Specify build rules for dynamic shared objects
+########################################################################
+
+LIBKINECT_HEADERS = $(wildcard Kinect/*.h)
 
 LIBKINECT_SOURCES = $(wildcard Kinect/*.cpp)
 
-$(LIBDIR)/libKinect.a: $(LIBKINECT_SOURCES:%.cpp=$(OBJDIR)/%.o)
-	@mkdir -p $(LIBDIR)
-	@-rm -f $@
-	@echo Linking $@...
-	@ar crs $@ $^
+$(call LIBRARYNAME,libKinect): PACKAGES += $(MYKINECT_DEPENDS)
+$(call LIBRARYNAME,libKinect): EXTRACINCLUDEFLAGS += $(MYKINECT_INCLUDE)
+$(call LIBRARYNAME,libKinect): CFLAGS += $(MYKINECT_CFLAGS)
+$(call LIBRARYNAME,libKinect): $(LIBKINECT_SOURCES:%.cpp=$(OBJDIR)/%.o)
+.PHONY: libKinect
+libKinect: $(call LIBRARYNAME,libKinect)
+
+########################################################################
+# Specify build rules for executables
+########################################################################
 
 #
 # Simple test program for libusb-1.0; can control motor and LEDs and
 # send commands to camera:
 #
 
-USBTEST_SOURCES = USBTest.cpp
-
-$(BINDIR)/USBTest: VRUI_LINKFLAGS += -lusb-1.0
-$(BINDIR)/USBTest: $(USBTEST_SOURCES:%.cpp=$(OBJDIR)/%.o) \
-                   $(LIBDIR)/libKinect.a
+$(EXEDIR)/USBTest: PACKAGES += MYKINECT
+$(EXEDIR)/USBTest: $(OBJDIR)/USBTest.o
 .PHONY: USBTest
-USBTest: $(BINDIR)/USBTest
+USBTest: $(EXEDIR)/USBTest
+
+$(EXEDIR)/KinectUtil: PACKAGES += MYKINECT
+$(EXEDIR)/KinectUtil: $(OBJDIR)/KinectUtil.o
+.PHONY: KinectUtil
+KinectUtil: $(EXEDIR)/KinectUtil
 
 #
 # Viewer for raw depth and color image streams:
 #
 
-RAWKINECTVIEWER_SOURCES = RawKinectViewer.cpp
-
-$(BINDIR)/RawKinectViewer: VRUI_LINKFLAGS += -lusb-1.0
-$(BINDIR)/RawKinectViewer: $(RAWKINECTVIEWER_SOURCES:%.cpp=$(OBJDIR)/%.o) \
-                           $(LIBDIR)/libKinect.a
+$(EXEDIR)/RawKinectViewer: PACKAGES += MYVRUI MYKINECT
+$(EXEDIR)/RawKinectViewer: $(OBJDIR)/RawKinectViewer.o
 .PHONY: RawKinectViewer
-RawKinectViewer: $(BINDIR)/RawKinectViewer
-
-#
-# 3D space alignment program, based on two files containing 3D tie
-# points:
-#
-
-ALIGNPOINTS_SOURCES = AlignPoints.cpp
-
-$(BINDIR)/AlignPoints: $(ALIGNPOINTS_SOURCES:%.cpp=$(OBJDIR)/%.o)
-.PHONY: AlignPoints
-AlignPoints: $(BINDIR)/AlignPoints
+RawKinectViewer: $(EXEDIR)/RawKinectViewer
 
 #
 # Utility to record color and depth streams from one or more Kinect
 # devices to pairs of compressed files:
 #
 
-KINECTRECORDER_SOURCES = KinectRecorder.cpp
-
-$(BINDIR)/KinectRecorder: VRUI_LINKFLAGS += -lusb-1.0
-$(BINDIR)/KinectRecorder: $(KINECTRECORDER_SOURCES:%.cpp=$(OBJDIR)/%.o) \
-                          $(LIBDIR)/libKinect.a
-
+$(EXEDIR)/KinectRecorder: PACKAGES += MYKINECT
+$(EXEDIR)/KinectRecorder: $(OBJDIR)/KinectRecorder.o
 .PHONY: KinectRecorder
-KinectRecorder: $(BINDIR)/KinectRecorder
+KinectRecorder: $(EXEDIR)/KinectRecorder
 
 #
 # Viewer for 3D image streams from one or more Kinect devices:
 #
 
-KINECTVIEWER_SOURCES = KinectViewer.cpp
-
-$(BINDIR)/KinectViewer: VRUI_LINKFLAGS += -lusb-1.0
-$(BINDIR)/KinectViewer: $(KINECTVIEWER_SOURCES:%.cpp=$(OBJDIR)/%.o) \
-                        $(LIBDIR)/libKinect.a
+$(EXEDIR)/KinectViewer: PACKAGES += MYVRUI MYKINECT
+$(EXEDIR)/KinectViewer: $(OBJDIR)/KinectViewer.o
 .PHONY: KinectViewer
-KinectViewer: $(BINDIR)/KinectViewer
+KinectViewer: $(EXEDIR)/KinectViewer
+
+$(EXEDIR)/CompressDepthFile: PACKAGES += MYKINECT
+$(EXEDIR)/CompressDepthFile: $(OBJDIR)/CompressDepthFile.o
+.PHONY: CompressDepthFile
+CompressDepthFile: $(EXEDIR)/CompressDepthFile
+
+$(EXEDIR)/DepthCompressionTest: PACKAGES += MYKINECT
+$(EXEDIR)/DepthCompressionTest: $(OBJDIR)/DepthCompressionTest.o
+.PHONY: DepthCompressionTest
+DepthCompressionTest: $(EXEDIR)/DepthCompressionTest
+
+$(EXEDIR)/ColorCompressionTest: PACKAGES += MYKINECT
+$(EXEDIR)/ColorCompressionTest: $(OBJDIR)/ColorCompressionTest.o
+.PHONY: ColorCompressionTest
+ColorCompressionTest: $(EXEDIR)/ColorCompressionTest
+
+$(EXEDIR)/CalibrateDepth: PACKAGES += MYMATH MYIO
+$(EXEDIR)/CalibrateDepth: $(OBJDIR)/CalibrateDepth.o
+.PHONY: CalibrateDepth
+CalibrateDepth: $(EXEDIR)/CalibrateDepth
+
+$(EXEDIR)/CalibrateCameras: PACKAGES += MYMATH MYIO
+$(EXEDIR)/CalibrateCameras: $(OBJDIR)/CalibrateCameras.o
+.PHONY: CalibrateCameras
+CalibrateCameras: $(EXEDIR)/CalibrateCameras
+
+$(EXEDIR)/NewCalibrateCameras: PACKAGES += MYGEOMETRY MYMATH MYIO
+$(EXEDIR)/NewCalibrateCameras: $(OBJDIR)/NewCalibrateCameras.o
+.PHONY: NewCalibrateCameras
+NewCalibrateCameras: $(EXEDIR)/NewCalibrateCameras
 
 #
-# Server for real-time 3D video streaming protocol:
+# 3D space alignment program, based on two files containing 3D tie
+# points:
 #
 
-KINECTSERVER_SOURCES = KinectServer.cpp \
-                       KinectServerMain.cpp
+$(EXEDIR)/AlignPoints: PACKAGES += MYVRUI
+$(EXEDIR)/AlignPoints: $(OBJDIR)/AlignPoints.o
+.PHONY: AlignPoints
+AlignPoints: $(EXEDIR)/AlignPoints
 
-$(BINDIR)/KinectServer: CFLAGS += -DVERBOSE
-$(BINDIR)/KinectServer: VRUI_LINKFLAGS += -lusb-1.0
-$(BINDIR)/KinectServer: $(KINECTSERVER_SOURCES:%.cpp=$(OBJDIR)/%.o) \
-                        $(LIBDIR)/libKinect.a
-
-.PHONY: KinectServer
-KinectServer: $(BINDIR)/KinectServer
-
-#
-# Client application for real-time 3D video streaming protocol:
-#
-
-KINECTCLIENTTEST_SOURCES = KinectClient.cpp \
-                           KinectClientTest.cpp
-
-$(BINDIR)/KinectClientTest: $(KINECTCLIENTTEST_SOURCES:%.cpp=$(OBJDIR)/%.o) \
-                            $(LIBDIR)/libKinect.a
-
-.PHONY: KinectClientTest
-KinectClientTest: $(BINDIR)/KinectClientTest
+$(EXEDIR)/TestAlignment: PACKAGES += MYGEOMETRY MYMATH MYIO
+$(EXEDIR)/TestAlignment: $(OBJDIR)/TestAlignment.o
+.PHONY: TestAlignment
+TestAlignment: $(EXEDIR)/TestAlignment
 
 #
 # Utility to convert frames from multiple colocated depth image streams
@@ -225,74 +268,115 @@ KinectClientTest: $(BINDIR)/KinectClientTest
 # approach:
 #
 
-SPACECARVER_SOURCES = SpaceCarver.cpp
-
-$(BINDIR)/SpaceCarver: $(SPACECARVER_SOURCES:%.cpp=$(OBJDIR)/%.o)
+$(EXEDIR)/SpaceCarver: PACKAGES += MYKINECT MYGEOMETRY MYMATH MYMISC
+$(EXEDIR)/SpaceCarver: $(OBJDIR)/SpaceCarver.o
 .PHONY: SpaceCarver
-SpaceCarver: $(BINDIR)/SpaceCarver
+SpaceCarver: $(EXEDIR)/SpaceCarver
 
 #
-# Vislet to render 3D video in otherwise unaware Vrui applications:
+# Server for real-time 3D video streaming protocol:
 #
 
-KINECTVIEWERVISLET_SOURCES = Kinect/USBContext.cpp \
-                             Kinect/USBConfigDescriptor.cpp \
-                             Kinect/USBDevice.cpp \
-                             Kinect/USBDeviceList.cpp \
-                             Kinect/KinectCamera.cpp \
-                             Kinect/KinectProjector.cpp \
-                             KinectViewerVislet.cpp
+$(EXEDIR)/KinectServer: PACKAGES += MYKINECT MYCOMM
+$(EXEDIR)/KinectServer: $(OBJDIR)/KinectServer.o \
+                        $(OBJDIR)/KinectServerMain.o
+.PHONY: KinectServer
+KinectServer: $(EXEDIR)/KinectServer
 
-$(LIBDIR)/libKinectViewerVislet.$(VRUI_PLUGINFILEEXT): VRUI_LINKFLAGS += -lusb-1.0
-$(LIBDIR)/libKinectViewerVislet.$(VRUI_PLUGINFILEEXT): $(KINECTVIEWERVISLET_SOURCES:%.cpp=$(OBJDIR)/pic/%.o)
-	@mkdir -p $(LIBDIR)
+#
+# Client application for real-time 3D video streaming protocol:
+#
+
+$(EXEDIR)/KinectClientTest: PACKAGES += MYVRUI MYKINECT MYCOMM
+$(EXEDIR)/KinectClientTest: $(OBJDIR)/KinectClient.o \
+                            $(OBJDIR)/KinectClientTest.o
+.PHONY: KinectClientTest
+KinectClientTest: $(EXEDIR)/KinectClientTest
+
+########################################################################
+# Specify build rules for vislet plug-ins
+########################################################################
+
+# Implicit rule for creating vislet plug-ins:
+$(call VISLETNAME,%): PACKAGES += MYVRUI MYKINECT
+$(call VISLETNAME,%): $(OBJDIR)/pic/Vislets/%.o
+	@mkdir -p $(VISLETDESTDIR)
+ifdef SHOWCOMMAND
+	$(CCOMP) $(PLUGINLINKFLAGS) -o $@ $^ $(LINKDIRFLAGS) $(LINKLIBFLAGS)
+else
 	@echo Linking $@...
-	@g++ -o $@ $^ $(VRUI_LINKFLAGS) $(VRUI_PLUGINLINKFLAGS)
-
-#
-# Server plug-in to transmit 3D video in Vrui's collaboration
-# infrastructure:
-#
-
-KINECTSERVERPLUGIN_SOURCES = KinectPipe.cpp \
-                             KinectServerPlugin.cpp
-
-$(LIBDIR)/libKinectServer.$(VRUI_PLUGINFILEEXT): $(KINECTSERVERPLUGIN_SOURCES:%.cpp=$(OBJDIR)/pic/%.o)
-	@mkdir -p $(LIBDIR)
-	@echo Linking $@...
-	@g++ -o $@ $^ $(VRUI_LINKFLAGS) $(VRUI_PLUGINLINKFLAGS)
-
-#
-# Client plug-in to transmit 3D video in Vrui's collaboration
-# infrastructure:
-#
-
-KINECTCLIENTPLUGIN_SOURCES = Kinect/ColorFrameReader.cpp \
-                             Kinect/HilbertCurve.cpp \
-                             Kinect/DepthFrameReader.cpp \
-                             Kinect/KinectProjector.cpp \
-                             KinectPipe.cpp \
-                             KinectClient.cpp \
-                             KinectClientPlugin.cpp
-
-$(LIBDIR)/libKinectClient.$(VRUI_PLUGINFILEEXT): $(KINECTCLIENTPLUGIN_SOURCES:%.cpp=$(OBJDIR)/pic/%.o)
-	@mkdir -p $(LIBDIR)
-	@echo Linking $@...
-	@g++ -o $@ $^ $(VRUI_LINKFLAGS) $(VRUI_PLUGINLINKFLAGS)
-
-#
-# Installation rule to place vislets and plugins into their proper
-# destination directories:
-#
-
-install:
-# Install all vislet plugins in VRUI_VISLETSDIR:
-	@echo Installing vislet plugins...
-	@install -d $(VRUI_VISLETSDIR)
-	@install $(LIBDIR)/libKinectViewerVislet.$(VRUI_PLUGINFILEEXT) $(VRUI_VISLETSDIR)
-ifneq ($(HAVE_COLLABORATION),0)
-  # Install all protocol plugins in PLUGININSTALLDIR:
-	@echo Installing protocol plugins...
-	@install -d $(PLUGININSTALLDIR)
-	@install $(LIBDIR)/libKinectServer.$(VRUI_PLUGINFILEEXT) $(LIBDIR)/libKinectClient.$(VRUI_PLUGINFILEEXT) $(PLUGININSTALLDIR)
+	@$(CCOMP) $(PLUGINLINKFLAGS) -o $@ $^ $(LINKDIRFLAGS) $(LINKLIBFLAGS)
 endif
+
+#
+# Vislet to render live 3D video in any Vrui application:
+#
+
+#$(call VISLETNAME,KinectViewer): $(OBJDIR)/KinectViewerVislet.o
+
+#
+# Vislet to record 3D video from any Vrui application:
+#
+
+#$(call VISLETNAME,KinectRecorder): $(OBJDIR)/KinectRecorderVislet.o
+
+#
+# Vislet to play back previously recorded 3D video in any Vrui
+# application:
+#
+
+#$(call VISLETNAME,KinectPlayback): $(OBJDIR)/KinectPlaybackVislet.o
+
+# Mark all vislet plugin object files as intermediate:
+.SECONDARY: $(VISLET_NAMES:%=$(OBJDIR)/pic/Vislets/%.o)
+
+########################################################################
+# Specify installation rules for header files, libraries, executables,
+# configuration files, and shared files.
+########################################################################
+
+ifdef INSTALLPREFIX
+  HEADERINSTALLDIR := $(INSTALLPREFIX)/$(HEADERINSTALLDIR)
+  LIBINSTALLDIR := $(INSTALLPREFIX)/$(LIBINSTALLDIR)
+  PLUGININSTALLDIR := $(INSTALLPREFIX)/$(PLUGININSTALLDIR)
+  EXECUTABLEINSTALLDIR := $(INSTALLPREFIX)/$(EXECUTABLEINSTALLDIR)
+  ETCINSTALLDIR := $(INSTALLPREFIX)/$(ETCINSTALLDIR)
+  SHAREINSTALLDIR := $(INSTALLPREFIX)/$(SHAREINSTALLDIR)
+endif
+
+install: all
+# Install all header files in HEADERINSTALLDIR:
+	@echo Installing header files...
+	@install -d $(HEADERINSTALLDIR)/Kinect
+	@install -m u=rw,go=r $(LIBKINECT_HEADERS) $(HEADERINSTALLDIR)/Kinect
+# Install all library files in LIBINSTALLDIR:
+	@echo Installing libraries...
+	@install -d $(LIBINSTALLDIR)
+	@install $(LIBRARIES) $(LIBINSTALLDIR)
+	@echo Configuring run-time linker...
+	$(foreach LIBNAME,$(LIBRARY_NAMES),$(call CREATE_SYMLINK,$(LIBNAME)))
+# Install all vislet plugins in PLUGININSTALLDIR/VRVISLETSDIREXT:
+	@echo Installing vislet plugins...
+	@install -d $(PLUGININSTALLDIR)/$(VRVISLETSDIREXT)
+	@install $(VISLETS) $(PLUGININSTALLDIR)/$(VRVISLETSDIREXT)
+# Install all binaries in EXECUTABLEINSTALLDIR:
+	@echo Installing executables...
+	@install -d $(EXECUTABLEINSTALLDIR)
+	@install $(EXECUTABLES) $(EXECUTABLEINSTALLDIR)
+# Install the package and configuration files in SHAREINSTALLDIR/make:
+	@echo Installing makefile fragments...
+	@install -d $(SHAREINSTALLDIR)/make
+	@install -m u=rw,go=r BuildRoot/Packages.Kinect $(SHAREINSTALLDIR)/make
+
+uninstall:
+	@echo Removing header files...
+	@rm -rf $(HEADERINSTALLDIR)/Kinect
+	@echo Removing libraries...
+	@rm -f $(LIBRARIES:$(LIBDESTDIR)/%=$(LIBINSTALLDIR)/%)
+	$(foreach LIBNAME,$(LIBRARY_NAMES),$(call DESTROY_SYMLINK,$(LIBNAME)))
+	@echo Removing vislet plugins...
+	@rm -f $(VISLETS:$(VISLETDESTDIR)/%=$(PLUGININSTALLDIR)/$(VRVISLETSDIREXT)/%)
+	@echo Removing executables...
+	@rm -f $(EXECUTABLES:$(EXEDIR)/%=$(EXECUTABLEINSTALLDIR)/%)
+	@echo Removing makefile fragments...
+	@rm -f $(SHAREINSTALLDIR)/make/Packages.Kinect

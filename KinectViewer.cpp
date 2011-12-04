@@ -101,7 +101,7 @@ class KinectViewer:public Vrui::Application
 		#if PLAYBACK
 		KinectStreamer(const char* frameFileNamePrefix);
 		#else
-		KinectStreamer(USBContext& usbContext,int cameraIndex,bool highres); // Creates a streamer for the Kinect camera of the given index in the given USB context
+		KinectStreamer(USBContext& usbContext,int cameraIndex,bool highres,bool compressDepth); // Creates a streamer for the Kinect camera of the given index in the given USB context
 		#endif
 		~KinectStreamer(void); // Destroys the streamer
 		
@@ -206,7 +206,7 @@ void KinectViewer::KinectStreamer::captureBackgroundCallback(Misc::CallbackData*
 	{
 	#if !PLAYBACK
 	/* Capture five second worth of background frames: */
-	camera->captureBackground(150,new Misc::VoidMethodCall<KinectCamera&,KinectViewer::KinectStreamer>(this,&KinectViewer::KinectStreamer::backgroundCaptureCompleteCallback));
+	camera->captureBackground(150,Misc::createFunctionCall(this,&KinectViewer::KinectStreamer::backgroundCaptureCompleteCallback));
 	#endif
 	}
 
@@ -238,7 +238,7 @@ void KinectViewer::KinectStreamer::backgroundRemovalFuzzCallback(GLMotif::TextFi
 #if PLAYBACK
 KinectViewer::KinectStreamer::KinectStreamer(const char* frameFileNamePrefix)
 #else
-KinectViewer::KinectStreamer::KinectStreamer(USBContext& context,int cameraIndex,bool highres)
+KinectViewer::KinectStreamer::KinectStreamer(USBContext& context,int cameraIndex,bool highres,bool compressDepth)
 #endif
 	:camera(0),
 	 projector(0),
@@ -290,6 +290,9 @@ KinectViewer::KinectStreamer::KinectStreamer(USBContext& context,int cameraIndex
 	
 	/* Set the camera's frame size: */
 	camera->setFrameSize(KinectCamera::COLOR,highres?KinectCamera::FS_1280_1024:KinectCamera::FS_640_480);
+	
+	/* Set the camera's compression flag: */
+	camera->setCompressDepthFrames(compressDepth);
 	
 	#endif
 	}
@@ -401,7 +404,7 @@ void KinectViewer::KinectStreamer::resetFrameTimer(void)
 void KinectViewer::KinectStreamer::startStreaming(void)
 	{
 	/* Start streaming: */
-	camera->startStreaming(new Misc::VoidMethodCall<const FrameBuffer&,KinectViewer::KinectStreamer>(this,&KinectViewer::KinectStreamer::colorStreamingCallback),new Misc::VoidMethodCall<const FrameBuffer&,KinectViewer::KinectStreamer>(this,&KinectViewer::KinectStreamer::depthStreamingCallback));
+	camera->startStreaming(Misc::createFunctionCall(this,&KinectViewer::KinectStreamer::colorStreamingCallback),Misc::createFunctionCall(this,&KinectViewer::KinectStreamer::depthStreamingCallback));
 	}
 
 KinectViewer::KinectStreamer::~KinectStreamer(void)
@@ -530,6 +533,7 @@ KinectViewer::KinectViewer(int& argc,char**& argv,char**& appDefaults)
 	
 	/* Add a streamer for each camera index or frame file name prefix passed on the command line: */
 	bool highres=false;
+	bool compressDepth=false;
 	for(int i=1;i<argc;++i)
 		{
 		if(argv[i][0]=='-')
@@ -538,6 +542,10 @@ KinectViewer::KinectViewer(int& argc,char**& argv,char**& appDefaults)
 				highres=true;
 			else if(strcasecmp(argv[i]+1,"low")==0)
 				highres=false;
+			else if(strcasecmp(argv[i]+1,"compress")==0)
+				compressDepth=true;
+			else if(strcasecmp(argv[i]+1,"nocompress")==0)
+				compressDepth=false;
 			}
 		else
 			{
@@ -546,7 +554,7 @@ KinectViewer::KinectViewer(int& argc,char**& argv,char**& appDefaults)
 			streamers.push_back(new KinectStreamer(argv[i]));
 			#else
 			int cameraIndex=atoi(argv[i]);
-			streamers.push_back(new KinectStreamer(usbContext,cameraIndex,highres));
+			streamers.push_back(new KinectStreamer(usbContext,cameraIndex,highres,compressDepth));
 			#endif
 			}
 		}

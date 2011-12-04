@@ -83,6 +83,14 @@ class KinectProjector:public GLObject
 	virtual void initContext(GLContextData& contextData) const;
 	
 	/* New methods: */
+	const FrameBuffer& getDepthFrame(void) const // Returns the current depth frame
+		{
+		return depthFrame;
+		}
+	const FrameBuffer& getColorFrame(void) const // Returns the current color frame
+		{
+		return colorFrame;
+		}
 	void setDepthFrame(const FrameBuffer& newDepthFrame); // Updates the projector's current depth frame
 	void setColorFrame(const FrameBuffer& newColorFrame); // Updates the projector's current color frame
 	void draw(GLContextData& contextData) const; // Draws the current depth and color frames in the current model coordinate system

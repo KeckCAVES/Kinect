@@ -39,7 +39,7 @@ Methods of class KinectPlayback:
 void* KinectPlayback::playbackThreadMethod(void)
 	{
 	Threads::Thread::setCancelState(Threads::Thread::CANCEL_ENABLE);
-	Threads::Thread::setCancelType(Threads::Thread::CANCEL_ASYNCHRONOUS);
+	// Threads::Thread::setCancelType(Threads::Thread::CANCEL_ASYNCHRONOUS);
 	
 	/* Create a set of three depth frame buffers to do on-the-fly median spot noise filtering: */
 	FrameBuffer depthFrames[3];
@@ -168,7 +168,7 @@ KinectPlayback::KinectPlayback(const char* depthFrameFileName,const char* colorF
 	 numBackgroundFrames(0),backgroundFrame(0),removeBackground(false)
 	{
 	/* Read the depth frame file's header: */
-	depthFrameFile->setEndianness(IO::File::LittleEndian);
+	depthFrameFile->setEndianness(Misc::LittleEndian);
 	depthFrameFile->read<double>(depthMatrix,4*4);
 	projectorTransform=Misc::Marshaller<Transform>::read(*depthFrameFile);
 	
@@ -178,7 +178,7 @@ KinectPlayback::KinectPlayback(const char* depthFrameFileName,const char* colorF
 		depthSize[i]=depthFrameReader->getSize()[i];
 	
 	/* Read the color frame file's header: */
-	colorFrameFile->setEndianness(IO::File::LittleEndian);
+	colorFrameFile->setEndianness(Misc::LittleEndian);
 	colorFrameFile->read<double>(colorMatrix,4*4);
 	
 	/* Create the color frame reader: */
@@ -201,10 +201,6 @@ KinectPlayback::~KinectPlayback(void)
 	/* Delete the frame readers: */
 	delete depthFrameReader;
 	delete colorFrameReader;
-	
-	/* Close the frame files: */
-	delete depthFrameFile;
-	delete colorFrameFile;
 	
 	delete[] backgroundFrame;
 	}

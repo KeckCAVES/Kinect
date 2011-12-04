@@ -72,6 +72,8 @@ class USBDevice
 		{
 		return device;
 		}
+	unsigned int getBusNumber(void) const; // Returns the number of the USB bus to which the device is connected
+	unsigned int getAddress(void) const; // REturns the device's address on the USB bus to which it is connected
 	libusb_device_descriptor getDeviceDescriptor(void); // Returns the device's device descriptor
 	std::string getSerialNumber(void); // Returns the device's serial number, or the empty string if none is defined
 	libusb_config_descriptor* getActiveConfigDescriptor(void); // Returns a descriptor for the device's active configuration
