@@ -22,22 +22,53 @@ Software Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA
 02111-1307 USA
 ***********************************************************************/
 
+#include <stdlib.h>
+#include <string.h>
 #include <iostream>
-#include <Misc/File.h>
-#include <Misc/FileCharacterSource.h>
-#include <Misc/CSVSource.h>
+#include <IO/File.h>
+#include <IO/OpenFile.h>
+#include <IO/CSVSource.h>
 #include <Math/Math.h>
 #include <Math/Matrix.h>
 
-int main(void)
+int main(int argc,char* argv[])
 	{
+	/* Parse the command line: */
+	int imgSize[2]={640,480};
+	const char* tiePointFileName="CalibrationData.csv";
+	const char* matrixFileName="CameraCalibrationMatrices.dat";
+	int nameState=0;
+	for(int i=1;i<argc;++i)
+		{
+		if(argv[i][0]=='-')
+			{
+			if(strcasecmp(argv[i]+1,"size")==0)
+				{
+				for(int j=0;j<2;++j)
+					{
+					++i;
+					imgSize[j]=atoi(argv[i]);
+					}
+				}
+			}
+		else if(nameState==0)
+			{
+			tiePointFileName=argv[i];
+			++nameState;
+			}
+		else if(nameState==1)
+			{
+			matrixFileName=argv[i];
+			++nameState;
+			}
+		}
+	
 	/* Create the linear system: */
 	Math::Matrix a(12,12,0.0);
 	
 	{
 	/* Open the calibration data file: */
-	Misc::FileCharacterSource dataSource("CalibrationData.csv");
-	Misc::CSVSource data(dataSource);
+	IO::CSVSource data(IO::openFile(tiePointFileName));
 	
 	unsigned int numEntries=0;
 	while(!data.eof())
@@ -46,8 +77,8 @@ int main(void)
 		double x=data.readField<double>();
 		double y=data.readField<double>();
 		double z=data.readField<double>();
-		double s=data.readField<double>()/640.0;
-		double t=data.readField<double>()/480.0;
+		double s=data.readField<double>()/double(imgSize[0]);
+		double t=data.readField<double>()/double(imgSize[1]);
 		
 		/* Insert the entry's two linear equations into the linear system: */
 		double eq[2][12];
@@ -110,9 +141,8 @@ int main(void)
 			hom.set(i,j,qe.first(i*4+j,minEIndex)/scale);
 	
 	{
-	/* Open the calibration data file: */
-	Misc::FileCharacterSource dataSource("CalibrationData.csv");
-	Misc::CSVSource data(dataSource);
+	/* Open the calibration data file again: */
+	IO::CSVSource data(IO::openFile(tiePointFileName));
 	
 	/* Test the homography on all calibration data entries: */
 	while(!data.eof())
@@ -122,8 +152,10 @@ int main(void)
 		for(unsigned int i=0;i<3;++i)
 			world.set(i,data.readField<double>());
 		world.set(3,1.0);
-		double s=data.readField<double>();
-		double t=data.readField<double>();
+		
+		/* Skip s and t: */
+		data.readField<double>();
+		data.readField<double>();
 		
 		/* Apply the homography: */
 		Math::Matrix str=hom*world;
@@ -132,23 +164,29 @@ int main(void)
 	}
 	
 	/* Open the calibration file: */
-	Misc::File matrixFile("CameraCalibrationMatrices.dat","wb",Misc::File::LittleEndian);
+	IO::FilePtr matrixFile(IO::openFile(matrixFileName,IO::File::WriteOnly));
+	matrixFile->setEndianness(Misc::LittleEndian);
 	
 	/* Create the depth projection matrix: */
 	Math::Matrix depthProjection(4,4,0.0);
-	double cameraFov=560.0;
-	depthProjection(0,0)=1.0/cameraFov;
-	depthProjection(0,3)=-320.0/cameraFov;
-	depthProjection(1,1)=1.0/cameraFov;
-	depthProjection(1,3)=-240.0/cameraFov;
+	double depthScale=34681.3;
+	double depthBias=1091.71;
+	double hScale=1.0/320.0/1.8530/1.0072;
+	double hCenter=320.0;
+	double vScale=1.0/320.0/1.8530/1.0072;
+	double vCenter=240.0;
+	depthProjection(0,0)=hScale;
+	depthProjection(0,3)=-hCenter*hScale;
+	depthProjection(1,1)=vScale;
+	depthProjection(1,3)=-vCenter*vScale;
 	depthProjection(2,3)=-1.0;
-	depthProjection(3,2)=-1.0/34400.0;
-	depthProjection(3,3)=1090.0/34400.0;
+	depthProjection(3,2)=-1.0/depthScale;
+	depthProjection(3,3)=depthBias/depthScale;
 	
 	/* Save the depth projection matrix: */
 	for(unsigned int i=0;i<4;++i)
 		for(unsigned int j=0;j<4;++j)
-			matrixFile.write<double>(depthProjection(i,j));
+			matrixFile->write<double>(depthProjection(i,j));
 	
 	/* Create the color projection matrix by extending the homography: */
 	Math::Matrix colorProjection(4,4);
@@ -166,7 +204,7 @@ int main(void)
 	/* Save the color projection matrix: */
 	for(unsigned int i=0;i<4;++i)
 		for(unsigned int j=0;j<4;++j)
-			matrixFile.write<double>(colorProjection(i,j));
+			matrixFile->write<double>(colorProjection(i,j));
 	
 	return 0;
 	}

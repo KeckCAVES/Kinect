@@ -2,7 +2,7 @@
 FindBlobs - Helper function to extract all eight-connected blobs of
 pixels from a frame whose pixel values match a given value up to a given
 tolerance.
-Copyright (c) 2010 Oliver Kreylos
+Copyright (c) 2010-2011 Oliver Kreylos
 
 This file is part of the Kinect 3D Video Capture Project (Kinect).
 
@@ -26,8 +26,7 @@ Software Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA
 #define FINDBLOBS_INCLUDED
 
 #include <vector>
-
-#include "FrameBuffer.h"
+#include <Kinect/FrameBuffer.h>
 
 template <class PixelParam>
 class BlobProperty // Class to accumulate additional pixel properties along with blobs
@@ -74,7 +73,7 @@ class PixelComparer // Class to compare pixel values
 	};
 
 template <class PixelParam>
-std::vector<Blob<PixelParam> > findBlobs(const FrameBuffer& frame,const PixelComparer<PixelParam>& comparer); // Extracts all connected blobs from the given frame whose pixel values match the given pixel comparer
+std::vector<Blob<PixelParam> > findBlobs(const Kinect::FrameBuffer& frame,const PixelComparer<PixelParam>& comparer); // Extracts all connected blobs from the given frame whose pixel values match the given pixel comparer
 
 #ifndef FINDBLOBS_IMPLEMENTATION
 #include "FindBlobs.icpp"
