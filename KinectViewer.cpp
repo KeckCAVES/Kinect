@@ -1,7 +1,7 @@
 /***********************************************************************
 KinectViewer - Simple application to view 3D reconstructions of color
 and depth images captured from a Kinect device.
-Copyright (c) 2010 Oliver Kreylos
+Copyright (c) 2010-2011 Oliver Kreylos
 
 This file is part of the Kinect 3D Video Capture Project (Kinect).
 
@@ -22,94 +22,96 @@ Software Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA
 ***********************************************************************/
 
 #include <string.h>
+#include <string>
 #include <vector>
 #include <stdexcept>
 #include <iostream>
 #include <Misc/FunctionCalls.h>
 #include <Misc/File.h>
 #include <Threads/TripleBuffer.h>
+#include <USB/Context.h>
+#include <Cluster/OpenPipe.h>
 #include <Geometry/OrthogonalTransformation.h>
 #include <Geometry/GeometryValueCoders.h>
 #include <GL/gl.h>
 #include <GL/GLGeometryWrappers.h>
 #include <GL/GLTransformationWrappers.h>
+#include <GLMotif/WidgetManager.h>
+#include <GLMotif/StyleSheet.h>
 #include <GLMotif/PopupMenu.h>
+#include <GLMotif/PopupWindow.h>
+#include <GLMotif/RowColumn.h>
 #include <GLMotif/Menu.h>
 #include <GLMotif/SubMenu.h>
+#include <GLMotif/Margin.h>
 #include <GLMotif/Button.h>
 #include <GLMotif/ToggleButton.h>
+#include <GLMotif/TextFieldSlider.h>
 #include <GLMotif/CascadeButton.h>
 #include <Vrui/Vrui.h>
 #include <Vrui/Viewer.h>
 #include <Vrui/Application.h>
-
-#include "USBContext.h"
-#include "FrameBuffer.h"
-#include "KinectCamera.h"
-#include "KinectFrameSaver.h"
-#include "KinectPlayback.h"
-#include "KinectProjector.h"
+#include <Vrui/OpenFile.h>
+#include <Kinect/FrameBuffer.h>
+#include <Kinect/Camera.h>
+#include <Kinect/FileFrameSource.h>
+#include <Kinect/MultiplexedFrameSource.h>
+#include <Kinect/Projector.h>
 // #include "MD5MeshAnimator.h"
-
-/***********************************************************************
-Setting PLAYBACK to 1 is just a hack right now; ignore it unless you
-understand exactly what it's doing.
-***********************************************************************/
-
-#define PLAYBACK 0
 
 class KinectViewer:public Vrui::Application
 	{
 	/* Embedded classes: */
 	private:
-	class KinectStreamer // Helper class to stream 3D video data from a Kinect camera to a Kinect projector
+	class KinectStreamer // Helper class to stream 3D video data from a 3D video frame source to a Kinect projector
 		{
 		/* Elements: */
 		public:
-		#if PLAYBACK
-		KinectPlayback* camera; // Pointer to the camera
-		#else
-		KinectCamera* camera; // Pointer to the camera
-		#endif
-		KinectFrameSaver* frameSaver; // Pointer to helper object saving depth and color frames received from the Kinect
-		Threads::TripleBuffer<FrameBuffer> depthFrames; // Triple buffer of depth frames received from the camera
-		Threads::TripleBuffer<FrameBuffer> colorFrames; // Triple buffer of color frames received from the camera
-		KinectProjector* projector; // Pointer to the projector
-		Vrui::OGTransform projectorTransform; // Transformation from projector space to shared model space
+		Kinect::FrameSource* source; // Pointer to the 3D video frame source
+		Threads::TripleBuffer<Kinect::FrameBuffer> colorFrames; // Triple buffer of color frames received from the camera
+		Threads::TripleBuffer<Kinect::FrameBuffer> depthFrames; // Triple buffer of depth frames received from the camera
+		Kinect::Projector* projector; // Pointer to the projector
 		bool enabled; // Flag whether the streamer is currently processing and rendering 3D video frames
+		unsigned short maxDepth; // Maximum depth value for background removal
 		
 		/* Private methods: */
-		void depthStreamingCallback(const FrameBuffer& frameBuffer); // Callback receiving depth frames from the Kinect camera
-		void colorStreamingCallback(const FrameBuffer& frameBuffer); // Callback receiving color frames from the Kinect camera
+		void colorStreamingCallback(const Kinect::FrameBuffer& frameBuffer); // Callback receiving color frames from the Kinect camera
+		void depthStreamingCallback(const Kinect::FrameBuffer& frameBuffer); // Callback receiving depth frames from the Kinect camera
+		void showFacadeCallback(GLMotif::ToggleButton::ValueChangedCallbackData* cbData);
+		void showFromCameraCallback(Misc::CallbackData* cbData);
+		void removeBackgroundCallback(GLMotif::ToggleButton::ValueChangedCallbackData* cbData);
+		void backgroundCaptureCompleteCallback(Kinect::Camera& camera);
+		void captureBackgroundCallback(Misc::CallbackData* cbData);
+		void saveBackgroundCallback(Misc::CallbackData* cbData);
+		void backgroundMaxDepthCallback(GLMotif::TextFieldSlider::ValueChangedCallbackData* cbData);
+		void backgroundRemovalFuzzCallback(GLMotif::TextFieldSlider::ValueChangedCallbackData* cbData);
 		
 		/* Constructors and destructors: */
 		public:
-		#if PLAYBACK
-		KinectStreamer(const char* depthFrameFileName,const char* colorFrameFileName);
-		#else
-		KinectStreamer(USBContext& usbContext,int cameraIndex); // Creates a streamer for the Kinect camera of the given index in the given USB context
-		#endif
+		KinectStreamer(Kinect::FrameSource* sSource); // Creates a streamer for the given 3D video source
 		~KinectStreamer(void); // Destroys the streamer
 		
 		/* Methods: */
+		GLMotif::PopupWindow* createStreamerDialog(void); // Creates a dialog box to control parameters of this streamer
+		void resetFrameTimer(void); // Resets the streamer's frame timer
+		void startStreaming(void); // Starts streaming
 		void frame(void); // Called once per Vrui frame to update state
 		void display(GLContextData& contextData) const; // Renders the streamer's current state into the given OpenGL context
 		};
 	
 	/* Elements: */
 	private:
-	USBContext usbContext; // USB device context
+	USB::Context usbContext; // USB device context
 	std::vector<KinectStreamer*> streamers; // List of Kinect streamers, each connected to one Kinect camera
-	Vrui::InputDevice* cameraDevice; // Pointer to the device to which the depth camera is attached
+	std::vector<GLMotif::PopupWindow*> streamerDialogs; // List of created streamer settings dialogs
+	// Vrui::InputDevice* cameraDevice; // Pointer to the device to which the depth camera is attached
 	// MD5MeshAnimator anim; // An animator
 	
 	GLMotif::PopupMenu* mainMenu; // The program's main menu
 	
 	/* Private methods: */
-	void enableStreamerCallback(Misc::CallbackData* cbData,const size_t& streamerIndex);
-	void viewCameraCallback(Misc::CallbackData* cbData,const size_t& streamerIndex);
-	void captureBackgroundCallback(Misc::CallbackData* cbData,const size_t& streamerIndex);
-	void removeBackgroundCallback(Misc::CallbackData* cbData,const size_t& streamerIndex);
+	void showStreamerDialogCallback(Misc::CallbackData* cbData,const size_t& streamerIndex);
+	void streamerDialogCloseCallback(GLMotif::PopupWindow::CloseCallbackData* cbData);
 	GLMotif::PopupMenu* createMainMenu(void); // Creates the program's main menu
 	
 	/* Constructors and destructors: */
@@ -126,28 +128,8 @@ class KinectViewer:public Vrui::Application
 Methods of class KinectViewer::KinectStreamer:
 *********************************************/
 
-void KinectViewer::KinectStreamer::depthStreamingCallback(const FrameBuffer& frameBuffer)
+void KinectViewer::KinectStreamer::colorStreamingCallback(const Kinect::FrameBuffer& frameBuffer)
 	{
-	/* Save the frame if requested: */
-	if(frameSaver!=0)
-		frameSaver->saveDepthFrame(frameBuffer);
-	
-	if(enabled)
-		{
-		/* Post the new frame into the depth frame triple buffer: */
-		depthFrames.postNewValue(frameBuffer);
-		
-		/* Update application state: */
-		Vrui::requestUpdate();
-		}
-	}
-
-void KinectViewer::KinectStreamer::colorStreamingCallback(const FrameBuffer& frameBuffer)
-	{
-	/* Save the frame if requested: */
-	if(frameSaver!=0)
-		frameSaver->saveColorFrame(frameBuffer);
-	
 	if(enabled)
 		{
 		/* Post the new frame into the color frame triple buffer: */
@@ -158,57 +140,229 @@ void KinectViewer::KinectStreamer::colorStreamingCallback(const FrameBuffer& fra
 		}
 	}
 
-#if PLAYBACK
-KinectViewer::KinectStreamer::KinectStreamer(const char* depthFrameFileName,const char* colorFrameFileName)
-#else
-KinectViewer::KinectStreamer::KinectStreamer(USBContext& context,int cameraIndex)
-#endif
-	:camera(0),frameSaver(0),
-	 projector(0),
-	 projectorTransform(Vrui::OGTransform::identity),
-	 enabled(true)
+void KinectViewer::KinectStreamer::depthStreamingCallback(const Kinect::FrameBuffer& frameBuffer)
 	{
-	#if PLAYBACK
-	/* Open the given frame files: */
-	camera=new KinectPlayback(depthFrameFileName,colorFrameFileName);
-	std::string serialNumber="B00367608415043B";
-	#else
-	/* Attach to and open the Kinect camera: */
-	camera=new KinectCamera(context,cameraIndex);
-	camera->open();
+	if(enabled)
+		{
+		/* Post the new frame into the depth frame triple buffer: */
+		depthFrames.postNewValue(frameBuffer);
+		
+		/* Update application state: */
+		Vrui::requestUpdate();
+		}
+	}
+
+void KinectViewer::KinectStreamer::showFacadeCallback(GLMotif::ToggleButton::ValueChangedCallbackData* cbData)
+	{
+	enabled=cbData->set;
+	}
+
+void KinectViewer::KinectStreamer::showFromCameraCallback(Misc::CallbackData* cbData)
+	{
+	/* Move the camera position to the viewer's head position: */
+	Vrui::NavTransform nav=Vrui::NavTransform::translateFromOriginTo(Vrui::getMainViewer()->getHeadPosition());
 	
-	/* Get the camera's serial number to load the proper calibration matrices: */
-	std::string serialNumber=camera->getSerialNumber();
-	#endif
+	/* Rotate the frame to align the projection direction with the viewer's viewing direction: */
+	nav*=Vrui::NavTransform::rotate(Vrui::Rotation::rotateX(Math::rad(Vrui::Scalar(90))));
 	
-	/* Create a Kinect projector with the proper calibration matrices: */
-	std::string calibrationFileName="CameraCalibrationMatrices-";
-	calibrationFileName.append(serialNumber);
-	calibrationFileName.append(".dat");
-	projector=new KinectProjector(calibrationFileName.c_str());
+	/* Account for the projector's model space transformation: */
+	nav*=Geometry::invert(projector->getProjectorTransform());
 	
-	/* Read the camera's model space transformation: */
-	std::string transformFileName="ProjectorTransform-";
-	transformFileName.append(serialNumber);
-	transformFileName.append(".txt");
-	Misc::File transformFile(transformFileName.c_str(),"rt");
-	char transform[1024];
-	transformFile.gets(transform,sizeof(transform));
-	projectorTransform=Misc::ValueCoder<Vrui::OGTransform>::decode(transform,transform+strlen(transform),0);
-	
-	/* Start streaming: */
-	camera->startStreaming(new Misc::VoidMethodCall<const FrameBuffer&,KinectViewer::KinectStreamer>(this,&KinectViewer::KinectStreamer::colorStreamingCallback),new Misc::VoidMethodCall<const FrameBuffer&,KinectViewer::KinectStreamer>(this,&KinectViewer::KinectStreamer::depthStreamingCallback));
+	Vrui::setNavigationTransformation(nav);
+	}
+
+void KinectViewer::KinectStreamer::removeBackgroundCallback(GLMotif::ToggleButton::ValueChangedCallbackData* cbData)
+	{
+	Kinect::Camera* camera=dynamic_cast<Kinect::Camera*>(source);
+	if(camera!=0)
+		{
+		/* Set the background removal flag: */
+		camera->setRemoveBackground(cbData->set);
+		
+		/* Set the toggle button's state to the actual new flag value: */
+		cbData->toggle->setToggle(camera->getRemoveBackground());
+		}
+	else
+		{
+		/* Reset the toggle button's state: */
+		cbData->toggle->setToggle(false);
+		}
+	}
+
+void KinectViewer::KinectStreamer::backgroundCaptureCompleteCallback(Kinect::Camera& camera)
+	{
+	/* Apply a max depth value, if one is defined: */
+	if(maxDepth<1100)
+		camera.setMaxDepth(maxDepth);
+	}
+
+void KinectViewer::KinectStreamer::captureBackgroundCallback(Misc::CallbackData* cbData)
+	{
+	Kinect::Camera* camera=dynamic_cast<Kinect::Camera*>(source);
+	if(camera!=0)
+		{
+		/* Capture five second worth of background frames: */
+		camera->captureBackground(150,Misc::createFunctionCall(this,&KinectViewer::KinectStreamer::backgroundCaptureCompleteCallback));
+		}
+	}
+
+void KinectViewer::KinectStreamer::saveBackgroundCallback(Misc::CallbackData* cbData)
+	{
+	Kinect::Camera* camera=dynamic_cast<Kinect::Camera*>(source);
+	if(camera!=0)
+		{
+		/* Save the current background frame: */
+		camera->saveBackground("KinectBackground");
+		}
+	}
+
+void KinectViewer::KinectStreamer::backgroundMaxDepthCallback(GLMotif::TextFieldSlider::ValueChangedCallbackData* cbData)
+	{
+	Kinect::Camera* camera=dynamic_cast<Kinect::Camera*>(source);
+	if(camera!=0)
+		{
+		/* Update the max depth value: */
+		maxDepth=(unsigned short)Math::floor(cbData->value+0.5);
+		camera->setMaxDepth(maxDepth,true);
+		}
+	}
+
+void KinectViewer::KinectStreamer::backgroundRemovalFuzzCallback(GLMotif::TextFieldSlider::ValueChangedCallbackData* cbData)
+	{
+	Kinect::Camera* camera=dynamic_cast<Kinect::Camera*>(source);
+	if(camera!=0)
+		{
+		/* Change the camera's background removal fuzz value: */
+		camera->setBackgroundRemovalFuzz(int(Math::floor(cbData->value+0.5)));
+		}
+	}
+
+KinectViewer::KinectStreamer::KinectStreamer(Kinect::FrameSource* sSource)
+	:source(sSource),
+	 projector(new Kinect::Projector(*source)),
+	 enabled(true),maxDepth(1100)
+	{
 	}
 
 KinectViewer::KinectStreamer::~KinectStreamer(void)
 	{
 	/* Stop streaming: */
-	camera->stopStreaming();
-	delete frameSaver;
+	source->stopStreaming();
 	delete projector;
 	
-	/* Close and disconnect from the Kinect camera device: */
-	delete camera;
+	/* Close and disconnect from the 3D video source: */
+	delete source;
+	}
+
+GLMotif::PopupWindow* KinectViewer::KinectStreamer::createStreamerDialog(void)
+	{
+	const GLMotif::StyleSheet& ss=*Vrui::getWidgetManager()->getStyleSheet();
+	Kinect::Camera* camera=dynamic_cast<Kinect::Camera*>(source);
+	
+	std::string dialogTitle="3D Video Source Settings";
+	if(camera!=0)
+		{
+		dialogTitle.push_back(' ');
+		dialogTitle.append(camera->getSerialNumber());
+		}
+	GLMotif::PopupWindow* streamerDialog=new GLMotif::PopupWindow("StreamerDialog",Vrui::getWidgetManager(),dialogTitle.c_str());
+	streamerDialog->setCloseButton(true);
+	streamerDialog->setResizableFlags(true,false);
+	
+	GLMotif::RowColumn* streamerSettings=new GLMotif::RowColumn("StreamerSettings",streamerDialog,false);
+	streamerSettings->setOrientation(GLMotif::RowColumn::VERTICAL);
+	streamerSettings->setPacking(GLMotif::RowColumn::PACK_TIGHT);
+	streamerSettings->setNumMinorWidgets(1);
+	
+	GLMotif::Margin* showMargin=new GLMotif::Margin("ShowMargin",streamerSettings,false);
+	showMargin->setAlignment(GLMotif::Alignment::LEFT);
+	
+	GLMotif::RowColumn* showBox=new GLMotif::RowColumn("ShowBox",showMargin,false);
+	showBox->setOrientation(GLMotif::RowColumn::HORIZONTAL);
+	showBox->setPacking(GLMotif::RowColumn::PACK_TIGHT);
+	showBox->setNumMinorWidgets(1);
+	
+	GLMotif::ToggleButton* showFacadeToggle=new GLMotif::ToggleButton("ShowFacadeToggle",showBox,"Show Facade");
+	showFacadeToggle->setBorderWidth(0.0f);
+	showFacadeToggle->setBorderType(GLMotif::Widget::PLAIN);
+	showFacadeToggle->setToggle(enabled);
+	showFacadeToggle->getValueChangedCallbacks().add(this,&KinectViewer::KinectStreamer::showFacadeCallback);
+	
+	GLMotif::Button* showFromCameraButton=new GLMotif::Button("ShowFromCameraButton",showBox,"Show From Camera");
+	showFromCameraButton->getSelectCallbacks().add(this,&KinectViewer::KinectStreamer::showFromCameraCallback);
+	
+	showBox->manageChild();
+	
+	showMargin->manageChild();
+	
+	if(camera!=0)
+		{
+		GLMotif::Margin* backgroundMargin=new GLMotif::Margin("BackgroundMargin",streamerSettings,false);
+		backgroundMargin->setAlignment(GLMotif::Alignment::LEFT);
+		
+		GLMotif::RowColumn* backgroundBox=new GLMotif::RowColumn("BackgroundBox",backgroundMargin,false);
+		backgroundBox->setOrientation(GLMotif::RowColumn::HORIZONTAL);
+		backgroundBox->setPacking(GLMotif::RowColumn::PACK_TIGHT);
+		backgroundBox->setNumMinorWidgets(1);
+		
+		GLMotif::ToggleButton* removeBackgroundToggle=new GLMotif::ToggleButton("RemoveBackgroundToggle",backgroundBox,"Remove Background");
+		removeBackgroundToggle->setBorderWidth(0.0f);
+		removeBackgroundToggle->setBorderType(GLMotif::Widget::PLAIN);
+		removeBackgroundToggle->setToggle(camera->getRemoveBackground());
+		removeBackgroundToggle->getValueChangedCallbacks().add(this,&KinectViewer::KinectStreamer::removeBackgroundCallback);
+		
+		GLMotif::Button* captureBackgroundButton=new GLMotif::Button("CaptureBackgroundButton",backgroundBox,"Capture Background");
+		captureBackgroundButton->getSelectCallbacks().add(this,&KinectViewer::KinectStreamer::captureBackgroundCallback);
+		
+		GLMotif::Button* saveBackgroundButton=new GLMotif::Button("SaveBackgroundButton",backgroundBox,"Save Background");
+		saveBackgroundButton->getSelectCallbacks().add(this,&KinectViewer::KinectStreamer::saveBackgroundCallback);
+		
+		backgroundBox->manageChild();
+		
+		backgroundMargin->manageChild();
+		
+		GLMotif::RowColumn* sliderBox=new GLMotif::RowColumn("SliderBox",streamerSettings,false);
+		sliderBox->setOrientation(GLMotif::RowColumn::VERTICAL);
+		sliderBox->setPacking(GLMotif::RowColumn::PACK_TIGHT);
+		sliderBox->setNumMinorWidgets(2);
+		
+		new GLMotif::Label("BackgroundMaxDepthLabel",sliderBox,"Background Depth Limit");
+		
+		GLMotif::TextFieldSlider* backgroundMaxDepthSlider=new GLMotif::TextFieldSlider("BackgroundMaxDepthSlider",sliderBox,6,ss.fontHeight*10.0f);
+		backgroundMaxDepthSlider->setSliderMapping(GLMotif::TextFieldSlider::LINEAR);
+		backgroundMaxDepthSlider->setValueType(GLMotif::TextFieldSlider::UINT);
+		backgroundMaxDepthSlider->setValueRange(0,1100,1);
+		backgroundMaxDepthSlider->setValue(maxDepth);
+		backgroundMaxDepthSlider->getValueChangedCallbacks().add(this,&KinectViewer::KinectStreamer::backgroundMaxDepthCallback);
+		
+		new GLMotif::Label("BackgroundRemovalFuzzLabel",sliderBox,"Background Removal Fuzz");
+		
+		GLMotif::TextFieldSlider* backgroundRemovalFuzzSlider=new GLMotif::TextFieldSlider("BackgroundRemovalFuzzSlider",sliderBox,6,ss.fontHeight*10.0f);
+		backgroundRemovalFuzzSlider->setSliderMapping(GLMotif::TextFieldSlider::LINEAR);
+		backgroundRemovalFuzzSlider->setValueType(GLMotif::TextFieldSlider::INT);
+		backgroundRemovalFuzzSlider->setValueRange(-100,100,1);
+		backgroundRemovalFuzzSlider->setValue(camera->getBackgroundRemovalFuzz());
+		backgroundRemovalFuzzSlider->getValueChangedCallbacks().add(this,&KinectViewer::KinectStreamer::backgroundRemovalFuzzCallback);
+		
+		sliderBox->manageChild();
+		}
+	
+	streamerSettings->manageChild();
+	
+	return streamerDialog;
+	}
+
+void KinectViewer::KinectStreamer::resetFrameTimer(void)
+	{
+	Kinect::Camera* camera=dynamic_cast<Kinect::Camera*>(source);
+	if(camera!=0)
+		camera->resetFrameTimer();
+	}
+
+void KinectViewer::KinectStreamer::startStreaming(void)
+	{
+	/* Start streaming: */
+	source->startStreaming(Misc::createFunctionCall(this,&KinectViewer::KinectStreamer::colorStreamingCallback),Misc::createFunctionCall(this,&KinectViewer::KinectStreamer::depthStreamingCallback));
 	}
 
 void KinectViewer::KinectStreamer::frame(void)
@@ -235,15 +389,8 @@ void KinectViewer::KinectStreamer::display(GLContextData& contextData) const
 	{
 	if(enabled)
 		{
-		/* Transform the projector into model space: */
-		glPushMatrix();
-		glMultMatrix(projectorTransform);
-		
-		/* Draw the current depth image: */
+		/* Draw the current 3D video frame: */
 		projector->draw(contextData);
-		
-		/* Return to navigational coordinates: */
-		glPopMatrix();
 		}
 	}
 
@@ -251,43 +398,43 @@ void KinectViewer::KinectStreamer::display(GLContextData& contextData) const
 Methods of class KinectViewer:
 *****************************/
 
-void KinectViewer::enableStreamerCallback(Misc::CallbackData* cbData,const size_t& streamerIndex)
+void KinectViewer::showStreamerDialogCallback(Misc::CallbackData* cbData,const size_t& streamerIndex)
 	{
 	GLMotif::ToggleButton::ValueChangedCallbackData* myCbData=static_cast<GLMotif::ToggleButton::ValueChangedCallbackData*>(cbData);
 	
-	/* Set the streamer's enable flag: */
-	streamers[streamerIndex]->enabled=myCbData->set;
+	if(myCbData->set)
+		{
+		/* If the dialog doesn't already exist, create it: */
+		if(streamerDialogs[streamerIndex]==0)
+			{
+			streamerDialogs[streamerIndex]=streamers[streamerIndex]->createStreamerDialog();
+			streamerDialogs[streamerIndex]->getCloseCallbacks().add(this,&KinectViewer::streamerDialogCloseCallback);
+			}
+		
+		/* Pop it up: */
+		Vrui::popupPrimaryWidget(streamerDialogs[streamerIndex]);
+		}
+	else
+		{
+		/* If the dialog exists, pop it down and destroy it: */
+		if(streamerDialogs[streamerIndex]!=0)
+			{
+			Vrui::getWidgetManager()->deleteWidget(streamerDialogs[streamerIndex]);
+			streamerDialogs[streamerIndex]=0;
+			}
+		}
 	}
 
-void KinectViewer::viewCameraCallback(Misc::CallbackData* cbData,const size_t& streamerIndex)
+void KinectViewer::streamerDialogCloseCallback(GLMotif::PopupWindow::CloseCallbackData* cbData)
 	{
-	/* Move the camera position to the viewer's head position: */
-	Vrui::NavTransform nav=Vrui::NavTransform::translateFromOriginTo(Vrui::getMainViewer()->getHeadPosition());
-	
-	/* Rotate the frame to align the projection direction with the viewer's viewing direction: */
-	nav*=Vrui::NavTransform::rotate(Vrui::Rotation::rotateX(Math::rad(Vrui::Scalar(90))));
-	
-	/* Account for the projector's model space transformation: */
-	nav*=Geometry::invert(streamers[streamerIndex]->projectorTransform);
-	
-	Vrui::setNavigationTransformation(nav);
-	}
-
-void KinectViewer::captureBackgroundCallback(Misc::CallbackData* cbData,const size_t& streamerIndex)
-	{
-	/* Capture five second worth of background frames: */
-	streamers[streamerIndex]->camera->captureBackground(150);
-	}
-
-void KinectViewer::removeBackgroundCallback(Misc::CallbackData* cbData,const size_t& streamerIndex)
-	{
-	GLMotif::ToggleButton::ValueChangedCallbackData* myCbData=static_cast<GLMotif::ToggleButton::ValueChangedCallbackData*>(cbData);
-	
-	/* Set the background removal flag: */
-	streamers[streamerIndex]->camera->setRemoveBackground(myCbData->set);
-	
-	/* Set the toggle button's state to the actual new flag value: */
-	myCbData->toggle->setToggle(streamers[streamerIndex]->camera->getRemoveBackground());
+	/* Find the dialog in the list: */
+	for(std::vector<GLMotif::PopupWindow*>::iterator sdIt=streamerDialogs.begin();sdIt!=streamerDialogs.end();++sdIt)
+		if(*sdIt==cbData->popupWindow)
+			{
+			/* Close the dialog: */
+			Vrui::getWidgetManager()->deleteWidget(*sdIt);
+			*sdIt=0;
+			}
 	}
 
 GLMotif::PopupMenu* KinectViewer::createMainMenu(void)
@@ -299,40 +446,12 @@ GLMotif::PopupMenu* KinectViewer::createMainMenu(void)
 	/* Create the main menu itself: */
 	GLMotif::Menu* mainMenu=new GLMotif::Menu("MainMenu",mainMenuPopup,false);
 	
-	/* Create a submenu for each Kinect streamer: */
+	/* Create a toggle button for each Kinect streamer's control dialog: */
 	for(size_t i=0;i<streamers.size();++i)
 		{
-		/* Create the submenu's top-level shell: */
-		GLMotif::Popup* streamerPopup=new GLMotif::Popup("StreamerPopup",Vrui::getWidgetManager());
-		GLMotif::SubMenu* streamerMenu=new GLMotif::SubMenu("StreamerMenu",streamerPopup,false);
-		
-		/* Create a toggle button to enable / disable the streamer: */
-		GLMotif::ToggleButton* enableToggle=new GLMotif::ToggleButton("EnableToggle",streamerMenu,"Enabled");
-		enableToggle->setToggle(streamers[i]->enabled);
-		enableToggle->getValueChangedCallbacks().add(this,&KinectViewer::enableStreamerCallback,i);
-		
-		/* Create a button to view from camera's point of view: */
-		GLMotif::Button* viewCameraButton=new GLMotif::Button("ViewCameraButton",streamerMenu,"View from Camera");
-		viewCameraButton->getSelectCallbacks().add(this,&KinectViewer::viewCameraCallback,i);
-		
-		/* Create a button to capture background frames: */
-		GLMotif::Button* captureBackgroundButton=new GLMotif::Button("CaptureBackgroundButton",streamerMenu,"Capture Background");
-		captureBackgroundButton->getSelectCallbacks().add(this,&KinectViewer::captureBackgroundCallback,i);
-		
-		/* Create a toggle button to enable/disable background removal: */
-		GLMotif::ToggleButton* removeBackgroundToggle=new GLMotif::ToggleButton("RemoveBackgroundToggle",streamerMenu,"Remove Background");
-		removeBackgroundToggle->setToggle(streamers[i]->camera->getRemoveBackground());
-		removeBackgroundToggle->getValueChangedCallbacks().add(this,&KinectViewer::removeBackgroundCallback,i);
-		
-		streamerMenu->manageChild();
-		
-		/* Create a cascade button to show the Kinect streamer's submenu: */
-		char streamerName[40];
-		snprintf(streamerName,sizeof(streamerName),"StreamerCascade%u",(unsigned int)i);
-		char streamerLabel[40];
-		snprintf(streamerLabel,sizeof(streamerLabel),"Streamer %u",(unsigned int)(i+1));
-		GLMotif::CascadeButton* streamerCascade=new GLMotif::CascadeButton(streamerName,mainMenu,streamerLabel);
-		streamerCascade->setPopup(streamerPopup);
+		GLMotif::ToggleButton* showStreamerDialogToggle=new GLMotif::ToggleButton("ShowStreamerDialogToggle",mainMenu,"Show Streamer Dialog");
+		showStreamerDialogToggle->setToggle(false);
+		showStreamerDialogToggle->getValueChangedCallbacks().add(this,&KinectViewer::showStreamerDialogCallback,i);
 		}
 	
 	/* Finish building the main menu: */
@@ -343,43 +462,93 @@ GLMotif::PopupMenu* KinectViewer::createMainMenu(void)
 
 KinectViewer::KinectViewer(int& argc,char**& argv,char**& appDefaults)
 	:Vrui::Application(argc,argv,appDefaults),
-	 cameraDevice(Vrui::findInputDevice("Camera")),
 	 mainMenu(0)
 	{
 	/* Enable background USB event handling: */
 	usbContext.startEventHandling();
 	
-	/* Connect to given Kinect camera device on the host: */
-	#if PLAYBACK
-	streamers.push_back(new KinectStreamer("/work/okreylos/3DVideo/Kinect/DepthFrames.dat","/work/okreylos/3DVideo/Kinect/ColorFrames.dat"));
-	#else
+	/* Add a streamer for each camera index or frame file name prefix passed on the command line: */
+	bool highres=false;
+	bool compressDepth=false;
+	for(int i=1;i<argc;++i)
+		{
+		if(argv[i][0]=='-')
+			{
+			if(strcasecmp(argv[i]+1,"high")==0)
+				highres=true;
+			else if(strcasecmp(argv[i]+1,"low")==0)
+				highres=false;
+			else if(strcasecmp(argv[i]+1,"compress")==0)
+				compressDepth=true;
+			else if(strcasecmp(argv[i]+1,"nocompress")==0)
+				compressDepth=false;
+			else if(strcasecmp(argv[i]+1,"c")==0)
+				{
+				++i;
+				
+				/* Open the camera of the given index: */
+				int cameraIndex=atoi(argv[i]);
+				Kinect::Camera* camera=new Kinect::Camera(usbContext,cameraIndex);
+				
+				/* Set the camera's frame size and compression flag: */
+				camera->setFrameSize(Kinect::FrameSource::COLOR,highres?Kinect::Camera::FS_1280_1024:Kinect::Camera::FS_640_480);
+				camera->setCompressDepthFrames(compressDepth);
+				
+				/* Add a new streamer for the camera: */
+				streamers.push_back(new KinectStreamer(camera));
+				}
+			else if(strcasecmp(argv[i]+1,"f")==0)
+				{
+				++i;
+				
+				/* Open a frame source for the color and depth files of the given name prefix: */
+				std::string colorFileName=argv[i];
+				colorFileName.append(".color");
+				std::string depthFileName=argv[i];
+				depthFileName.append(".depth");
+				Kinect::FileFrameSource* fileSource=new Kinect::FileFrameSource(Vrui::openFile(colorFileName.c_str()),Vrui::openFile(depthFileName.c_str()));
+				
+				/* Add a new streamer for the file source: */
+				streamers.push_back(new KinectStreamer(fileSource));
+				}
+			else if(strcasecmp(argv[i]+1,"p")==0)
+				{
+				i+=2;
+				
+				/* Open a multiplexed frame source for the given server host name and port number: */
+				Kinect::MultiplexedFrameSource* source=Kinect::MultiplexedFrameSource::create(Cluster::openTCPPipe(Vrui::getClusterMultiplexer(),argv[i-1],atoi(argv[i])));
+				
+				/* Add a new streamer for each component stream in the multiplexer: */
+				for(unsigned int i=0;i<source->getNumStreams();++i)
+					streamers.push_back(new KinectStreamer(source->getStream(i)));
+				}
+			}
+		}
 	
-	/* Read the index of the Kinect camera to which to connect: */
-	int cameraIndex=0;
-	if(argc>=2)
-		cameraIndex=atoi(argv[1]);
+	/* Initialize the streamer dialog list: */
+	for(std::vector<KinectStreamer*>::iterator sIt=streamers.begin();sIt!=streamers.end();++sIt)
+		streamerDialogs.push_back(0);
 	
-	/* Add a streamer for the selected camera: */
-	streamers.push_back(new KinectStreamer(usbContext,cameraIndex));
+	/* Reset all streamers' frame timers: */
+	for(std::vector<KinectStreamer*>::iterator sIt=streamers.begin();sIt!=streamers.end();++sIt)
+		(*sIt)->resetFrameTimer();
 	
-	/* Save frames from the first Kinect streamer: */
-	// streamers[0]->frameSaver=new KinectFrameSaver("/work/okreylos/3DVideo/Kinect/DepthFrames2.dat","/work/okreylos/3DVideo/Kinect/ColorFrames2.dat");
-	
-	/* Add a streamer for another Kinect camera: */
-	// streamers.push_back(new KinectStreamer(usbContext,1));
-	#endif
+	/* Start streaming on all streamers: */
+	for(std::vector<KinectStreamer*>::iterator sIt=streamers.begin();sIt!=streamers.end();++sIt)
+		(*sIt)->startStreaming();
 	
 	/* Create the main menu: */
 	mainMenu=createMainMenu();
 	Vrui::setMainMenu(mainMenu);
-	
-	/* Initialize navigation transformation: */
-	viewCameraCallback(0,0);
 	}
 
 KinectViewer::~KinectViewer(void)
 	{
 	delete mainMenu;
+	
+	/* Delete all streamer dialogs: */
+	for(std::vector<GLMotif::PopupWindow*>::iterator sdIt=streamerDialogs.begin();sdIt!=streamerDialogs.end();++sdIt)
+		delete *sdIt;
 	
 	/* Delete all streamers: */
 	for(std::vector<KinectStreamer*>::iterator sIt=streamers.begin();sIt!=streamers.end();++sIt)
@@ -400,6 +569,7 @@ void KinectViewer::frame(void)
 
 void KinectViewer::display(GLContextData& contextData) const
 	{
+	#if 0
 	if(cameraDevice!=0)
 		{
 		/* Move the camera projector to the tracking device's position and orientation in physical space: */
@@ -420,16 +590,19 @@ void KinectViewer::display(GLContextData& contextData) const
 		glVertex3f(0.0f,0.0f,100.0f);
 		glEnd();
 		}
+	#endif
 	
 	/* Process all streamers: */
 	for(std::vector<KinectStreamer*>::const_iterator sIt=streamers.begin();sIt!=streamers.end();++sIt)
 		(*sIt)->display(contextData);
 	
+	#if 0
 	if(cameraDevice!=0)
 		{
 		/* Return to navigational space: */
 		glPopMatrix();
 		}
+	#endif
 	
 	#if 0
 	/* Draw the animated model: */

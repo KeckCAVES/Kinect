@@ -1,7 +1,7 @@
 /***********************************************************************
 AlignPoints - Utility to align two sets of measurements of the same set
 of points using a variety of transformation types.
-Copyright (c) 2009-2010 Oliver Kreylos
+Copyright (c) 2009-2011 Oliver Kreylos
 
 This file is part of the Kinect 3D Video Capture Project (Kinect).
 
@@ -26,15 +26,17 @@ Software Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA
 #include <iostream>
 #include <vector>
 #include <Misc/File.h>
-#include <Misc/FileCharacterSource.h>
-#include <Misc/ValueSource.h>
+#include <IO/ValueSource.h>
 #include <Math/Constants.h>
 #define GEOMETRY_NONSTANDARD_TEMPLATES
 #include <Geometry/Point.h>
 #include <Geometry/AffineCombiner.h>
+#include <Geometry/Box.h>
 #include <Geometry/GeometryValueCoders.h>
 #include <GL/gl.h>
 #include <GL/GLGeometryWrappers.h>
+#include <Vrui/Vrui.h>
+#include <Vrui/OpenFile.h>
 #include <Vrui/Application.h>
 
 #include "ONTransformFitter.h"
@@ -43,7 +45,7 @@ Software Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA
 
 template <class TransformFitterParam>
 inline
-void
+typename TransformFitterParam::Transform
 findTransform(std::vector<typename TransformFitterParam::Point>& points0,
               std::vector<typename TransformFitterParam::Point>& points1)
 	{
@@ -87,11 +89,12 @@ findTransform(std::vector<typename TransformFitterParam::Point>& points0,
 	
 	/* Print the result: */
 	std::cout<<"Best distance: "<<bestDistance<<std::endl;
-	std::cout<<"Best transform: "<<Misc::ValueCoder<typename TransformFitterParam::Transform>::encode(bestTransform)<<std::endl;
 	
 	/* Transform the first point set: */
 	for(typename std::vector<typename TransformFitterParam::Point>::iterator pIt=points0.begin();pIt!=points0.end();++pIt)
 		*pIt=bestTransform.transform(*pIt);
+	
+	return bestTransform;
 	}
 
 template <class PointParam,class TransformParam>
@@ -112,6 +115,7 @@ class AlignPoints:public Vrui::Application
 	private:
 	typedef double Scalar;
 	typedef Geometry::Point<Scalar,3> Point;
+	typedef Geometry::Box<Scalar,3> Box;
 	typedef Geometry::OrthonormalTransformation<Scalar,3> ONTransform;
 	typedef Geometry::OrthogonalTransformation<Scalar,3> OGTransform;
 	typedef Geometry::ProjectiveTransformation<Scalar,3> PTransform;
@@ -134,6 +138,7 @@ AlignPoints::AlignPoints(int& argc,char**& argv,char**& appDefaults)
 	const char* fileName[2]={0,0};
 	int transformMode=1;
 	Scalar preScale=Scalar(1);
+	OGTransform preTransform=OGTransform::identity;
 	const char* outputFileName=0;
 	for(int i=1;i<argc;++i)
 		{
@@ -147,6 +152,11 @@ AlignPoints::AlignPoints(int& argc,char**& argv,char**& appDefaults)
 				{
 				++i;
 				preScale=Scalar(atof(argv[i]));
+				}
+			else if(strcasecmp(argv[i]+1,"PRE")==0)
+				{
+				++i;
+				preTransform=Misc::ValueCoder<OGTransform>::decode(argv[i],argv[i]+strlen(argv[i]),0);
 				}
 			else if(strcasecmp(argv[i]+1,"O")==0)
 				{
@@ -164,8 +174,7 @@ AlignPoints::AlignPoints(int& argc,char**& argv,char**& appDefaults)
 	for(int pointSet=0;pointSet<2;++pointSet)
 		{
 		/* Open the input file: */
-		Misc::FileCharacterSource file(fileName[pointSet]);
-		Misc::ValueSource reader(file);
+		IO::ValueSource reader(Vrui::openFile(fileName[pointSet]));
 		reader.setWhitespace(',',true);
 		reader.setPunctuation('\n',true);
 		reader.skipWs();
@@ -193,16 +202,26 @@ AlignPoints::AlignPoints(int& argc,char**& argv,char**& appDefaults)
 		}
 	
 	/* Align the point sets: */
+	OGTransform finalTransform=preTransform;
 	switch(transformMode)
 		{
 		case 1: // Orthonormal transformation
-			findTransform<ONTransformFitter>(points[0],points[1]);
+			{
+			ONTransform best=findTransform<ONTransformFitter>(points[0],points[1]);
+			finalTransform*=best;
 			break;
+			}
 		
 		case 2: // Orthogonal transformation
-			findTransform<OGTransformFitter>(points[0],points[1]);
+			{
+			OGTransform best=findTransform<OGTransformFitter>(points[0],points[1]);
+			finalTransform*=best;
 			break;
+			}
 		}
+	
+	/* Write the final transformation: */
+	std::cout<<"Best transformation: "<<Misc::ValueCoder<OGTransform>::encode(finalTransform)<<std::endl;
 	
 	if(outputFileName!=0)
 		{
@@ -211,6 +230,16 @@ AlignPoints::AlignPoints(int& argc,char**& argv,char**& appDefaults)
 		for(std::vector<Point>::const_iterator pIt=points[0].begin();pIt!=points[0].end();++pIt)
 			fprintf(outputFile.getFilePtr(),"%10.6f, %10.6f, %10.6f\n",double((*pIt)[0]),double((*pIt)[1]),double((*pIt)[2]));
 		}
+	
+	/* Calculate the two point sets' joint bounding box: */
+	Box bbox=Box::empty;
+	for(int i=0;i<2;++i)
+		for(std::vector<Point>::const_iterator pIt=points[i].begin();pIt!=points[i].end();++pIt)
+			bbox.addPoint(*pIt);
+	
+	Point center=Geometry::mid(bbox.min,bbox.max);
+	Scalar size=Geometry::dist(bbox.min,bbox.max);
+	Vrui::setNavigationTransformation(Vrui::Point(center),Vrui::Scalar(size));
 	}
 
 void AlignPoints::display(GLContextData& contextData) const

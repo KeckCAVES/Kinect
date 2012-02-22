@@ -1,0 +1,313 @@
+/***********************************************************************
+MultiplexedFrameSource - Class to stream several pairs of color and
+depth frames from a single source file or pipe.
+Copyright (c) 2010-2011 Oliver Kreylos
+
+This file is part of the Kinect 3D Video Capture Project (Kinect).
+
+The Kinect 3D Video Capture Project is free software; you can
+redistribute it and/or modify it under the terms of the GNU General
+Public License as published by the Free Software Foundation; either
+version 2 of the License, or (at your option) any later version.
+
+The Kinect 3D Video Capture Project is distributed in the hope that it
+will be useful, but WITHOUT ANY WARRANTY; without even the implied
+warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See
+the GNU General Public License for more details.
+
+You should have received a copy of the GNU General Public License along
+with the Kinect 3D Video Capture Project; if not, write to the Free
+Software Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA
+02111-1307 USA
+**********************************************************************/
+
+#include <Kinect/MultiplexedFrameSource.h>
+
+#include <Misc/ThrowStdErr.h>
+#include <Misc/FunctionCalls.h>
+#include <Geometry/GeometryMarshallers.h>
+
+namespace Kinect {
+
+/***********************************************
+Methods of class MultiplexedFrameSource::Stream:
+***********************************************/
+
+MultiplexedFrameSource::Stream::Stream(MultiplexedFrameSource* sOwner,unsigned int sIndex,IO::File& source)
+	:owner(sOwner),index(sIndex),
+	 colorStreamingCallback(0),
+	 depthStreamingCallback(0)
+	{
+	/* Register this source with the stream multiplexer: */
+	{
+	Threads::Mutex::Lock streamLock(owner->streamMutex);
+	++owner->numStreamsAlive;
+	}
+	
+	/* Read the intrinsic and extrinsic camera parameters from the source: */
+	ips.colorProjection=Misc::Marshaller<IntrinsicParameters::PTransform>::read(source);
+	ips.depthProjection=Misc::Marshaller<IntrinsicParameters::PTransform>::read(source);
+	eps=Misc::Marshaller<ExtrinsicParameters>::read(source);
+	}
+
+MultiplexedFrameSource::Stream::~Stream(void)
+	{
+	{
+	Threads::Spinlock::Lock streamingLock(streamingMutex);
+	streaming=false;
+	
+	/* Delete any old streaming callbacks: */
+	delete colorStreamingCallback;
+	delete depthStreamingCallback;
+	}
+	
+	/* Remove this stream from the owner's stream array: */
+	bool lastOneOut;
+	{
+	Threads::Mutex::Lock streamLock(owner->streamMutex);
+	owner->streams[index]=0;
+	--owner->numStreamsAlive;
+	lastOneOut=owner->numStreamsAlive==0;
+	}
+	
+	/* Destroy theowner if this was the last stream to die: */
+	if(lastOneOut)
+		delete owner;
+	}
+
+FrameSource::IntrinsicParameters MultiplexedFrameSource::Stream::getIntrinsicParameters(void) const
+	{
+	return ips;
+	}
+
+FrameSource::ExtrinsicParameters MultiplexedFrameSource::Stream::getExtrinsicParameters(void) const
+	{
+	return eps;
+	}
+
+const unsigned int* MultiplexedFrameSource::Stream::getActualFrameSize(int sensor) const
+	{
+	switch(sensor)
+		{
+		case COLOR:
+			return owner->colorFrameReaders[index]->getSize();
+			break;
+		
+		case DEPTH:
+			return owner->depthFrameReaders[index]->getSize();
+			break;
+		
+		default:
+			return 0;
+		}
+	}
+
+void MultiplexedFrameSource::Stream::startStreaming(FrameSource::StreamingCallback* newColorStreamingCallback,FrameSource::StreamingCallback* newDepthStreamingCallback)
+	{
+	Threads::Spinlock::Lock streamingLock(streamingMutex);
+	streaming=true;
+	
+	/* Delete any old streaming callbacks: */
+	delete colorStreamingCallback;
+	delete depthStreamingCallback;
+	
+	/* Install the new streaming callbacks: */
+	colorStreamingCallback=newColorStreamingCallback;
+	depthStreamingCallback=newDepthStreamingCallback;
+	}
+
+void MultiplexedFrameSource::Stream::stopStreaming(void)
+	{
+	Threads::Spinlock::Lock streamingLock(streamingMutex);
+	streaming=false;
+	
+	/* Delete any old streaming callbacks: */
+	delete colorStreamingCallback;
+	colorStreamingCallback=0;
+	delete depthStreamingCallback;
+	depthStreamingCallback=0;
+	}
+
+/***************************************
+Methods of class MultiplexedFrameSource:
+***************************************/
+
+void* MultiplexedFrameSource::receivingThreadMethod(void)
+	{
+	Threads::Thread::setCancelState(Threads::Thread::CANCEL_ENABLE);
+	// Threads::Thread::setCancelType(Threads::Thread::CANCEL_ASYNCHRONOUS);
+	
+	/* Initialize the demultiplexer state: */
+	unsigned int currentMetaFrameIndex=0; // Index of the meta frame currently being received from the server
+	unsigned int numMissingColorFrames=numStreams; // Number of color frames still missing from the current meta frame
+	unsigned int numMissingDepthFrames=numStreams; // Number of depth frames still missing from the current meta frame
+	
+	try
+		{
+		while(keepReceiving)
+			{
+			/* Receive the next frame's identifier: */
+			unsigned int metaFrameIndex=pipe->read<unsigned int>();
+			unsigned int frameId=pipe->read<unsigned int>();
+			
+			/* Check for the beginning of a new meta frame: */
+			if(currentMetaFrameIndex!=metaFrameIndex)
+				{
+				/* If the previous metaframe was complete, stream all current frames to their respective listeners: */
+				if(numMissingColorFrames==0&&numMissingDepthFrames==0)
+					{
+					Threads::Mutex::Lock streamLock(streamMutex);
+					
+					for(unsigned int i=0;i<numStreams;++i)
+						{
+						if(streams[i]!=0)
+							{
+							Threads::Spinlock::Lock streamingLock(streams[i]->streamingMutex);
+							if(streams[i]->streaming)
+								{
+								/* Push the streamer's frames: */
+								(*streams[i]->colorStreamingCallback)(frames[i*2+0]);
+								(*streams[i]->depthStreamingCallback)(frames[i*2+1]);
+								}
+							}
+						}
+					}
+				
+				/* Start the next metaframe: */
+				currentMetaFrameIndex=metaFrameIndex;
+				numMissingColorFrames=numStreams;
+				numMissingDepthFrames=numStreams;
+				}
+			
+			/* Read the new frame: */
+			unsigned int streamIndex=frameId>>1;
+			if(frameId&0x1U)
+				{
+				/* Receive a depth frame: */
+				frames[frameId]=depthFrameReaders[streamIndex]->readNextFrame();
+				--numMissingDepthFrames;
+				}
+			else
+				{
+				/* Receive a color frame: */
+				frames[frameId]=colorFrameReaders[streamIndex]->readNextFrame();
+				--numMissingColorFrames;
+				}
+			}
+		}
+	catch(std::runtime_error err)
+		{
+		/* Ignore the error and terminate the thread */
+		}
+	
+	return 0;
+	}
+
+MultiplexedFrameSource::MultiplexedFrameSource(Comm::PipePtr sPipe)
+	:pipe(sPipe),
+	 numStreams(0),
+	 colorFrameReaders(0),
+	 depthFrameReaders(0),
+	 frames(0),
+	 numStreamsAlive(0),
+	 streams(0)
+	{
+	/* Determine server's endianness: */
+	unsigned int endiannessFlag=pipe->read<unsigned int>();
+	if(endiannessFlag==0x78563412U)
+		pipe->setSwapOnRead(true);
+	else if(endiannessFlag!=0x12345678U)
+		Misc::throwStdErr("MultiplexedFrameSource::MultiplexedFrameSource: Server has unrecognized endianness");
+	
+	/* Initialize all streams: */
+	numStreams=pipe->read<unsigned int>();
+	colorFrameReaders=new ColorFrameReader*[numStreams];
+	depthFrameReaders=new DepthFrameReader*[numStreams];
+	streams=new Stream*[numStreams];
+	for(unsigned int i=0;i<numStreams;++i)
+		{
+		colorFrameReaders[i]=0;
+		depthFrameReaders[i]=0;
+		streams[i]=0;
+		}
+	bool allStreamsOk=true;
+	for(unsigned int i=0;i<numStreams;++i)
+		{
+		try
+			{
+			colorFrameReaders[i]=new ColorFrameReader(*pipe);
+			depthFrameReaders[i]=new DepthFrameReader(*pipe);
+			streams[i]=new Stream(this,i,*pipe);
+			}
+		catch(std::runtime_error err)
+			{
+			/* Signal an error to clean up later: */
+			allStreamsOk=false;
+			}
+		}
+	
+	/* Check if all streams were initialized correctly: */
+	if(!allStreamsOk)
+		{
+		/* Close all streams that were initialized OK: */
+		for(unsigned int i=0;i<numStreams;++i)
+			{
+			delete colorFrameReaders[i];
+			delete depthFrameReaders[i];
+			delete streams[i];
+			}
+		
+		/* Clean up and signal an error: */
+		delete[] colorFrameReaders;
+		delete[] depthFrameReaders;
+		delete[] streams;
+		Misc::throwStdErr("MultiplexedFrameSource::MultiplexedFrameSource: Error while initializing component streams");
+		}
+	
+	/* Allocate the frame buffer array: */
+	frames=new FrameBuffer[numStreams*2];
+	
+	/* Start the demultiplexer thread: */
+	keepReceiving=true;
+	receivingThread.start(this,&MultiplexedFrameSource::receivingThreadMethod);
+	}
+
+MultiplexedFrameSource::~MultiplexedFrameSource(void)
+	{
+	/* Signal the receiving thread to shut down: */
+	keepReceiving=false;
+	receivingThread.join();
+	
+	/* Delete all streams: */
+	for(unsigned int i=0;i<numStreams;++i)
+		{
+		delete colorFrameReaders[i];
+		delete depthFrameReaders[i];
+		delete streams[i]; // None of these can actually be !=0, but whatever
+		}
+	delete[] colorFrameReaders;
+	delete[] depthFrameReaders;
+	delete[] streams;
+	
+	/* Delete the frame buffers: */
+	delete[] frames;
+	
+	/* Say goodbye to the server: */
+	try
+		{
+		/* Send the disconnect request and shut down the server pipe: */
+		pipe->write<unsigned int>(0);
+		pipe->flush();
+		}
+	catch(...)
+		{
+		/* Ignore the error; we were just being polite anyway */
+		}
+	}
+
+MultiplexedFrameSource* MultiplexedFrameSource::create(Comm::PipePtr sPipe)
+	{
+	return new MultiplexedFrameSource(sPipe);
+	}
+
+}
