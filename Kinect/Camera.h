@@ -1,6 +1,6 @@
 /***********************************************************************
-KinectCamera - Wrapper class to represent the color and depth camera
-interface aspects of the Kinect sensor.
+Camera - Wrapper class to represent the color and depth camera interface
+aspects of the Kinect sensor.
 Copyright (c) 2010-2011 Oliver Kreylos
 
 This file is part of the Kinect 3D Video Capture Project (Kinect).
@@ -21,17 +21,21 @@ Software Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA
 02111-1307 USA
 ***********************************************************************/
 
-#ifndef KINECTCAMERA_INCLUDED
-#define KINECTCAMERA_INCLUDED
+#ifndef KINECT_CAMERA_INCLUDED
+#define KINECT_CAMERA_INCLUDED
+
+/* Set to 1 for frame stream analysis: */
+#define KINECT_CAMERA_DUMP_HEADERS 0
 
 #include <string>
 #include <Misc/Timer.h>
 #include <Threads/MutexCond.h>
 #include <Threads/Thread.h>
-#include <Kinect/USBDevice.h>
-
-// DEBUGGING
-// #include <Misc/File.h>
+#include <USB/Device.h>
+#if KINECT_CAMERA_DUMP_HEADERS
+#include <IO/File.h>
+#endif
+#include <Kinect/FrameSource.h>
 
 /* Forward declarations: */
 struct libusb_device;
@@ -40,32 +44,30 @@ namespace Misc {
 template <class ParameterParam>
 class FunctionCall;
 }
+namespace USB {
+class Context;
+}
 namespace IO {
 class File;
 }
-class USBContext;
-class FrameBuffer;
 
-class KinectCamera:public USBDevice
+namespace Kinect {
+
+class Camera:public FrameSource
 	{
 	/* Embedded classes: */
 	public:
-	enum Camera // Enumerated type to select one of the Kinect's built-in cameras
-		{
-		COLOR=0,DEPTH
-		};
 	enum FrameSize // Enumerated type to select color and depth frame sizes
 		{
 		FS_640_480=0, // 640x480 frames
-		FS_1280_1024 // 1280x1024 frames
+		FS_1280_1024 // 1280x1024 frames, only valid for color camera
 		};
 	enum FrameRate // Enumerated type to select frame rates for the color and depth cameras
 		{
 		FR_15_HZ=0, // 15 Hz
-		FR_30_HZ // 30 Hz
+		FR_30_HZ // 30 Hz, only possible for 640x480 pixel frames
 		};
-	typedef Misc::FunctionCall<const FrameBuffer&> StreamingCallback; // Function call type for streaming color or depth image capture callback
-	typedef Misc::FunctionCall<KinectCamera&> BackgroundCaptureCallback; // Function call type for completion of background capture callback
+	typedef Misc::FunctionCall<Camera&> BackgroundCaptureCallback; // Function call type for completion of background capture callback
 	
 	private:
 	struct StreamingState // Structure containing necessary state to stream color or depth frames from the respective camera
@@ -99,8 +101,9 @@ class KinectCamera:public USBDevice
 		
 		StreamingCallback* streamingCallback; // Callback to be called when a new frame has been decoded
 		
-		// DEBUGGING
-		//Misc::File* headerFile;
+		#if KINECT_CAMERA_DUMP_HEADERS
+		IO::FilePtr headerFile;
+		#endif
 		
 		/* Constructors and destructors: */
 		public:
@@ -112,9 +115,9 @@ class KinectCamera:public USBDevice
 		};
 	
 	/* Elements: */
-	public:
-	static const unsigned short invalidDepth=0x07ffU; // The depth value indicating an invalid (or removed) pixel
 	private:
+	USB::Device device; // The USB device representing this Kinect camera
+	std::string serialNumber; // This Kinect camera's serial number
 	FrameSize frameSizes[2]; // Selected frame sizes for the color and depth cameras
 	FrameRate frameRates[2]; // Selected frame rates for the color and depth cameras
 	unsigned short messageSequenceNumber; // Incrementing sequence number for command messages to the camera
@@ -128,8 +131,9 @@ class KinectCamera:public USBDevice
 	bool removeBackground; // Flag whether to remove background information during frame processing
 	short int backgroundRemovalFuzz; // Fuzz value for background removal (positive values: more aggressive removal)
 	
-	// DEBUGGING
-	//Misc::File* headerFile;
+	#if KINECT_CAMERA_DUMP_HEADERS
+	IO::FilePtr headerFile;
+	#endif
 	
 	/* Private methods: */
 	size_t sendMessage(unsigned short messageType,const unsigned short* messageData,size_t messageSize,void* replyBuffer,size_t replyBufferSize); // Sends a general message to the camera device; returns reply size in bytes
@@ -140,17 +144,27 @@ class KinectCamera:public USBDevice
 	
 	/* Constructors and destructors: */
 	public:
-	KinectCamera(libusb_device* sDevice); // Creates a Kinect camera wrapper around the given USB device, which is assumed to be a Kinect camera
-	KinectCamera(USBContext& usbContext,size_t index =0); // Opens the index-th Kinect camera device on the given USB context
-	~KinectCamera(void); // Destroys the camera
+	Camera(libusb_device* sDevice); // Creates a Kinect camera wrapper around the given USB device, which is assumed to be a Kinect camera
+	Camera(USB::Context& usbContext,size_t index =0); // Opens the index-th Kinect camera device on the given USB context
+	~Camera(void); // Destroys the camera
 	
-	/* Methods: */
+	/* Methods from FrameSource: */
+	virtual IntrinsicParameters getIntrinsicParameters(void) const;
+	virtual ExtrinsicParameters getExtrinsicParameters(void) const;
+	virtual const unsigned int* getActualFrameSize(int sensor) const;
+	virtual void startStreaming(StreamingCallback* newColorStreamingCallback,StreamingCallback* newDepthStreamingCallback);
+	virtual void stopStreaming(void);
+	
+	/* New methods: */
+	const std::string& getSerialNumber(void) const // Returns the camera's serial number
+		{
+		return serialNumber;
+		}
 	void setFrameSize(int camera,FrameSize newFrameSize); // Sets the frame size of the color or depth camera for the next streaming operation
 	FrameSize getFrameSize(int camera) // Returns the selected frame size of the color or depth camera
 		{
 		return frameSizes[camera];
 		}
-	const unsigned int* getActualFrameSize(int camera) const; // Returns the selected frame size of the color or depth camera in pixels
 	void setFrameRate(int camera,FrameRate newFrameRate); // Sets the frame rate of the color or depth camera for the next streaming operation
 	FrameRate getFrameRate(int camera) const // Returns the selected frame rate of the color or depth camera
 		{
@@ -159,12 +173,12 @@ class KinectCamera:public USBDevice
 	unsigned int getActualFrameRate(int camera) const; // Returns the selected frame rate of the color or depth camera in Hz
 	void resetFrameTimer(double newFrameTimerOffset =0.0); // Resets the frame timer to zero
 	void setCompressDepthFrames(bool newCompressDepthFrames); // Enables or disables depth frame compression for the next streaming operation
-	void startStreaming(StreamingCallback* newColorStreamingCallback,StreamingCallback* newDepthStreamingCallback); // Installs the given streaming callback and starts receiving color and depth data from the camera
 	void captureBackground(unsigned int newNumBackgroundFrames,bool replace,BackgroundCaptureCallback* newBackgroundCaptureCallback =0); // Captures the given number of frames to create a background removal buffer and calls optional callback upon completion
 	void loadBackground(const char* fileNamePrefix); // Loads a background removal buffer from a file with the given prefix
 	void loadBackground(IO::File& file); // Ditto, from already opened file
 	void setMaxDepth(unsigned int newMaxDepth,bool replace =false); // Sets a depth value beyond which all pixels are considered background
 	void saveBackground(const char* fileNamePrefix); // Saves the current background frame to a file with the given prefix
+	void saveBackground(IO::File& file); // Ditto, into an already opened file
 	void setRemoveBackground(bool newRemoveBackground); // Enables or disables background removal
 	bool getRemoveBackground(void) const // Returns the current background removal flag
 		{
@@ -175,7 +189,8 @@ class KinectCamera:public USBDevice
 		{
 		return backgroundRemovalFuzz;
 		}
-	void stopStreaming(void); // Stops streaming; blocks until all pending transfers have either completed or been cancelled
 	};
+
+}
 
 #endif

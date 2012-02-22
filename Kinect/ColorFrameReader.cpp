@@ -1,6 +1,6 @@
 /***********************************************************************
 ColorFrameReader - Class to read compressed color frames from a source.
-Copyright (c) 2010 Oliver Kreylos
+Copyright (c) 2010-2011 Oliver Kreylos
 
 This file is part of the Kinect 3D Video Capture Project (Kinect).
 
@@ -22,6 +22,7 @@ Software Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA
 
 #include <Kinect/ColorFrameReader.h>
 
+#include <Misc/SizedTypes.h>
 #include <IO/File.h>
 #include <Math/Constants.h>
 #include <Video/Config.h>
@@ -33,6 +34,8 @@ Software Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA
 #include <Video/TheoraPacket.h>
 #endif
 #include <Kinect/FrameBuffer.h>
+
+namespace Kinect {
 
 /*********************************
 Methods of class ColorFrameReader:
@@ -74,16 +77,7 @@ ColorFrameReader::ColorFrameReader(IO::File& sSource)
 		#else
 		
 		/* Skip the stream header packets: */
-		while(streamHeaderSize>0)
-			{
-			/* Read a chunk of header data: */
-			unsigned char buffer[256];
-			size_t readSize=sizeof(buffer);
-			if(readSize>streamHeaderSize)
-				readSize=streamHeaderSize;
-			source.read(buffer,readSize);
-			streamHeaderSize-=readSize;
-			}
+		source.skip<Misc::UInt8>(streamHeaderSize);
 		
 		#endif
 		}
@@ -175,27 +169,14 @@ FrameBuffer ColorFrameReader::readNextFrame(void)
 		**********************/
 		
 		/* Skip packet flags: */
-		source.read<char>();
+		source.skip<char>(1);
 		
 		/* Skip 64-bit granule position and packet number: */
-		unsigned int buffer[2];
-		source.read(buffer,2);
-		source.read(buffer,2);
+		source.skip<Misc::SInt64>(2);
 		
 		/* Read the packet data size: */
 		size_t packetSize=source.read<unsigned int>();
-		
-		/* Skip the packet data: */
-		while(packetSize>0)
-			{
-			/* Read a chunk of packet data: */
-			unsigned char buffer[256];
-			size_t readSize=sizeof(buffer);
-			if(readSize>packetSize)
-				readSize=packetSize;
-			source.read(buffer,readSize);
-			packetSize-=readSize;
-			}
+		source.skip<Misc::UInt8>(packetSize);
 		
 		/* Initialize the frame to 50% grey (why not?): */
 		unsigned char* resultPtr=static_cast<unsigned char*>(result.getBuffer());
@@ -224,3 +205,5 @@ FrameBuffer ColorFrameReader::readNextFrame(void)
 	
 	return result;
 	}
+
+}

@@ -1,7 +1,7 @@
 /***********************************************************************
 DepthCompressionTest - Utility to check the results of compressing a
 depth frame file.
-Copyright (c) 2010 Oliver Kreylos
+Copyright (c) 2010-2011 Oliver Kreylos
 
 This file is part of the Kinect 3D Video Capture Project (Kinect).
 
@@ -49,9 +49,9 @@ int main(int argc,char* argv[])
 	
 	/* Create the depth frame writer and reader: */
 	IO::FilePtr compressedDepthFrameFile(IO::openFile("/work/okreylos/3DVideo/Kinect/CompressedDepthFrames.dat",IO::File::ReadWrite));
-	DepthFrameWriter depthFrameWriter(*compressedDepthFrameFile,size);
+	Kinect::DepthFrameWriter depthFrameWriter(*compressedDepthFrameFile,size);
 	compressedDepthFrameFile->flush();
-	DepthFrameReader depthFrameReader(*compressedDepthFrameFile);
+	Kinect::DepthFrameReader depthFrameReader(*compressedDepthFrameFile);
 	
 	/* Process all frames from the two depth frame files: */
 	double totalTime=0.0;
@@ -60,7 +60,7 @@ int main(int argc,char* argv[])
 	while(!depthFrameFile->eof())
 		{
 		/* Read the next uncompressed depth frame: */
-		FrameBuffer frame0(size[0],size[1],size[1]*size[0]*sizeof(unsigned short));
+		Kinect::FrameBuffer frame0(size[0],size[1],size[1]*size[0]*sizeof(unsigned short));
 		frame0.timeStamp=depthFrameFile->read<double>();
 		unsigned short* frameBuffer0=static_cast<unsigned short*>(frame0.getBuffer());
 		depthFrameFile->read(frameBuffer0,size[1]*size[0]);
@@ -93,7 +93,7 @@ int main(int argc,char* argv[])
 		
 		/* Read the next compressed depth frame: */
 		Misc::Timer uncompressTime;
-		FrameBuffer frame1=depthFrameReader.readNextFrame();
+		Kinect::FrameBuffer frame1=depthFrameReader.readNextFrame();
 		uncompressTime.elapse();
 		double time=uncompressTime.getTime();
 		totalTime+=time;

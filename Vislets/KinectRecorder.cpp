@@ -29,11 +29,11 @@ Software Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA
 #include <Misc/StandardValueCoders.h>
 #include <Misc/CompoundValueCoders.h>
 #include <Misc/ConfigurationFile.h>
+#include <USB/DeviceList.h>
 #include <Geometry/GeometryValueCoders.h>
 #include <Sound/SoundRecorder.h>
-#include <Kinect/USBDeviceList.h>
 #include <Kinect/FrameBuffer.h>
-#include <Kinect/KinectFrameSaver.h>
+#include <Kinect/FrameSaver.h>
 #include <Vrui/Vrui.h>
 #include <Vrui/VisletManager.h>
 
@@ -53,7 +53,6 @@ KinectRecorderFactory::KinectRecorderFactory(Vrui::VisletManager& visletManager)
 	
 	/* Load class settings: */
 	Misc::ConfigurationFileSection cfs=visletManager.getVisletClassSection(getClassName());
-	std::string defaultCalibrationFilesPath=cfs.retrieveString("./calibrationFilesPath",".");
 	std::string defaultSaveFileNamePrefix=cfs.retrieveString("./saveFileNamePrefix",".");
 	std::string defaultBackgroundFileNamePrefix=cfs.retrieveString("./backgroundFileNamePrefix","");
 	
@@ -70,46 +69,11 @@ KinectRecorderFactory::KinectRecorderFactory(Vrui::VisletManager& visletManager)
 		config.deviceSerialNumber=kds.retrieveString("./serialNumber");
 		config.highResolution=kds.retrieveValue<bool>("./highResolution",false);
 		
-		/* Read the calibration files path: */
-		std::string calibrationFilesPath=kds.retrieveString("./calibrationFilesPath",defaultCalibrationFilesPath);
-		
-		/* Construct the calibration file name: */
-		config.calibrationFileName=calibrationFilesPath;
-		config.calibrationFileName.push_back('/');
-		config.calibrationFileName.append("CameraCalibrationMatrices-");
-		config.calibrationFileName.append(config.deviceSerialNumber);
-		if(config.highResolution)
-			config.calibrationFileName.append("-high");
-		config.calibrationFileName.append(".dat");
-		
-		/* Override the calibration file name from the configuration file: */
-		config.calibrationFileName=kds.retrieveString("./calibrationFileName",config.calibrationFileName);
-		
-		/* Construct the transformation file name: */
-		config.transformFileName=calibrationFilesPath;
-		config.transformFileName.push_back('/');
-		config.transformFileName.append("ProjectorTransform-");
-		config.transformFileName.append(config.deviceSerialNumber);
-		config.transformFileName.append(".txt");
-		
-		/* Override the transformation file name from the configuration file: */
-		config.transformFileName=kds.retrieveString("./transformationFileName",config.transformFileName);
-		
 		/* Read the save file name prefix: */
 		config.saveFileNamePrefix=kds.retrieveString("./saveFileNamePrefix",defaultSaveFileNamePrefix);
 		
 		/* Read background removal settings: */
-		std::string backgroundFileNamePrefix=kds.retrieveString("./backgroundFileNamePrefix",defaultBackgroundFileNamePrefix);
-		if(!backgroundFileNamePrefix.empty())
-			{
-			/* Construct the background file name: */
-			config.backgroundFileName=calibrationFilesPath;
-			config.backgroundFileName.push_back('/');
-			config.backgroundFileName.append(backgroundFileNamePrefix);
-			
-			/* Override the background file name from the configuration file: */
-			config.backgroundFileName=kds.retrieveString("./backgroundFileName",config.backgroundFileName);
-			}
+		config.backgroundFileName=kds.retrieveString("./backgroundFileNamePrefix",defaultBackgroundFileNamePrefix);
 		config.captureBackgroundFrames=kds.retrieveValue<unsigned int>("./captureBackgroundFrames",0);
 		config.maxDepth=kds.retrieveValue<unsigned int>("./maxDepth",0);
 		config.backgroundRemovalFuzz=kds.retrieveValue<int>("./backgroundRemovalFuzz",-1000000);
@@ -191,24 +155,9 @@ extern "C" void destroyKinectRecorderFactory(Vrui::VisletFactory* factory)
 Methods of class KinectRecorder::KinectStreamer:
 ***********************************************/
 
-void KinectRecorder::KinectStreamer::depthStreamingCallback(const FrameBuffer& frameBuffer)
-	{
-	/* Save the frame: */
-	frameSaver->saveDepthFrame(frameBuffer);
-	}
-
-void KinectRecorder::KinectStreamer::colorStreamingCallback(const FrameBuffer& frameBuffer)
-	{
-	/* Save the frame: */
-	frameSaver->saveColorFrame(frameBuffer);
-	}
-
 KinectRecorder::KinectStreamer::KinectStreamer(libusb_device* sDevice,const KinectRecorderFactory::KinectConfig& config)
 	:camera(sDevice),frameSaver(0)
 	{
-	/* Open the Kinect camera: */
-	camera.open();
-	
 	/* Check if there is an existing background frame for the camera: */
 	bool removeBackground=false;
 	if(!config.backgroundFileName.empty())
@@ -241,14 +190,8 @@ KinectRecorder::KinectStreamer::KinectStreamer(libusb_device* sDevice,const Kine
 	if(config.backgroundRemovalFuzz!=-1000000)
 		camera.setBackgroundRemovalFuzz(config.backgroundRemovalFuzz);
 	
-	/* Load the camera's physical space transformation: */
-	Misc::File transformFile(config.transformFileName.c_str(),"rt");
-	char transform[1024];
-	transformFile.gets(transform,sizeof(transform));
-	KinectFrameSaver::Transform projectorTransform=Misc::ValueCoder<KinectFrameSaver::Transform>::decode(transform,transform+strlen(transform),0);
-	
 	/* Set the camera's frame size: */
-	camera.setFrameSize(KinectCamera::COLOR,config.highResolution?KinectCamera::FS_1280_1024:KinectCamera::FS_640_480);
+	camera.setFrameSize(Kinect::FrameSource::COLOR,config.highResolution?Kinect::Camera::FS_1280_1024:Kinect::Camera::FS_640_480);
 	
 	/* Create the frame saver: */
 	std::string depthFrameFileName=config.saveFileNamePrefix;
@@ -259,7 +202,7 @@ KinectRecorder::KinectStreamer::KinectStreamer(libusb_device* sDevice,const Kine
 	colorFrameFileName.push_back('-');
 	colorFrameFileName.append(config.deviceSerialNumber);
 	colorFrameFileName.append(".color");
-	frameSaver=new KinectFrameSaver(camera,config.calibrationFileName.c_str(),projectorTransform,depthFrameFileName.c_str(),colorFrameFileName.c_str());
+	frameSaver=new Kinect::FrameSaver(camera,colorFrameFileName.c_str(),depthFrameFileName.c_str());
 	}
 
 KinectRecorder::KinectStreamer::~KinectStreamer(void)
@@ -274,7 +217,7 @@ KinectRecorder::KinectStreamer::~KinectStreamer(void)
 void KinectRecorder::KinectStreamer::startStreaming(void)
 	{
 	/* Start streaming: */
-	camera.startStreaming(Misc::createFunctionCall(this,&KinectRecorder::KinectStreamer::colorStreamingCallback),Misc::createFunctionCall(this,&KinectRecorder::KinectStreamer::depthStreamingCallback));
+	camera.startStreaming(Misc::createFunctionCall(frameSaver,&Kinect::FrameSaver::saveColorFrame),Misc::createFunctionCall(frameSaver,&Kinect::FrameSaver::saveDepthFrame));
 	}
 
 /***************************************
@@ -302,7 +245,7 @@ KinectRecorder::KinectRecorder(int numArguments,const char* const arguments[])
 		usbContext.startEventHandling();
 		
 		/* Enumerate all USB devices: */
-		USBDeviceList usbDevices(usbContext);
+		USB::DeviceList usbDevices(usbContext);
 		size_t numKinectCameras=usbDevices.getNumDevices(0x045eU,0x02aeU);
 		
 		for(std::vector<KinectRecorderFactory::KinectConfig>::const_iterator kcIt=factory->kinectConfigs.begin();kcIt!=factory->kinectConfigs.end();++kcIt)
@@ -313,7 +256,7 @@ KinectRecorder::KinectRecorder(int numArguments,const char* const arguments[])
 				for(cameraIndex=0;cameraIndex<numKinectCameras;++cameraIndex)
 					{
 					/* Tentatively open the Kinect camera device: */
-					USBDevice cam(usbDevices.getDevice(0x045eU,0x02aeU,cameraIndex));
+					USB::Device cam(usbDevices.getDevice(0x045eU,0x02aeU,cameraIndex));
 					if(cam.getSerialNumber()==kcIt->deviceSerialNumber) // Bail out if the desired device was found
 						break;
 					}

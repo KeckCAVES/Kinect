@@ -1,6 +1,6 @@
 ########################################################################
 # Makefile for Kinect 3D Video Capture Project.
-# Copyright (c) 2010-2011 Oliver Kreylos
+# Copyright (c) 2010-2012 Oliver Kreylos
 #
 # This file is part of the WhyTools Build Environment.
 # 
@@ -34,10 +34,17 @@ VRUI_MAKEDIR := $(HOME)/Vrui-2.2/share/make
 PACKAGEROOT := $(shell pwd)
 
 # Specify version of created dynamic shared libraries
-KINECT_VERSION = 1004
-MAJORLIBVERSION = 1
-MINORLIBVERSION = 4
+KINECT_VERSION = 2000
+MAJORLIBVERSION = 2
+MINORLIBVERSION = 0
 KINECT_NAME := Kinect-$(MAJORLIBVERSION).$(MINORLIBVERSION)
+
+# Check if Vrui's collaboration infrastructure is installed
+ifneq ($(wildcard $(VRUI_MAKEDIR)/Packages.Collaboration),)
+  HAVE_COLLABORATION = 1
+else
+  HAVE_COLLABORATION = 0
+endif
 
 # Root directory for Kinect configuration data underneath Vrui's
 # configuration directory:
@@ -49,6 +56,10 @@ include $(VRUI_MAKEDIR)/SystemDefinitions
 include $(VRUI_MAKEDIR)/Packages.System
 include $(VRUI_MAKEDIR)/Configuration.Vrui
 include $(VRUI_MAKEDIR)/Packages.Vrui
+ifneq ($(HAVE_COLLABORATION),0)
+  include $(VRUI_MAKEDIR)/Configuration.Collaboration
+  include $(VRUI_MAKEDIR)/Packages.Collaboration
+endif
 include $(PACKAGEROOT)/BuildRoot/Packages.Kinect
 
 # Override the include file and library search directories:
@@ -103,6 +114,25 @@ LIBRARY_NAMES = libKinect
 LIBRARIES += $(LIBRARY_NAMES:%=$(call LIBRARYNAME,%))
 
 #
+# The Kinect executables:
+#
+
+EXECUTABLES += $(EXEDIR)/KinectUtil \
+               $(EXEDIR)/RawKinectViewer \
+               $(EXEDIR)/AlignPoints \
+               $(EXEDIR)/KinectRecorder \
+               $(EXEDIR)/KinectServer \
+               $(EXEDIR)/KinectViewer \
+               $(EXEDIR)/CompressDepthFile \
+               $(EXEDIR)/DepthCompressionTest \
+               $(EXEDIR)/ColorCompressionTest \
+               $(EXEDIR)/CalibrateDepth \
+               $(EXEDIR)/CalibrateCameras \
+               $(EXEDIR)/NewCalibrateCameras \
+               $(EXEDIR)/TestAlignment \
+               $(EXEDIR)/KinectClientTest
+
+#
 # The Kinect vislets:
 #
 
@@ -112,29 +142,52 @@ VISLET_NAMES = KinectViewer \
 
 VISLETS += $(VISLET_NAMES:%=$(call VISLETNAME,%))
 
-EXECUTABLES += $(EXEDIR)/USBTest \
-               $(EXEDIR)/KinectUtil \
-               $(EXEDIR)/RawKinectViewer \
-               $(EXEDIR)/KinectRecorder \
-               $(EXEDIR)/KinectViewer \
-               $(EXEDIR)/CompressDepthFile \
-               $(EXEDIR)/DepthCompressionTest \
-               $(EXEDIR)/ColorCompressionTest \
-               $(EXEDIR)/CalibrateDepth \
-               $(EXEDIR)/CalibrateCameras \
-               $(EXEDIR)/NewCalibrateCameras \
-               $(EXEDIR)/AlignPoints \
-               $(EXEDIR)/TestAlignment \
-               $(EXEDIR)/KinectServer \
-               $(EXEDIR)/KinectClientTest
+#
+# The Kinect collaboration infrastructure plug-ins:
+#
 
-ALL = $(LIBRARIES) $(EXECUTABLES) $(PLUGINS) $(VISLETS)
+COLLABORATIONPLUGIN_NAMES = KinectServer \
+                            KinectClient
+
+ifneq ($(HAVE_COLLABORATION),0)
+  PLUGINS += $(COLLABORATIONPLUGIN_NAMES:%=$(call PLUGINNAME,%))
+endif
+
+# Set the name of the make configuration file:
+MAKECONFIGFILE = share/Configuration.Kinect
+
+ALL = $(LIBRARIES) $(EXECUTABLES) $(PLUGINS) $(VISLETS) $(MAKECONFIGFILE)
 
 .PHONY: all
 all: $(ALL)
 
 # Make all components depend on Kinect driver library:
 $(VISLETS) $(PLUGINS) $(EXECUTABLES): $(call LIBRARYNAME,libKinect)
+
+########################################################################
+# Pseudo-target to print configuration options
+########################################################################
+
+.PHONY: config
+config: Configure-End
+
+.PHONY: Configure-Begin
+Configure-Begin:
+	@echo "---- Configured Kinect options: ----"
+	@echo "Installation directory: $(VRUI_PACKAGEROOT)"
+	@echo "Calibration data directory: $(ETCINSTALLDIR)/$(KINECTCONFIGDIREXT)"
+	@echo "Vislet plug-in directory: $(PLUGININSTALLDIR)/$(VRVISLETSDIREXT)"
+ifneq ($(HAVE_COLLABORATION),0)
+	@echo "Vrui collaboration infrastructure detected"
+	@echo "Collaboration protocol plug-in directory: $(PLUGININSTALLDIR)/$(COLLABORATIONPLUGINSDIREXT)"
+endif
+
+.PHONY: Configure-End
+Configure-End: Configure-Begin
+Configure-End:
+	@echo "--------"
+
+$(wildcard *.cpp Kinect/*.cpp): config
 
 ########################################################################
 # Specify other actions to be performed on a `make clean'
@@ -163,6 +216,9 @@ LIBKINECT_HEADERS = $(wildcard Kinect/*.h)
 
 LIBKINECT_SOURCES = $(wildcard Kinect/*.cpp)
 
+$(OBJDIR)/Kinect/Camera.o: CFLAGS += -DKINECT_CAMERA_INTRINSICPARAMETERSFILENAMEPREFIX='"$(ETCINSTALLDIR)/$(KINECTCONFIGDIREXT)/IntrinsicParameters"'
+$(OBJDIR)/Kinect/Camera.o: CFLAGS += -DKINECT_CAMERA_EXTRINSICPARAMETERSFILENAMEPREFIX='"$(ETCINSTALLDIR)/$(KINECTCONFIGDIREXT)/ExtrinsicParameters"'
+
 $(call LIBRARYNAME,libKinect): PACKAGES += $(MYKINECT_DEPENDS)
 $(call LIBRARYNAME,libKinect): EXTRACINCLUDEFLAGS += $(MYKINECT_INCLUDE)
 $(call LIBRARYNAME,libKinect): CFLAGS += $(MYKINECT_CFLAGS)
@@ -175,14 +231,9 @@ libKinect: $(call LIBRARYNAME,libKinect)
 ########################################################################
 
 #
-# Simple test program for libusb-1.0; can control motor and LEDs and
-# send commands to camera:
+# Utility to list Kinect devices on all USB buses and send commands to
+# them:
 #
-
-$(EXEDIR)/USBTest: PACKAGES += MYKINECT
-$(EXEDIR)/USBTest: $(OBJDIR)/USBTest.o
-.PHONY: USBTest
-USBTest: $(EXEDIR)/USBTest
 
 $(EXEDIR)/KinectUtil: PACKAGES += MYKINECT
 $(EXEDIR)/KinectUtil: $(OBJDIR)/KinectUtil.o
@@ -190,13 +241,26 @@ $(EXEDIR)/KinectUtil: $(OBJDIR)/KinectUtil.o
 KinectUtil: $(EXEDIR)/KinectUtil
 
 #
-# Viewer for raw depth and color image streams:
+# Viewer for raw depth and color image streams, with ability to
+# internally and externally calibrate Kinect cameras:
 #
+
+$(OBJDIR)/RawKinectViewer.o: CFLAGS += -DKINECT_CAMERA_INTRINSICPARAMETERSFILENAMEPREFIX='"$(ETCINSTALLDIR)/$(KINECTCONFIGDIREXT)/IntrinsicParameters"'
 
 $(EXEDIR)/RawKinectViewer: PACKAGES += MYVRUI MYKINECT
 $(EXEDIR)/RawKinectViewer: $(OBJDIR)/RawKinectViewer.o
 .PHONY: RawKinectViewer
 RawKinectViewer: $(EXEDIR)/RawKinectViewer
+
+#
+# 3D space alignment program for external calibration of multiple Kinect
+# devices, based on two files containing 3D tie points:
+#
+
+$(EXEDIR)/AlignPoints: PACKAGES += MYVRUI
+$(EXEDIR)/AlignPoints: $(OBJDIR)/AlignPoints.o
+.PHONY: AlignPoints
+AlignPoints: $(EXEDIR)/AlignPoints
 
 #
 # Utility to record color and depth streams from one or more Kinect
@@ -209,13 +273,30 @@ $(EXEDIR)/KinectRecorder: $(OBJDIR)/KinectRecorder.o
 KinectRecorder: $(EXEDIR)/KinectRecorder
 
 #
-# Viewer for 3D image streams from one or more Kinect devices:
+# Server for real-time 3D video streaming protocol:
+#
+
+$(OBJDIR)/KinectServerMain.o: CFLAGS += -DKINECTSERVER_CONFIGURATIONFILENAME='"$(ETCINSTALLDIR)/KinectServer.cfg"'
+
+$(EXEDIR)/KinectServer: PACKAGES += MYKINECT MYCOMM
+$(EXEDIR)/KinectServer: $(OBJDIR)/KinectServer.o \
+                        $(OBJDIR)/KinectServerMain.o
+.PHONY: KinectServer
+KinectServer: $(EXEDIR)/KinectServer
+
+#
+# Viewer for 3D image streams from one or more Kinect devices, pre-
+# recorded files or 3D video streaming servers:
 #
 
 $(EXEDIR)/KinectViewer: PACKAGES += MYVRUI MYKINECT
 $(EXEDIR)/KinectViewer: $(OBJDIR)/KinectViewer.o
 .PHONY: KinectViewer
 KinectViewer: $(EXEDIR)/KinectViewer
+
+#
+# Several obsolete or testing utilities or applications:
+#
 
 $(EXEDIR)/CompressDepthFile: PACKAGES += MYKINECT
 $(EXEDIR)/CompressDepthFile: $(OBJDIR)/CompressDepthFile.o
@@ -247,45 +328,15 @@ $(EXEDIR)/NewCalibrateCameras: $(OBJDIR)/NewCalibrateCameras.o
 .PHONY: NewCalibrateCameras
 NewCalibrateCameras: $(EXEDIR)/NewCalibrateCameras
 
-#
-# 3D space alignment program, based on two files containing 3D tie
-# points:
-#
-
-$(EXEDIR)/AlignPoints: PACKAGES += MYVRUI
-$(EXEDIR)/AlignPoints: $(OBJDIR)/AlignPoints.o
-.PHONY: AlignPoints
-AlignPoints: $(EXEDIR)/AlignPoints
-
 $(EXEDIR)/TestAlignment: PACKAGES += MYGEOMETRY MYMATH MYIO
 $(EXEDIR)/TestAlignment: $(OBJDIR)/TestAlignment.o
 .PHONY: TestAlignment
 TestAlignment: $(EXEDIR)/TestAlignment
 
-#
-# Utility to convert frames from multiple colocated depth image streams
-# into a 3D volume to create a watertight mesh based on a space carving
-# approach:
-#
-
 $(EXEDIR)/SpaceCarver: PACKAGES += MYKINECT MYGEOMETRY MYMATH MYMISC
 $(EXEDIR)/SpaceCarver: $(OBJDIR)/SpaceCarver.o
 .PHONY: SpaceCarver
 SpaceCarver: $(EXEDIR)/SpaceCarver
-
-#
-# Server for real-time 3D video streaming protocol:
-#
-
-$(EXEDIR)/KinectServer: PACKAGES += MYKINECT MYCOMM
-$(EXEDIR)/KinectServer: $(OBJDIR)/KinectServer.o \
-                        $(OBJDIR)/KinectServerMain.o
-.PHONY: KinectServer
-KinectServer: $(EXEDIR)/KinectServer
-
-#
-# Client application for real-time 3D video streaming protocol:
-#
 
 $(EXEDIR)/KinectClientTest: PACKAGES += MYVRUI MYKINECT MYCOMM
 $(EXEDIR)/KinectClientTest: $(OBJDIR)/KinectClient.o \
@@ -312,28 +363,73 @@ endif
 # Vislet to render live 3D video in any Vrui application:
 #
 
-#$(call VISLETNAME,KinectViewer): $(OBJDIR)/KinectViewerVislet.o
+$(call VISLETNAME,KinectViewer): $(OBJDIR)/pic/Vislets/KinectViewer.o
 
 #
 # Vislet to record 3D video from any Vrui application:
 #
 
-#$(call VISLETNAME,KinectRecorder): $(OBJDIR)/KinectRecorderVislet.o
+$(call VISLETNAME,KinectRecorder): $(OBJDIR)/pic/Vislets/KinectRecorder.o
 
 #
 # Vislet to play back previously recorded 3D video in any Vrui
 # application:
 #
 
-#$(call VISLETNAME,KinectPlayback): $(OBJDIR)/KinectPlaybackVislet.o
+$(call VISLETNAME,KinectPlayback): $(OBJDIR)/pic/Vislets/KinectPlayback.o
 
 # Mark all vislet plugin object files as intermediate:
 .SECONDARY: $(VISLET_NAMES:%=$(OBJDIR)/pic/Vislets/%.o)
 
 ########################################################################
+# Specify build rules for collaboration infrastructure plug-ins
+########################################################################
+
+# Implicit rule for creating collaboration infrastructure plug-ins:
+$(call PLUGINNAME,%): $(OBJDIR)/pic/%.o
+	@mkdir -p $(PLUGINDESTDIR)
+ifdef SHOWCOMMAND
+	$(CCOMP) $(PLUGINLINKFLAGS) -o $@ $^ $(LINKDIRFLAGS) $(LINKLIBFLAGS)
+else
+	@echo Linking $@...
+	@$(CCOMP) $(PLUGINLINKFLAGS) -o $@ $^ $(LINKDIRFLAGS) $(LINKLIBFLAGS)
+endif
+
+#
+# Server-side plugin:
+#
+
+$(call PLUGINNAME,KinectServer): PACKAGES += MYCOLLABORATIONSERVER
+$(call PLUGINNAME,KinectServer): $(OBJDIR)/pic/KinectProtocol.o \
+                                 $(OBJDIR)/pic/KinectServerPlugin.o
+
+#
+# Client-side plugin:
+#
+
+$(call PLUGINNAME,KinectClient): PACKAGES += MYKINECT MYCOLLABORATIONCLIENT
+$(call PLUGINNAME,KinectClient): $(OBJDIR)/pic/KinectProtocol.o \
+                                 $(OBJDIR)/pic/KinectClient.o \
+                                 $(OBJDIR)/pic/KinectClientPlugin.o
+
+########################################################################
 # Specify installation rules for header files, libraries, executables,
 # configuration files, and shared files.
 ########################################################################
+
+# Pseudo-target to dump Kinect configuration settings
+$(MAKECONFIGFILE): config
+	@echo Creating configuration makefile fragment...
+	@echo '# Makefile fragment for Kinect configuration options' > $(MAKECONFIGFILE)
+	@echo '# Autogenerated by Kinect installation on $(shell date)' >> $(MAKECONFIGFILE)
+	@echo >> $(MAKECONFIGFILE)
+	@echo '# Configuration settings:'>> $(MAKECONFIGFILE)
+	@echo 'KINECT_CONFIGDIR = $(ETCINSTALLDIR)/$(KINECTCONFIGDIREXT)' >> $(MAKECONFIGFILE)
+	@echo 'KINECT_HAVE_COLLABORATION = $(HAVE_COLLABORATION)' >> $(MAKECONFIGFILE)
+	@echo >> $(MAKECONFIGFILE)
+	@echo '# Version information:'>> $(MAKECONFIGFILE)
+	@echo 'KINECT_VERSION = $(KINECT_VERSION)' >> $(MAKECONFIGFILE)
+	@echo 'KINECT_NAME = $(KINECT_NAME)' >> $(MAKECONFIGFILE)
 
 ifdef INSTALLPREFIX
   HEADERINSTALLDIR := $(INSTALLPREFIX)/$(HEADERINSTALLDIR)
@@ -355,6 +451,12 @@ install: all
 	@install $(LIBRARIES) $(LIBINSTALLDIR)
 	@echo Configuring run-time linker...
 	$(foreach LIBNAME,$(LIBRARY_NAMES),$(call CREATE_SYMLINK,$(LIBNAME)))
+ifneq ($(HAVE_COLLABORATION),0)
+  # Install all collaboration protocol plugins in PLUGININSTALLDIR/COLLABORATIONPLUGINSDIREXT:
+	@echo Installing collaboration protocol plugins...
+	@install -d $(PLUGININSTALLDIR)/$(COLLABORATIONPLUGINSDIREXT)
+	@install $(PLUGINS) $(PLUGININSTALLDIR)/$(COLLABORATIONPLUGINSDIREXT)
+endif
 # Install all vislet plugins in PLUGININSTALLDIR/VRVISLETSDIREXT:
 	@echo Installing vislet plugins...
 	@install -d $(PLUGININSTALLDIR)/$(VRVISLETSDIREXT)
@@ -363,10 +465,16 @@ install: all
 	@echo Installing executables...
 	@install -d $(EXECUTABLEINSTALLDIR)
 	@install $(EXECUTABLES) $(EXECUTABLEINSTALLDIR)
+# Install all configuration files in ETCINSTALLDIR:
+	@echo Installing configuration files...
+	@install -d $(ETCINSTALLDIR)
+	@install -m u=rw,go=r etc/KinectServer.cfg $(ETCINSTALLDIR)
+	@install -d $(ETCINSTALLDIR)/$(KINECTCONFIGDIREXT)
 # Install the package and configuration files in SHAREINSTALLDIR/make:
 	@echo Installing makefile fragments...
 	@install -d $(SHAREINSTALLDIR)/make
 	@install -m u=rw,go=r BuildRoot/Packages.Kinect $(SHAREINSTALLDIR)/make
+	@install -m u=rw,go=r $(MAKECONFIGFILE) $(SHAREINSTALLDIR)/make
 
 uninstall:
 	@echo Removing header files...
@@ -374,9 +482,16 @@ uninstall:
 	@echo Removing libraries...
 	@rm -f $(LIBRARIES:$(LIBDESTDIR)/%=$(LIBINSTALLDIR)/%)
 	$(foreach LIBNAME,$(LIBRARY_NAMES),$(call DESTROY_SYMLINK,$(LIBNAME)))
+ifneq ($(HAVE_COLLABORATION),0)
+	@echo Removing collaboration protocol plugins...
+	@rm -f $(PLUGINS:$(PLUGINDESTDIR)/%=$(PLUGININSTALLDIR)/$(COLLABORATIONPLUGINSDIREXT)/%)
+endif
 	@echo Removing vislet plugins...
 	@rm -f $(VISLETS:$(VISLETDESTDIR)/%=$(PLUGININSTALLDIR)/$(VRVISLETSDIREXT)/%)
 	@echo Removing executables...
 	@rm -f $(EXECUTABLES:$(EXEDIR)/%=$(EXECUTABLEINSTALLDIR)/%)
+	@echo Removing configuration files...
+	@rm -f $(ETCINSTALLDIR)/KinectServer.cfg
 	@echo Removing makefile fragments...
 	@rm -f $(SHAREINSTALLDIR)/make/Packages.Kinect
+	@rm -f $(SHAREINSTALLDIR)/make/Configuration.Kinect

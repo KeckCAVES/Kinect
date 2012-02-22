@@ -1,6 +1,6 @@
 /***********************************************************************
 KinectServerMain - Main program for Kinect 3D video streamer.
-Copyright (c) 2010 Oliver Kreylos
+Copyright (c) 2010-2011 Oliver Kreylos
 
 This file is part of the Kinect 3D Video Capture Project (Kinect).
 
@@ -24,7 +24,7 @@ Software Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA
 #include <signal.h>
 #include <iostream>
 #include <Misc/ConfigurationFile.h>
-#include <Kinect/USBContext.h>
+#include <USB/Context.h>
 
 #include "KinectServer.h"
 
@@ -53,10 +53,10 @@ int main(void)
 		std::cerr<<"KinectServerMain: Cannot intercept SIG_INT signals. Server won't shut down cleanly."<<std::endl;
 	
 	/* Open the server's configuration file: */
-	Misc::ConfigurationFile serverConfig("KinectServer.cfg");
+	Misc::ConfigurationFile serverConfig(KINECTSERVER_CONFIGURATIONFILENAME);
 	
 	/* Open the USB context: */
-	USBContext usbContext;
+	USB::Context usbContext;
 	
 	/* Create a Kinect server object: */
 	Misc::ConfigurationFileSection serverSection=serverConfig.getSection("KinectServer");

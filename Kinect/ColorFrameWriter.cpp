@@ -35,6 +35,8 @@ Software Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA
 #endif
 #include <Kinect/FrameBuffer.h>
 
+namespace Kinect {
+
 /*********************************
 Methods of class ColorFrameWriter:
 *********************************/
@@ -136,3 +138,5 @@ size_t ColorFrameWriter::writeFrame(const FrameBuffer& frame)
 	
 	return result;
 	}
+
+}

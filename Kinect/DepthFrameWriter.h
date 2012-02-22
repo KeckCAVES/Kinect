@@ -1,6 +1,6 @@
 /***********************************************************************
 DepthFrameWriter - Class to write compressed depth frames to a sink.
-Copyright (c) 2010 Oliver Kreylos
+Copyright (c) 2010-2011 Oliver Kreylos
 
 This file is part of the Kinect 3D Video Capture Project (Kinect).
 
@@ -20,8 +20,8 @@ Software Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA
 02111-1307 USA
 ***********************************************************************/
 
-#ifndef DEPTHFRAMEWRITER_INCLUDED
-#define DEPTHFRAMEWRITER_INCLUDED
+#ifndef KINECT_DEPTHFRAMEWRITER_INCLUDED
+#define KINECT_DEPTHFRAMEWRITER_INCLUDED
 
 #include <stddef.h>
 #include <Kinect/HilbertCurve.h>
@@ -30,7 +30,11 @@ Software Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA
 namespace IO {
 class File;
 }
+namespace Kinect {
 class FrameBuffer;
+}
+
+namespace Kinect {
 
 class DepthFrameWriter
 	{
@@ -74,5 +78,7 @@ class DepthFrameWriter
 	/* Methods: */
 	size_t writeFrame(const FrameBuffer& frame); // Compresses and writes the given depth frame; returns compressed frame size in bytes
 	};
+
+}
 
 #endif

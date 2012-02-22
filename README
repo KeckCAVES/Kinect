@@ -1,58 +1,78 @@
 ========================================================================
-README for Kinect 3D Video Capture Project version 1.4
-Copyright (c) 2010-2011 Oliver Kreylos
+README for Kinect 3D Video Capture Project version 2.0
+Copyright (c) 2010-2012 Oliver Kreylos
 ========================================================================
 
 Requirements
 ============
 
-This software requires the Vrui VR toolkit, version 2.2-001 or later. It
-also requires libusb version 1.0.
+This software requires the Vrui VR toolkit, version 2.2 build 004 or
+newer. It also requires libusb version 1.0, and that Vrui was configured
+with support for libusb prior to its installation. This software can
+optionally create Kinect 3D video streaming plug-ins for Vrui's
+collaboration infrastructure. The presence of Vrui's collaboration
+infrastructure will be detected automatically during the build process.
 
-Installation
-============
+Installation Guide
+==================
 
-0. Install Vrui (ideally, just run make followed by make install).
+It is recommended to download or move the source packages for Vrui and
+the Kinect 3D Video Capture Project into a src directory underneath the
+user's home directory. Otherwise, references to ~/src in the following
+instructions need to be changed.
 
-1. Set Vrui's installation directory in the makefile, either to
-   Vrui-2.2 if Vrui was installed in its default location, or to
-   whatever was configured in Vrui's makefile.
+0. Install Vrui from ~/src/Vrui-<version>-<build> (see Vrui README file).
 
-2. Run make.
+0.5. (Optional) Install Vrui's collaboration infrastructure from
+     ~/src/CollaborationInfrastructure-<version> (see its README file).
 
-3. (Optional) If you want to create a vislet to display live 3D video in
-   otherwise unaware Vrui applications, or have installed Vrui's
-   collaboration infrastructure and want to transmit 3D video between
-   collaborating sites, run make install to copy the respective plug-ins
-   to their destination directories.
+1. Change into ~/src directory and unpack the Kinect 3D Video Capture
+   Project tarball:
+   > cd ~/src
+   > tar xfz <download path>/Kinect-<version>.tar.gz
+   - or -
+   > tar xf <download path>/Kinect-<version>.tar
+
+2. Change into the Kinect 3D Video Capture Project's base directory:
+   > cd Kinect-<version>
+
+3. If the Vrui version installed in step 0 was not 2.2, or Vrui's
+   installation directory was changed from the default of ~/Vrui-2.2,
+   adapt the makefile using a text editor. Change the value of
+   VRUI_MAKEDIR close to the beginning of the file as follows:
+   VRUI_MAKEDIR := <Vrui install dir>/share/make
+   Where <Vrui install dir> is the installation directory chosen in
+   step 0. Use $(HOME) to refer to the user's home directory instead
+   of ~.
+
+4. Build the Kinect 3D Video Capture Project:
+   > make
+
+5. Install the Kinect 3D Video Capture Project:
+   > make install
 
 Use
 ===
 
-1. Run ./bin/RawKinectViewer <camera index> to intrinsically calibrate
+1. Run ./bin/KinectUtil list to list all Kinect devices connected to the
+   host computer.
+
+2. Run ./bin/RawKinectViewer <camera index> to intrinsically calibrate
    the <camera index>-th Kinect device on the host's USB bus (with the
    first device having index 0), using a semi-transparent checkerboard
    calibration target. This generates a binary
-   CameraCalibrationMatrices-<serial number>.dat file.
+   IntrinsicParameters-<serial number>.dat file in
+   <Vrui install dir>/etc/Kinect-<version>, where <serial number> is the
+   unique factory-assigned serial number of the Kinect device as
+   displayed in step 1.
 
-Step 1 only has to be performed once for each Kinect device, unless the
+Step 2 only has to be performed once for each Kinect device, unless the
 resulting calibration proves unsatisfactory. Kinect devices typically
 retain their intrinsic calibration over time.
 
-2. Create a ProjectorTransform-<serial number>.txt file using the same
-   serial number as the one in the file generated in step 3, initially
-   only containing the string "identity" (without the quotes). Transform
-   files are used to merge 3D images from multiple Kinect devices into a
-   single representation.
-
-Step 2 creates a "dummy" transformation useful only for viewing 3D video
-from a single Kinect device. See the next section on how to calibrate
-any number of Kinect devices to a desired world coordinate system.
-
-3. Run ./bin/KinectViewer <camera index>, where <camera index> is the
+3. Run ./bin/KinectViewer -c <camera index>, where <camera index> is the
    zero-based index of the Kinect device to use if there are multiple
-   ones. If no index is specified, KinectViewer will use the first (or
-   only) device.
+   ones.
 
 Merging 3D Facades from Multiple Kinects
 ========================================

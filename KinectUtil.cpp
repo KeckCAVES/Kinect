@@ -26,16 +26,16 @@ Software Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA
 #include <iostream>
 #include <iomanip>
 #include <Misc/HashTable.h>
-#include <Kinect/USBContext.h>
-#include <Kinect/USBDevice.h>
-#include <Kinect/USBDeviceList.h>
+#include <USB/Context.h>
+#include <USB/Device.h>
+#include <USB/DeviceList.h>
 
-USBContext usbContext;
+USB::Context usbContext;
 
 void list(void)
 	{
 	/* Get the list of all USB devices: */
-	USBDeviceList deviceList(usbContext);
+	USB::DeviceList deviceList(usbContext);
 	
 	/* Get the number of Kinect camera devices: */
 	size_t numKinects=deviceList.getNumDevices(0x045e,0x02ae);
@@ -46,7 +46,7 @@ void list(void)
 	for(size_t i=0;i<numKinects;++i)
 		{
 		/* Get the i-th Kinect device: */
-		USBDevice kinect=deviceList.getDevice(0x045e,0x02ae,i);
+		USB::Device kinect=deviceList.getDevice(0x045e,0x02ae,i);
 		kinect.open();
 		busNumbers[i]=kinect.getBusNumber();
 		if(maxBusNumber<busNumbers[i]+1)
@@ -89,7 +89,7 @@ void list(void)
 void resetAll(void)
 	{
 	/* Get the list of all USB devices: */
-	USBDeviceList deviceList(usbContext);
+	USB::DeviceList deviceList(usbContext);
 	
 	/* Get the number of Kinect camera devices: */
 	size_t numKinects=deviceList.getNumDevices(0x045e,0x02ae);
@@ -98,7 +98,7 @@ void resetAll(void)
 	for(size_t i=0;i<numKinects;++i)
 		{
 		std::cout<<"Resetting Kinect "<<i<<"..."<<std::flush;
-		USBDevice kinect=deviceList.getDevice(0x045e,0x02ae,i);
+		USB::Device kinect=deviceList.getDevice(0x045e,0x02ae,i);
 		kinect.open();
 		kinect.reset();
 		std::cout<<" done"<<std::endl;
@@ -108,10 +108,10 @@ void resetAll(void)
 bool reset(unsigned int index)
 	{
 	/* Get the list of all USB devices: */
-	USBDeviceList deviceList(usbContext);
+	USB::DeviceList deviceList(usbContext);
 	
 	/* Get the index-th Kinect device: */
-	USBDevice kinect=deviceList.getDevice(0x045e,0x02ae,index);
+	USB::Device kinect=deviceList.getDevice(0x045e,0x02ae,index);
 	if(!kinect.isValid())
 		return false;
 		
@@ -133,7 +133,7 @@ int main(int argc,char* argv[])
 	if(argc<2)
 		{
 		std::cout<<"Missing command. Usage:"<<std::endl;
-		std::cout<<"KinectUtil [list | reset]"<<std::endl;
+		std::cout<<"KinectUtil ( list | ( reset [ all | <index> ] ) )"<<std::endl;
 		return 1;
 		}
 	if(strcasecmp(argv[1],"list")==0)

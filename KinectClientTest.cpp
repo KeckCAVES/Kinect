@@ -1,7 +1,7 @@
 /***********************************************************************
 KinectClientTest - Test application to receive and display streaming
 3D video data from a remote server.
-Copyright (c) 2010 Oliver Kreylos
+Copyright (c) 2010-2011 Oliver Kreylos
 
 This file is part of the Kinect 3D Video Capture Project (Kinect).
 

@@ -26,26 +26,23 @@ Software Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA
 
 #include <string>
 #include <Threads/TripleBuffer.h>
+#include <USB/Context.h>
 #include <Geometry/OrthogonalTransformation.h>
 #include <Vrui/Geometry.h>
 #include <Vrui/Vislet.h>
-#include <Kinect/USBContext.h>
 #include <Kinect/FrameBuffer.h>
 
 /* Forward declarations: */
-class KinectCamera;
-class KinectProjector;
+namespace Kinect {
+class Camera;
+class Projector;
+}
 
 class KinectViewer;
 
 class KinectViewerFactory:public Vrui::VisletFactory
 	{
 	friend class KinectViewer;
-	
-	/* Elements: */
-	private:
-	Vrui::OGTransform kinectTransform; // Transformation to map the Kinect's 3D reconstruction space into Vrui physical space
-	std::string calibrationFileName; // Name of file containing the Kinect's depth and color calibration matrices
 	
 	/* Constructors and destructors: */
 	public:
@@ -65,15 +62,15 @@ class KinectViewer:public Vrui::Vislet
 	private:
 	static KinectViewerFactory* factory; // Pointer to the class' factory object
 	
-	USBContext usbContext; // USB device context
-	KinectCamera* kinectCamera; // Pointer to camera aspect of Kinect device
-	Threads::TripleBuffer<FrameBuffer> depthFrames; // Triple buffer of depth frames received from the camera
-	Threads::TripleBuffer<FrameBuffer> colorFrames; // Triple buffer of color frames received from the camera
-	KinectProjector* kinectProjector; // Object to project depth and color frames back into 3D camera space
+	USB::Context usbContext; // USB device context
+	Kinect::Camera* camera; // Pointer to camera aspect of Kinect device
+	Threads::TripleBuffer<Kinect::FrameBuffer> depthFrames; // Triple buffer of depth frames received from the camera
+	Threads::TripleBuffer<Kinect::FrameBuffer> colorFrames; // Triple buffer of color frames received from the camera
+	Kinect::Projector* projector; // Object to project depth and color frames back into 3D camera space
 	
 	/* Private methods: */
-	void depthStreamingCallback(const FrameBuffer& frameBuffer); // Callback called when a new depth frame was received
-	void colorStreamingCallback(const FrameBuffer& frameBuffer); // Callback called when a new color frame was received
+	void colorStreamingCallback(const Kinect::FrameBuffer& frameBuffer); // Callback called when a new color frame was received
+	void depthStreamingCallback(const Kinect::FrameBuffer& frameBuffer); // Callback called when a new depth frame was received
 	
 	/* Constructors and destructors: */
 	public:

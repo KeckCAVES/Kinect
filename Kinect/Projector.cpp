@@ -1,7 +1,7 @@
 /***********************************************************************
-KinectProjector - Class to project a depth frame captured from a Kinect
-camera back into calibrated 3D camera space, and texture-map it with a
-matching color frame.
+Projector - Class to project a depth frame captured from a Kinect camera
+back into calibrated 3D camera space, and texture-map it with a matching
+color frame.
 Copyright (c) 2010-2011 Oliver Kreylos
 
 This file is part of the Kinect 3D Video Capture Project (Kinect).
@@ -22,23 +22,22 @@ Software Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA
 02111-1307 USA
 ***********************************************************************/
 
-#include <Kinect/KinectProjector.h>
+#include <Kinect/Projector.h>
 
-#include <IO/File.h>
-#include <IO/OpenFile.h>
 #include <GL/gl.h>
 #include <GL/GLVertexArrayParts.h>
 #include <GL/GLVertex.h>
 #include <GL/GLContextData.h>
 #include <GL/Extensions/GLARBVertexBufferObject.h>
 #include <GL/GLTransformationWrappers.h>
-#include <Kinect/KinectCamera.h>
 
-/******************************************
-Methods of class KinectProjector::DataItem:
-******************************************/
+namespace Kinect {
 
-KinectProjector::DataItem::DataItem(void)
+/************************************
+Methods of class Projector::DataItem:
+************************************/
+
+Projector::DataItem::DataItem(void)
 	:vertexBufferId(0),
 	 indexBufferId(0),numIndices(0),
 	 depthFrameVersion(0),
@@ -60,7 +59,7 @@ KinectProjector::DataItem::DataItem(void)
 	glGenTextures(1,&textureId);
 	}
 
-KinectProjector::DataItem::~DataItem(void)
+Projector::DataItem::~DataItem(void)
 	{
 	/* Destroy the vertex and index buffers: */
 	if(vertexBufferId!=0)
@@ -72,74 +71,73 @@ KinectProjector::DataItem::~DataItem(void)
 	glDeleteTextures(1,&textureId);
 	}
 
-/********************************
-Methods of class KinectProjector:
-********************************/
+/**************************
+Methods of class Projector:
+**************************/
 
-KinectProjector::KinectProjector(const char* calibrationFileName)
-	:depthFrameVersion(0),
-	 #ifdef FILTERING
-	 filteredDepthFrame(0),
+Projector::Projector(void)
+	:colorFrameVersion(0),
+	 depthFrameVersion(0)
+	 #if KINECT_PROJECTOR_FILTERING
+	 ,filteredDepthFrame(0)
 	 #endif
-	 colorFrameVersion(0)
 	{
-	/* Open the calibration file: */
-	IO::FilePtr calibrationFile(IO::openFile(calibrationFileName));
-	calibrationFile->setEndianness(Misc::LittleEndian);
-	
-	/* Read the depth projection matrix: */
-	calibrationFile->read(depthProjection.getMatrix().getEntries(),4*4);
-	
-	/* Read the color projection matrix: */
-	calibrationFile->read(colorProjection.getMatrix().getEntries(),4*4);
 	}
 
-KinectProjector::KinectProjector(IO::File& calibrationFile)
-	:depthFrameVersion(0),
-	 #ifdef FILTERING
-	 filteredDepthFrame(0),
+Projector::Projector(const FrameSource& frameSource)
+	:colorFrameVersion(0),
+	 depthFrameVersion(0)
+	 #if KINECT_PROJECTOR_FILTERING
+	 ,filteredDepthFrame(0)
 	 #endif
-	 colorFrameVersion(0)
 	{
-	/* Read the depth projection matrix: */
-	calibrationFile.read(depthProjection.getMatrix().getEntries(),4*4);
-	
-	/* Read the color projection matrix: */
-	calibrationFile.read(colorProjection.getMatrix().getEntries(),4*4);
+	/* Query the source's intrinsic and extrinsic parameters: */
+	FrameSource::IntrinsicParameters ips=frameSource.getIntrinsicParameters();
+	colorProjection=ips.colorProjection;
+	depthProjection=ips.depthProjection;
+	projectorTransform=frameSource.getExtrinsicParameters();
 	}
 
-KinectProjector::KinectProjector(const double depthMatrix[16],const double colorMatrix[16])
-	:depthFrameVersion(0),
-	 #ifdef FILTERING
-	 filteredDepthFrame(0),
-	 #endif
-	 colorFrameVersion(0)
+void Projector::setIntrinsicParameters(const FrameSource::IntrinsicParameters& ips)
 	{
-	/* Copy the depth and color projection matrices: */
-	depthProjection=PTransform::fromRowMajor(depthMatrix);
-	colorProjection=PTransform::fromRowMajor(colorMatrix);
+	colorProjection=ips.colorProjection;
+	depthProjection=ips.depthProjection;
 	}
 
-KinectProjector::~KinectProjector(void)
+void Projector::setExtrinsicParameters(const FrameSource::ExtrinsicParameters& eps)
 	{
-	#ifdef FILTERING
+	projectorTransform=eps;
+	}
+
+Projector::~Projector(void)
+	{
+	#if KINECT_PROJECTOR_FILTERING
 	delete[] filteredDepthFrame;
 	#endif
 	}
 
-void KinectProjector::initContext(GLContextData& contextData) const
+void Projector::initContext(GLContextData& contextData) const
 	{
 	/* Create and register the data item: */
 	DataItem* dataItem=new DataItem;
 	contextData.addDataItem(this,dataItem);
 	}
 
-void KinectProjector::setDepthFrame(const FrameBuffer& newDepthFrame)
+void Projector::setColorFrame(const FrameBuffer& newColorFrame)
+	{
+	/* Copy the color frame: */
+	colorFrame=newColorFrame;
+	
+	/* Increment the frame version number to invalidate all per-context color frame caches: */
+	++colorFrameVersion;
+	}
+
+void Projector::setDepthFrame(const FrameBuffer& newDepthFrame)
 	{
 	/* Copy the depth frame: */
 	depthFrame=newDepthFrame;
 	
-	#ifdef FILTERING
+	#if KINECT_PROJECTOR_FILTERING
 	
 	if(filteredDepthFrame!=0)
 		{
@@ -180,15 +178,6 @@ void KinectProjector::setDepthFrame(const FrameBuffer& newDepthFrame)
 	++depthFrameVersion;
 	}
 
-void KinectProjector::setColorFrame(const FrameBuffer& newColorFrame)
-	{
-	/* Copy the color frame: */
-	colorFrame=newColorFrame;
-	
-	/* Increment the frame version number to invalidate all per-context color frame caches: */
-	++colorFrameVersion;
-	}
-
 namespace {
 
 /****************************************
@@ -212,7 +201,7 @@ inline unsigned short depthRange(unsigned short d0,unsigned short d1,unsigned sh
 
 }
 
-void KinectProjector::draw(GLContextData& contextData) const
+void Projector::draw(GLContextData& contextData) const
 	{
 	/* Get the context data item: */
 	DataItem* dataItem=contextData.retrieveDataItem<DataItem>(this);
@@ -222,8 +211,9 @@ void KinectProjector::draw(GLContextData& contextData) const
 	glDisable(GL_CULL_FACE);
 	glDisable(GL_LIGHTING);
 	
-	/* Load the transformation projecting depth images into 3D camera space: */
+	/* Load the transformation projecting depth images into 3D world space: */
 	glPushMatrix();
+	glMultMatrix(projectorTransform);
 	glMultMatrix(depthProjection);
 	
 	/* Bind the vertex and index buffers: */
@@ -242,7 +232,7 @@ void KinectProjector::draw(GLContextData& contextData) const
 		Vertex* vPtr=static_cast<Vertex*>(glMapBufferARB(GL_ARRAY_BUFFER_ARB,GL_WRITE_ONLY_ARB));
 		
 		/* Upload vertices: */
-		#ifdef FILTERING
+		#if KINECT_PROJECTOR_FILTERING
 		
 		const float* fdfPtr=filteredDepthFrame;
 		for(unsigned int y=0;y<height;++y)
@@ -321,13 +311,13 @@ void KinectProjector::draw(GLContextData& contextData) const
 				{
 				/* Calculate the quad's validity case index: */
 				unsigned int caseIndex=0x0;
-				if(dfPtr[0]<KinectCamera::invalidDepth-1)
+				if(dfPtr[0]<FrameSource::invalidDepth-1)
 					caseIndex|=0x1U;
-				if(dfPtr[1]<KinectCamera::invalidDepth-1)
+				if(dfPtr[1]<FrameSource::invalidDepth-1)
 					caseIndex|=0x2U;
-				if(dfPtr[width]<KinectCamera::invalidDepth-1)
+				if(dfPtr[width]<FrameSource::invalidDepth-1)
 					caseIndex|=0x4U;
-				if(dfPtr[width+1]<KinectCamera::invalidDepth-1)
+				if(dfPtr[width+1]<FrameSource::invalidDepth-1)
 					caseIndex|=0x8U;
 				
 				/* Generate candidate triangles according to the quad's case index: */
@@ -415,3 +405,5 @@ void KinectProjector::draw(GLContextData& contextData) const
 	/* Restore OpenGL state: */
 	glPopAttrib();
 	}
+
+}

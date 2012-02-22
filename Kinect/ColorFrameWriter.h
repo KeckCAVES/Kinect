@@ -20,8 +20,8 @@ Software Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA
 02111-1307 USA
 ***********************************************************************/
 
-#ifndef COLORFRAMEWRITER_INCLUDED
-#define COLORFRAMEWRITER_INCLUDED
+#ifndef KINECT_COLORFRAMEWRITER_INCLUDED
+#define KINECT_COLORFRAMEWRITER_INCLUDED
 
 #include <stddef.h>
 #include <Video/Config.h>
@@ -39,7 +39,11 @@ namespace Video {
 class ImageExtractor;
 #endif
 }
+namespace Kinect {
 class FrameBuffer;
+}
+
+namespace Kinect {
 
 class ColorFrameWriter
 	{
@@ -61,5 +65,7 @@ class ColorFrameWriter
 	/* Methods: */
 	size_t writeFrame(const FrameBuffer& frame); // Compresses and writes the given color frame; returns compressed frame size in bytes
 	};
+
+}
 
 #endif

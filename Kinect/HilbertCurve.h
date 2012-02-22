@@ -1,7 +1,7 @@
 /***********************************************************************
 HilbertCurve - Helper class to create an index array to traverse a 2D
 array in the order of a space-filling Hilbert curve.
-Copyright (c) 2010 Oliver Kreylos
+Copyright (c) 2010-2011 Oliver Kreylos
 
 This file is part of the Kinect 3D Video Capture Project (Kinect).
 
@@ -21,8 +21,10 @@ Software Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA
 02111-1307 USA
 ***********************************************************************/
 
-#ifndef HILBERTCURVE_INCLUDED
-#define HILBERTCURVE_INCLUDED
+#ifndef KINECT_HILBERTCURVE_INCLUDED
+#define KINECT_HILBERTCURVE_INCLUDED
+
+namespace Kinect {
 
 class HilbertCurve
 	{
@@ -49,5 +51,7 @@ class HilbertCurve
 		return offsets[index];
 		}
 	};
+
+}
 
 #endif

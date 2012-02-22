@@ -41,9 +41,9 @@ int main(int argc,char* argv[])
 	
 	/* Create the color frame writer and reader: */
 	IO::FilePtr compressedColorFrameFile(IO::openFile("/work/okreylos/3DVideo/Kinect/CompressedColorFrames.dat",IO::File::ReadWrite));
-	ColorFrameWriter colorFrameWriter(*compressedColorFrameFile,size);
+	Kinect::ColorFrameWriter colorFrameWriter(*compressedColorFrameFile,size);
 	compressedColorFrameFile->flush();
-	ColorFrameReader colorFrameReader(*compressedColorFrameFile);
+	Kinect::ColorFrameReader colorFrameReader(*compressedColorFrameFile);
 	
 	/* Process all frames from the two color frame files: */
 	double totalTime=0.0;
@@ -52,7 +52,7 @@ int main(int argc,char* argv[])
 	while(!colorFrameFile->eof())
 		{
 		/* Read the next uncompressed color frame: */
-		FrameBuffer frame0(size[0],size[1],size[1]*size[0]*3*sizeof(unsigned char));
+		Kinect::FrameBuffer frame0(size[0],size[1],size[1]*size[0]*3*sizeof(unsigned char));
 		frame0.timeStamp=colorFrameFile->read<double>();
 		unsigned char* frameBuffer0=static_cast<unsigned char*>(frame0.getBuffer());
 		colorFrameFile->read(frameBuffer0,size[1]*size[0]*3);
@@ -63,7 +63,7 @@ int main(int argc,char* argv[])
 		
 		/* Read the next compressed color frame: */
 		Misc::Timer uncompressTime;
-		FrameBuffer frame1=colorFrameReader.readNextFrame();
+		Kinect::FrameBuffer frame1=colorFrameReader.readNextFrame();
 		uncompressTime.elapse();
 		double time=uncompressTime.getTime();
 		totalTime+=time;

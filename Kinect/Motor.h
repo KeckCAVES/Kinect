@@ -1,6 +1,7 @@
 /***********************************************************************
-USBConfigDescriptor - Class representing a USB configuration descriptor.
-Copyright (c) 2010 Oliver Kreylos
+Motor - Wrapper class to represent the motor and accelerometer interface
+aspect of the Kinect sensor.
+Copyright (c) 2010-2011 Oliver Kreylos
 
 This file is part of the Kinect 3D Video Capture Project (Kinect).
 
@@ -20,35 +21,40 @@ Software Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA
 02111-1307 USA
 ***********************************************************************/
 
-#ifndef USBCONFIGDESCRIPTOR_INCLUDED
-#define USBCONFIGDESCRIPTOR_INCLUDED
+#ifndef KINECT_MOTOR_INCLUDED
+#define KINECT_MOTOR_INCLUDED
+
+#include <USB/Device.h>
 
 /* Forward declarations: */
-struct libusb_config_descriptor;
+namespace USB {
+class Context;
+}
 
-class USBConfigDescriptor
+namespace Kinect {
+
+class Motor:public USB::Device
 	{
-	/* Elements: */
-	private:
-	libusb_config_descriptor* descriptor; // Configuration descriptor pointer from the USB library
+	/* Embedded classes: */
+	public:
+	enum LEDState // Enumerated type for Kinect's LED states
+		{
+		LED_OFF=0x0,
+		LED_GREEN,LED_RED,LED_YELLOW,
+		LED_BLINK_YELLOW,LED_BLINK_GREEN,
+		LED_RED_YELLOW,LED_RED_GREEN
+		};
 	
 	/* Constructors and destructors: */
 	public:
-	USBConfigDescriptor(libusb_config_descriptor* sDescriptor) // Wraps given descriptor pointer
-		:descriptor(sDescriptor)
-		{
-		}
-	private:
-	USBConfigDescriptor(const USBConfigDescriptor& source); // Prohibit copy constructor
-	USBConfigDescriptor& operator=(const USBConfigDescriptor& source); // Prohibit assignment operator
-	public:
-	~USBConfigDescriptor(void); // Destroys the configuration descriptor
+	Motor(USB::Context& usbContext,size_t index =0); // Opens the index-th Kinect motor device on the given USB context
 	
 	/* Methods: */
-	libusb_config_descriptor* getDescriptor(void) const // Returns the descriptor pointer
-		{
-		return descriptor;
-		}
+	void setLED(LEDState newLEDState); // Sets the state of the Kinect's LED
+	void setPitch(int pitch); // Sets the motor's pitch angle
+	void readAccelerometers(float accels[3]); // Writes the Kinect's accelerometer readings into the given array
 	};
+
+}
 
 #endif

@@ -1,6 +1,7 @@
 /***********************************************************************
-USBConfigDescriptor - Class representing a USB configuration descriptor.
-Copyright (c) 2010 Oliver Kreylos
+FrameSource - Base class for objects that create streams of depth and
+color frames.
+Copyright (c) 2011 Oliver Kreylos
 
 This file is part of the Kinect 3D Video Capture Project (Kinect).
 
@@ -20,15 +21,20 @@ Software Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA
 02111-1307 USA
 ***********************************************************************/
 
-#include <Kinect/USBConfigDescriptor.h>
+#include <Kinect/FrameSource.h>
 
-#include <libusb-1.0/libusb.h>
+namespace Kinect {
 
-/************************************
-Methods of class USBConfigDescriptor:
-************************************/
+/****************************
+Methods of class FrameSource:
+****************************/
 
-USBConfigDescriptor::~USBConfigDescriptor(void)
+FrameSource::FrameSource(void)
 	{
-	libusb_free_config_descriptor(descriptor);
 	}
+
+FrameSource::~FrameSource(void)
+	{
+	}
+
+}

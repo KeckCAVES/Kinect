@@ -32,13 +32,18 @@ Software Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA
 #include <Geometry/OrthogonalTransformation.h>
 #include <Sound/SoundDataFormat.h>
 #include <Kinect/FrameBuffer.h>
+#include <Kinect/Projector.h>
 #include <Vrui/Vislet.h>
 
 /* Forward declarations: */
 namespace Sound {
 class SoundPlayer;
 }
-class KinectProjector;
+namespace Kinect {
+class ColorFrameReader;
+class DepthFrameReader;
+class Projector;
+}
 
 class KinectPlayer;
 
@@ -87,32 +92,30 @@ class KinectPlayer:public Vrui::Vislet
 	private:
 	class KinectStreamer // Helper class to play back 3D video data from a pair of time-stamped files
 		{
-		/* Embedded classes: */
-		private:
-		typedef Geometry::OrthogonalTransformation<double,3> OGTransform; // Type for facade transformations
-		
 		/* Elements: */
-		IO::FilePtr depthFile; // Pointer to the file containing the depth stream
-		Threads::Thread depthDecompressorThread; // Thread to decompress depth frames from the depth file
+		private:
 		IO::FilePtr colorFile; // Pointer to the file containing the color stream
+		Kinect::ColorFrameReader* colorDecompressor; // Decompressor for color frames
 		Threads::Thread colorDecompressorThread; // Thread to decompress color frames from the color file
-		OGTransform projectorTransform; // Transformation from projector space to physical space
-		KinectProjector* projector; // Projector to render a combined depth/color frame
+		IO::FilePtr depthFile; // Pointer to the file containing the depth stream
+		Kinect::DepthFrameReader* depthDecompressor; // Decompressor for depth frames
+		Threads::Thread depthDecompressorThread; // Thread to decompress depth frames from the depth file
+		Kinect::Projector projector; // Projector to render a combined depth/color frame
 		Threads::MutexCond timeStampCond; // Condition variable to signal a change in the next time stamp value
 		double readAheadTimeStamp; // Time stamp up to which to read ahead in the depth and color files
 		Threads::MutexCond frameQueueCond; // Condition variable to signal arrival of a new depth or color frame
-		FrameBuffer depthFrames[2]; // The two most recently read depth frames
-		int numDepthFrames; // Number of depth frames in queue
-		int mostRecentDepthFrame; // Index of the most recently read depth frame
-		FrameBuffer nextDepthFrame; // The next depth frame
-		FrameBuffer colorFrames[2]; // The two most recently read depth frames
+		Kinect::FrameBuffer colorFrames[2]; // The two most recently read depth frames
 		int numColorFrames; // Number of color frames in queue
 		int mostRecentColorFrame; // Index of the most recently read depth frame
-		FrameBuffer nextColorFrame; // The next color frame
+		Kinect::FrameBuffer nextColorFrame; // The next color frame
+		Kinect::FrameBuffer depthFrames[2]; // The two most recently read depth frames
+		int numDepthFrames; // Number of depth frames in queue
+		int mostRecentDepthFrame; // Index of the most recently read depth frame
+		Kinect::FrameBuffer nextDepthFrame; // The next depth frame
 		
 		/* Private methods: */
-		void* depthDecompressorThreadMethod(void); // Thread method to read depth frames
 		void* colorDecompressorThreadMethod(void); // Thread method to read color frames
+		void* depthDecompressorThreadMethod(void); // Thread method to read depth frames
 		
 		/* Constructors and destructors: */
 		public:

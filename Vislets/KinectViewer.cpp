@@ -31,17 +31,15 @@ Software Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA
 #include <GL/GLTransformationWrappers.h>
 #include <Vrui/Vrui.h>
 #include <Vrui/VisletManager.h>
-#include <Kinect/KinectCamera.h>
-#include <Kinect/KinectProjector.h>
+#include <Kinect/Camera.h>
+#include <Kinect/Projector.h>
 
 /************************************
 Methods of class KinectViewerFactory:
 ************************************/
 
 KinectViewerFactory::KinectViewerFactory(Vrui::VisletManager& visletManager)
-	:Vrui::VisletFactory("KinectViewer",visletManager),
-	 kinectTransform(Vrui::OGTransform::identity),
-	 calibrationFileName("CalibrationMatrices.dat")
+	:Vrui::VisletFactory("KinectViewer",visletManager)
 	{
 	#if 0
 	/* Insert class into class hierarchy: */
@@ -49,11 +47,6 @@ KinectViewerFactory::KinectViewerFactory(Vrui::VisletManager& visletManager)
 	visletFactory->addChildClass(this);
 	addParentClass(visletFactory);
 	#endif
-	
-	/* Load class settings: */
-	Misc::ConfigurationFileSection cfs=visletManager.getVisletClassSection(getClassName());
-	kinectTransform=cfs.retrieveValue<Vrui::OGTransform>("./kinectTransform",kinectTransform);
-	calibrationFileName=cfs.retrieveString("./calibrationFileName",calibrationFileName);
 	
 	/* Set tool class' factory pointer: */
 	KinectViewer::factory=this;
@@ -110,16 +103,7 @@ KinectViewerFactory* KinectViewer::factory=0;
 Methods of class KinectViewer:
 *****************************/
 
-void KinectViewer::depthStreamingCallback(const FrameBuffer& frameBuffer)
-	{
-	/* Post the new frame into the depth frame triple buffer: */
-	depthFrames.postNewValue(frameBuffer);
-	
-	/* Update application state: */
-	Vrui::requestUpdate();
-	}
-
-void KinectViewer::colorStreamingCallback(const FrameBuffer& frameBuffer)
+void KinectViewer::colorStreamingCallback(const Kinect::FrameBuffer& frameBuffer)
 	{
 	/* Post the new frame into the color frame triple buffer: */
 	colorFrames.postNewValue(frameBuffer);
@@ -128,32 +112,41 @@ void KinectViewer::colorStreamingCallback(const FrameBuffer& frameBuffer)
 	Vrui::requestUpdate();
 	}
 
+void KinectViewer::depthStreamingCallback(const Kinect::FrameBuffer& frameBuffer)
+	{
+	/* Post the new frame into the depth frame triple buffer: */
+	depthFrames.postNewValue(frameBuffer);
+	
+	/* Update application state: */
+	Vrui::requestUpdate();
+	}
+
 KinectViewer::KinectViewer(int numArguments,const char* const arguments[])
-	:kinectCamera(0),
-	 kinectProjector(0)
+	:camera(0),
+	 projector(0)
 	{
 	/* Enable background USB event handling: */
 	usbContext.startEventHandling();
 	
 	/* Connect to first Kinect camera device on the host: */
-	kinectCamera=new KinectCamera(usbContext);
+	camera=new Kinect::Camera(usbContext);
 	
 	/* Create a Kinect projector: */
-	kinectProjector=new KinectProjector(factory->calibrationFileName.c_str());
+	projector=new Kinect::Projector(*camera);
 	
 	/* Start streaming: */
-	kinectCamera->startStreaming(Misc::createFunctionCall(this,&KinectViewer::colorStreamingCallback),Misc::createFunctionCall(this,&KinectViewer::depthStreamingCallback));
+	camera->startStreaming(Misc::createFunctionCall(this,&KinectViewer::colorStreamingCallback),Misc::createFunctionCall(this,&KinectViewer::depthStreamingCallback));
 	}
 
 KinectViewer::~KinectViewer(void)
 	{
 	/* Stop streaming: */
-	kinectCamera->stopStreaming();
+	camera->stopStreaming();
 	
-	delete kinectProjector;
+	delete projector;
 	
 	/* Disconnect from the Kinect camera device: */
-	delete kinectCamera;
+	delete camera;
 	}
 
 Vrui::VisletFactory* KinectViewer::getFactory(void) const
@@ -163,30 +156,23 @@ Vrui::VisletFactory* KinectViewer::getFactory(void) const
 
 void KinectViewer::frame(void)
 	{
-	/* Lock the most recent frame in the depth frame triple buffer: */
-	if(depthFrames.lockNewValue())
-		{
-		/* Push the new frame to the Kinect projector: */
-		kinectProjector->setDepthFrame(depthFrames.getLockedValue());
-		}
-	
 	/* Lock the most recent frame in the color frame triple buffer: */
 	if(colorFrames.lockNewValue())
 		{
 		/* Push the new frame to the Kinect projector: */
-		kinectProjector->setColorFrame(colorFrames.getLockedValue());
+		projector->setColorFrame(colorFrames.getLockedValue());
+		}
+	
+	/* Lock the most recent frame in the depth frame triple buffer: */
+	if(depthFrames.lockNewValue())
+		{
+		/* Push the new frame to the Kinect projector: */
+		projector->setDepthFrame(depthFrames.getLockedValue());
 		}
 	}
 
 void KinectViewer::display(GLContextData& contextData) const
 	{
-	/* Move the Kinect camera's reconstruction 3D space into Vrui physical space: */
-	glPushMatrix();
-	glMultMatrix(factory->kinectTransform);
-	
-	/* Draw the current depth image: */
-	kinectProjector->draw(contextData);
-	
-	/* Return to physical space: */
-	glPopMatrix();
+	/* Draw the current 3D video facade: */
+	projector->draw(contextData);
 	}

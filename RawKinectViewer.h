@@ -27,6 +27,7 @@ Software Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA
 #include <utility>
 #include <vector>
 #include <Threads/TripleBuffer.h>
+#include <USB/Context.h>
 #include <Geometry/Point.h>
 #include <Geometry/Plane.h>
 #include <Geometry/ProjectiveTransformation.h>
@@ -38,7 +39,6 @@ Software Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA
 #include <Vrui/LocatorTool.h>
 #include <Vrui/GenericToolFactory.h>
 #include <Vrui/Application.h>
-#include <Kinect/USBContext.h>
 #include <Kinect/FrameBuffer.h>
 
 #include "FindBlobs.h"
@@ -47,7 +47,9 @@ Software Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA
 namespace GLMotif {
 class PopupMenu;
 }
-class KinectCamera;
+namespace Kinect {
+class Camera;
+}
 
 /**************
 Helper classes:
@@ -64,7 +66,7 @@ class BlobProperty<unsigned short> // Blob property accumulator for depth frames
 	
 	/* Elements: */
 	private:
-	static Geometry::ProjectiveTransformation<double,3> projection; // Pixel re-projection matrix
+	static PTransform projection; // Pixel re-projection matrix
 	double pxs,pys,pzs; // Accumulated centroid of reprojected pixels
 	double rawDepth; // Sum of pixels' raw depth values
 	size_t numPixels; // Number of accumulated pixels
@@ -301,10 +303,10 @@ class RawKinectViewer:public Vrui::Application,public GLObject
 		{
 		/* Elements: */
 		public:
-		GLuint depthTextureId; // ID of texture object holding depth image
-		unsigned int depthFrameVersion; // Version number of frame currently texture object
 		GLuint colorTextureId; // ID of texture object holding color image
 		unsigned int colorFrameVersion; // Version number of color currently in texture object
+		GLuint depthTextureId; // ID of texture object holding depth image
+		unsigned int depthFrameVersion; // Version number of frame currently texture object
 		
 		/* Constructors and destructors: */
 		DataItem(void);
@@ -317,14 +319,14 @@ class RawKinectViewer:public Vrui::Application,public GLObject
 	friend class GridTool;
 	
 	/* Elements: */
-	USBContext usbContext; // USB device context
-	KinectCamera* kinectCamera; // Pointer to camera aspect of Kinect device
-	const unsigned int* depthFrameSize; // Size of depth frames in pixels
-	Threads::TripleBuffer<FrameBuffer> depthFrames; // Triple buffer of depth frames received from the camera
-	unsigned int depthFrameVersion; // Version number of current depth frame
+	USB::Context usbContext; // USB device context
+	Kinect::Camera* camera; // Pointer to camera aspect of Kinect device
 	const unsigned int* colorFrameSize; // Size of color frames in pixels
-	Threads::TripleBuffer<FrameBuffer> colorFrames; // Triple buffer of color frames received from the camera
+	Threads::TripleBuffer<Kinect::FrameBuffer> colorFrames; // Triple buffer of color frames received from the camera
 	unsigned int colorFrameVersion; // Version number of current color frame
+	const unsigned int* depthFrameSize; // Size of depth frames in pixels
+	Threads::TripleBuffer<Kinect::FrameBuffer> depthFrames; // Triple buffer of depth frames received from the camera
+	unsigned int depthFrameVersion; // Version number of current depth frame
 	bool paused; // Flag whether the video stream display is paused
 	unsigned int averageNumFrames; // Number of depth frames to average
 	unsigned int averageFrameCounter; // Number of depth frames still to accumulate
@@ -337,8 +339,8 @@ class RawKinectViewer:public Vrui::Application,public GLObject
 	GLMotif::PopupMenu* mainMenu; // The program's main menu
 	
 	/* Private methods: */
-	void depthStreamingCallback(const FrameBuffer& frameBuffer); // Callback receiving depth frames from the Kinect camera
-	void colorStreamingCallback(const FrameBuffer& frameBuffer); // Callback receiving color frames from the Kinect camera
+	void colorStreamingCallback(const Kinect::FrameBuffer& frameBuffer); // Callback receiving color frames from the Kinect camera
+	void depthStreamingCallback(const Kinect::FrameBuffer& frameBuffer); // Callback receiving depth frames from the Kinect camera
 	void locatorButtonPressCallback(Vrui::LocatorTool::ButtonPressCallbackData* cbData); // Callback when a locator tool's button is pressed
 	void captureBackgroundCallback(Misc::CallbackData* cbData);
 	void removeBackgroundCallback(GLMotif::ToggleButton::ValueChangedCallbackData* cbData);

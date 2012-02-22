@@ -28,7 +28,6 @@ Software Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA
 #include <Misc/FunctionCalls.h>
 #include <Misc/File.h>
 #include <IO/File.h>
-#include <IO/OpenFile.h>
 #include <Math/Math.h>
 #include <Math/Constants.h>
 #include <Math/Matrix.h>
@@ -47,7 +46,8 @@ Software Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA
 #include <Vrui/Vrui.h>
 #include <Vrui/DisplayState.h>
 #include <Vrui/ToolManager.h>
-#include <Kinect/KinectCamera.h>
+#include <Vrui/OpenFile.h>
+#include <Kinect/Camera.h>
 
 /*****************************************************
 Static elements of class BlobProperty<unsigned short>:
@@ -1257,11 +1257,12 @@ void RawKinectViewer::GridTool::calibrate(void)
 	colorProj*=depthProj;
 	
 	/* Write the calibration file: */
-	std::string calibFileName="CameraCalibrationMatrices-";
-	calibFileName.append(application->kinectCamera->getSerialNumber());
+	std::string calibFileName=KINECT_CAMERA_INTRINSICPARAMETERSFILENAMEPREFIX;
+	calibFileName.push_back('-');
+	calibFileName.append(application->camera->getSerialNumber());
 	calibFileName.append(".dat");
 	std::cout<<"Writing calibration file "<<calibFileName<<std::endl;
-	IO::FilePtr calibFile(IO::openFile(calibFileName.c_str(),IO::File::WriteOnly));
+	IO::FilePtr calibFile(Vrui::openFile(calibFileName.c_str(),IO::File::WriteOnly));
 	calibFile->setEndianness(Misc::LittleEndian);
 	for(int i=0;i<4;++i)
 		for(int j=0;j<4;++j)
@@ -1273,7 +1274,7 @@ void RawKinectViewer::GridTool::calibrate(void)
 
 void RawKinectViewer::GridTool::printWorldPoints(void)
 	{
-	typedef Geometry::ProjectiveTransformation<double,3> PTransform;
+	typedef Kinect::FrameSource::IntrinsicParameters::PTransform PTransform;
 	
 	if(tiePoints.empty())
 		{
@@ -1281,17 +1282,8 @@ void RawKinectViewer::GridTool::printWorldPoints(void)
 		return;
 		}
 	
-	/* Read the calibration file: */
-	std::string calibFileName="CameraCalibrationMatrices-";
-	calibFileName.append(application->kinectCamera->getSerialNumber());
-	calibFileName.append(".dat");
-	IO::FilePtr calibFile(IO::openFile(calibFileName.c_str()));
-	calibFile->setEndianness(Misc::LittleEndian);
-	double mat[16];
-	calibFile->read<double>(mat,16);
-	PTransform depthProj=PTransform::fromRowMajor(mat);
-	calibFile->read<double>(mat,16);
-	PTransform colorProj=PTransform::fromRowMajor(mat);
+	/* Get the camera's intrinsic parameters: */
+	Kinect::FrameSource::IntrinsicParameters ips=application->camera->getIntrinsicParameters();
 	
 	/* Unproject the grid points of the most recent tie point: */
 	const TiePoint& tp=tiePoints.back();
@@ -1302,7 +1294,7 @@ void RawKinectViewer::GridTool::printWorldPoints(void)
 			const Plane::Vector& n=tp.gridPlane.getNormal();
 			double o=tp.gridPlane.getOffset();
 			double depth=(o-dip[0]*n[0]-dip[1]*n[1])/n[2];
-			PTransform::Point wp=depthProj.transform(PTransform::Point(dip[0]+double(application->depthFrameSize[0]),dip[1],depth));
+			PTransform::Point wp=ips.depthProjection.transform(PTransform::Point(dip[0]+double(application->depthFrameSize[0]),dip[1],depth));
 			std::cout<<wp[0]<<", "<<wp[1]<<", "<<wp[2]<<std::endl;
 			}
 	}
@@ -1556,8 +1548,8 @@ Methods of class RawKinectViewer::DataItem:
 ******************************************/
 
 RawKinectViewer::DataItem::DataItem(void)
-	:depthTextureId(0),depthFrameVersion(0),
-	 colorTextureId(0),colorFrameVersion(0)
+	:colorTextureId(0),colorFrameVersion(0),
+	 depthTextureId(0),depthFrameVersion(0)
 	{
 	/* Allocate texture objects: */
 	glGenTextures(1,&depthTextureId);
@@ -1575,24 +1567,24 @@ RawKinectViewer::DataItem::~DataItem(void)
 Methods of class RawKinectViewer:
 ********************************/
 
-void RawKinectViewer::depthStreamingCallback(const FrameBuffer& frameBuffer)
+void RawKinectViewer::colorStreamingCallback(const Kinect::FrameBuffer& frameBuffer)
 	{
 	if(!paused)
 		{
-		/* Post the new frame into the depth frame triple buffer: */
-		depthFrames.postNewValue(frameBuffer);
+		/* Post the new frame into the color frame triple buffer: */
+		colorFrames.postNewValue(frameBuffer);
 		
 		/* Update application state: */
 		Vrui::requestUpdate();
 		}
 	}
 
-void RawKinectViewer::colorStreamingCallback(const FrameBuffer& frameBuffer)
+void RawKinectViewer::depthStreamingCallback(const Kinect::FrameBuffer& frameBuffer)
 	{
 	if(!paused)
 		{
-		/* Post the new frame into the color frame triple buffer: */
-		colorFrames.postNewValue(frameBuffer);
+		/* Post the new frame into the depth frame triple buffer: */
+		depthFrames.postNewValue(frameBuffer);
 		
 		/* Update application state: */
 		Vrui::requestUpdate();
@@ -1625,16 +1617,16 @@ void RawKinectViewer::locatorButtonPressCallback(Vrui::LocatorTool::ButtonPressC
 void RawKinectViewer::captureBackgroundCallback(Misc::CallbackData* cbData)
 	{
 	/* Capture five seconds worth of background frames: */
-	kinectCamera->captureBackground(150,true);
+	camera->captureBackground(150,true);
 	}
 
 void RawKinectViewer::removeBackgroundCallback(GLMotif::ToggleButton::ValueChangedCallbackData* cbData)
 	{
 	/* Set the background removal flag: */
-	kinectCamera->setRemoveBackground(cbData->set);
+	camera->setRemoveBackground(cbData->set);
 	
 	/* Set the toggle button's state to the actual new flag value: */
-	cbData->toggle->setToggle(kinectCamera->getRemoveBackground());
+	cbData->toggle->setToggle(camera->getRemoveBackground());
 	}
 
 void RawKinectViewer::averageFramesCallback(GLMotif::ToggleButton::ValueChangedCallbackData* cbData)
@@ -1677,7 +1669,7 @@ GLMotif::PopupMenu* RawKinectViewer::createMainMenu(void)
 	
 	/* Create a toggle button to enable/disable background removal: */
 	GLMotif::ToggleButton* removeBackgroundToggle=new GLMotif::ToggleButton("RemoveBackgroundToggle",mainMenu,"Remove Background");
-	removeBackgroundToggle->setToggle(kinectCamera->getRemoveBackground());
+	removeBackgroundToggle->setToggle(camera->getRemoveBackground());
 	removeBackgroundToggle->getValueChangedCallbacks().add(this,&RawKinectViewer::removeBackgroundCallback);
 	
 	/* Create a toggle button to calculate and show an averaged depth frame: */
@@ -1692,13 +1684,16 @@ GLMotif::PopupMenu* RawKinectViewer::createMainMenu(void)
 
 RawKinectViewer::RawKinectViewer(int& argc,char**& argv,char**& appDefaults)
 	:Vrui::Application(argc,argv,appDefaults),
-	 kinectCamera(0),
-	 depthFrameVersion(0),colorFrameVersion(0),
+	 camera(0),
+	 colorFrameVersion(0),depthFrameVersion(0),
 	 paused(false),
 	 averageNumFrames(150),averageFrameCounter(0),averageFrameDepth(0),averageFrameForeground(0),showAverageFrame(false),
 	 mainMenu(0)
 	{
-	/* Register the custom tool class with the Vrui tool manager: */
+	/*********************************************************************
+	Register the custom tool classes with the Vrui tool manager:
+	*********************************************************************/
+	
 	PauseToolFactory* toolFactory1=new PauseToolFactory("PauseTool","Pause",0,*Vrui::getToolManager());
 	toolFactory1->setNumButtons(1);
 	toolFactory1->setButtonFunction(0,"Pause");
@@ -1732,14 +1727,14 @@ RawKinectViewer::RawKinectViewer(int& argc,char**& argv,char**& appDefaults)
 	
 	/* Parse the command line: */
 	int cameraIndex=0; // Use first Kinect camera device on USB bus
-	KinectCamera::FrameSize selectedColorFrameSize=KinectCamera::FS_640_480;
+	Kinect::Camera::FrameSize selectedColorFrameSize=Kinect::Camera::FS_640_480;
 	bool compressDepthFrames=false;
 	for(int i=1;i<argc;++i)
 		{
 		if(argv[i][0]=='-')
 			{
 			if(strcasecmp(argv[i]+1,"high")==0)
-				selectedColorFrameSize=KinectCamera::FS_1280_1024;
+				selectedColorFrameSize=Kinect::Camera::FS_1280_1024;
 			else if(strcasecmp(argv[i]+1,"compress")==0)
 				compressDepthFrames=true;
 			else if(strcasecmp(argv[i]+1,"gridSize")==0)
@@ -1767,12 +1762,12 @@ RawKinectViewer::RawKinectViewer(int& argc,char**& argv,char**& appDefaults)
 	usbContext.startEventHandling();
 	
 	/* Connect to the given Kinect camera device on the host: */
-	kinectCamera=new KinectCamera(usbContext,cameraIndex);
+	camera=new Kinect::Camera(usbContext,cameraIndex);
 	
 	#if 0
 	{
 	/* Get the camera's serial number to load the proper calibration matrices: */
-	std::string serialNumber=kinectCamera->getSerialNumber();
+	std::string serialNumber=camera->getSerialNumber();
 	
 	/* Open the calibration file: */
 	Misc::File calibrationFile((std::string("CameraCalibrationMatrices-")+serialNumber+std::string(".dat")).c_str(),"rb",Misc::File::LittleEndian);
@@ -1785,25 +1780,25 @@ RawKinectViewer::RawKinectViewer(int& argc,char**& argv,char**& appDefaults)
 	#endif
 	
 	/* Set the color camera's frame size: */
-	kinectCamera->setFrameSize(KinectCamera::COLOR,selectedColorFrameSize);
+	camera->setFrameSize(Kinect::FrameSource::COLOR,selectedColorFrameSize);
 	
 	/* Get the cameras' actual frame sizes: */
-	depthFrameSize=kinectCamera->getActualFrameSize(KinectCamera::DEPTH);
-	colorFrameSize=kinectCamera->getActualFrameSize(KinectCamera::COLOR);
+	colorFrameSize=camera->getActualFrameSize(Kinect::FrameSource::COLOR);
+	depthFrameSize=camera->getActualFrameSize(Kinect::FrameSource::DEPTH);
 	
 	/* Allocate the average depth frame buffer: */
 	averageFrameDepth=new float[depthFrameSize[0]*depthFrameSize[1]];
 	averageFrameForeground=new float[depthFrameSize[0]*depthFrameSize[1]];
 	
 	/* Set depth frame compression: */
-	kinectCamera->setCompressDepthFrames(compressDepthFrames);
+	camera->setCompressDepthFrames(compressDepthFrames);
 	
 	/* Create the main menu: */
 	mainMenu=createMainMenu();
 	Vrui::setMainMenu(mainMenu);
 	
 	/* Start streaming: */
-	kinectCamera->startStreaming(Misc::createFunctionCall(this,&RawKinectViewer::colorStreamingCallback),Misc::createFunctionCall(this,&RawKinectViewer::depthStreamingCallback));
+	camera->startStreaming(Misc::createFunctionCall(this,&RawKinectViewer::colorStreamingCallback),Misc::createFunctionCall(this,&RawKinectViewer::depthStreamingCallback));
 	
 	/* Select an invalid pixel: */
 	selectedPixel[0]=selectedPixel[1]=~0x0U;
@@ -1819,10 +1814,10 @@ RawKinectViewer::~RawKinectViewer(void)
 	delete[] averageFrameForeground;
 	
 	/* Stop streaming: */
-	kinectCamera->stopStreaming();
+	camera->stopStreaming();
 	
 	/* Disconnect from the Kinect camera device: */
-	delete kinectCamera;
+	delete camera;
 	}
 
 void RawKinectViewer::toolCreationCallback(Vrui::ToolManager::ToolCreationCallbackData* cbData)
@@ -1841,6 +1836,10 @@ void RawKinectViewer::toolCreationCallback(Vrui::ToolManager::ToolCreationCallba
 
 void RawKinectViewer::frame(void)
 	{
+	/* Lock the most recent frame in the color frame triple buffer: */
+	if(colorFrames.lockNewValue())
+		++colorFrameVersion;
+	
 	/* Lock the most recent frame in the depth frame triple buffer: */
 	if(depthFrames.lockNewValue())
 		{
@@ -1876,10 +1875,6 @@ void RawKinectViewer::frame(void)
 				showAverageFrame=true;
 			}
 		}
-	
-	/* Lock the most recent frame in the color frame triple buffer: */
-	if(colorFrames.lockNewValue())
-		++colorFrameVersion;
 	}
 
 void RawKinectViewer::display(GLContextData& contextData) const
@@ -1947,7 +1942,7 @@ void RawKinectViewer::display(GLContextData& contextData) const
 		if(dataItem->depthFrameVersion!=depthFrameVersion)
 			{
 			/* Upload the depth frame into the texture object: */
-			const FrameBuffer& depthFrame=depthFrames.getLockedValue();
+			const Kinect::FrameBuffer& depthFrame=depthFrames.getLockedValue();
 			unsigned int width=depthFrame.getSize(0);
 			unsigned int height=depthFrame.getSize(1);
 			const GLushort* framePtr=static_cast<const GLushort*>(depthFrame.getBuffer());
@@ -2012,7 +2007,7 @@ void RawKinectViewer::display(GLContextData& contextData) const
 	if(dataItem->colorFrameVersion!=colorFrameVersion)
 		{
 		/* Upload the color frame into the texture object: */
-		const FrameBuffer& colorFrame=colorFrames.getLockedValue();
+		const Kinect::FrameBuffer& colorFrame=colorFrames.getLockedValue();
 		unsigned int width=colorFrame.getSize(0);
 		unsigned int height=colorFrame.getSize(1);
 		const GLubyte* framePtr=static_cast<const GLubyte*>(colorFrame.getBuffer());

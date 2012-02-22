@@ -1,7 +1,7 @@
 /***********************************************************************
-KinectMotor - Wrapper class to represent the motor and accelerometer
-interface aspect of the Kinect sensor.
-Copyright (c) 2010 Oliver Kreylos
+Motor - Wrapper class to represent the motor and accelerometer interface
+aspect of the Kinect sensor.
+Copyright (c) 2010-2011 Oliver Kreylos
 
 This file is part of the Kinect 3D Video Capture Project (Kinect).
 
@@ -21,23 +21,25 @@ Software Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA
 02111-1307 USA
 ***********************************************************************/
 
-#include <Kinect/KinectMotor.h>
+#include <Kinect/Motor.h>
 
 #include <Misc/ThrowStdErr.h>
-#include <Kinect/USBContext.h>
-#include <Kinect/USBDeviceList.h>
+#include <USB/Context.h>
+#include <USB/DeviceList.h>
 
-/****************************
-Methods of class KinectMotor:
-****************************/
+namespace Kinect {
 
-KinectMotor::KinectMotor(USBContext& usbContext,size_t index)
+/**********************
+Methods of class Motor:
+**********************/
+
+Motor::Motor(USB::Context& usbContext,size_t index)
 	{
 	/* Get the index-th Kinect motor device from the context: */
-	USBDeviceList deviceList(usbContext);
-	USBDevice::operator=(deviceList.getDevice(0x045e,0x02b0,index));
+	USB::DeviceList deviceList(usbContext);
+	USB::Device::operator=(deviceList.getDevice(0x045e,0x02b0,index));
 	if(!isValid())
-		Misc::throwStdErr("KinectMotor::KinectMotor: Less than %d Kinect motor devices detected",int(index));
+		Misc::throwStdErr("Kinect::Motor::Motor: Less than %d Kinect motor devices detected",int(index));
 	
 	/* Open and prepare the device: */
 	open();
@@ -45,13 +47,13 @@ KinectMotor::KinectMotor(USBContext& usbContext,size_t index)
 	claimInterface(0);
 	}
 
-void KinectMotor::setLED(LEDState newLEDState)
+void Motor::setLED(Motor::LEDState newLEDState)
 	{
 	/* Write an LED control message: */
 	writeControl(0x40,0x06,newLEDState,0x0000,0,0);
 	}
 
-void KinectMotor::setPitch(int pitch)
+void Motor::setPitch(int pitch)
 	{
 	/* Limit the pitch value to valid interval to prevent motor breakage: */
 	if(pitch<-35)
@@ -67,7 +69,7 @@ void KinectMotor::setPitch(int pitch)
 	writeControl(0x40,0x31,pitch,0x0000,0,0);
 	}
 
-void KinectMotor::readAccelerometers(float accels[3])
+void Motor::readAccelerometers(float accels[3])
 	{
 	/* Read the raw accelerometer values: */
 	unsigned char data[32];
@@ -83,5 +85,7 @@ void KinectMotor::readAccelerometers(float accels[3])
 			}
 		}
 	else
-		Misc::throwStdErr("KinectMotor::readAccelerometers: Short control packet, received %d bytes instead of 8",int(dataSize));
+		Misc::throwStdErr("Kinect::Motor::readAccelerometers: Short control packet, received %d bytes instead of 8",int(dataSize));
 	}
+
+}

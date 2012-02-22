@@ -38,7 +38,7 @@ Software Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA
 #include <Kinect/FrameBuffer.h>
 #include <Kinect/DepthFrameReader.h>
 #include <Kinect/ColorFrameReader.h>
-#include <Kinect/KinectProjector.h>
+#include <Kinect/Projector.h>
 
 /* Forward declarations: */
 namespace Cluster {
@@ -50,21 +50,16 @@ class KinectClient
 	{
 	/* Embedded classes: */
 	private:
-	typedef Geometry::OrthogonalTransformation<double,3> OGTransform; // Type for facade transformations
-	typedef Geometry::ProjectiveTransformation<double,3> PTransform; // Type for reprojection and texture transformations
-	
 	struct CameraState // Structure to hold state related to displaying a color and depth stream from a remote Kinect camera
 		{
 		/* Elements: */
 		public:
-		DepthFrameReader depthDecompressor; // Decompressor for depth frames
-		ColorFrameReader colorDecompressor; // Decompressor for color frames
-		KinectProjector projector; // Projector to reproject and render the camera's facade
-		OGTransform facadeTransform; // The camera's facade transform
+		Kinect::ColorFrameReader colorDecompressor; // Decompressor for color frames
+		Kinect::DepthFrameReader depthDecompressor; // Decompressor for depth frames
+		Kinect::Projector projector; // Projector to reproject and render the 3D video facade
 		
 		/* Constructors and destructors: */
 		CameraState(IO::File& source); // Initializes camera state by reading from given data source
-		~CameraState(void);
 		};
 	
 	/* Elements: */
@@ -74,13 +69,13 @@ class KinectClient
 	Threads::Thread receivingThread; // Thread receiving frame data from the server
 	#if KINECTCLIENT_DELAY
 	Threads::Spinlock metaFrameQueueMutex; // Mutex serializing access to the metaframe queue
-	std::deque<FrameBuffer*> metaFrameQueue; // Queoe of complete metaframes waiting to be displayed
+	std::deque<FrameBuffer*> metaFrameQueue; // Queue of complete metaframes waiting to be displayed
 	#else
-	Threads::TripleBuffer<FrameBuffer*> metaFrames; // Triple buffer holding complete metaframes (depth and color interleaved)
+	Threads::TripleBuffer<Kinect::FrameBuffer*> metaFrames; // Triple buffer holding complete metaframes (depth and color interleaved)
 	#endif
 	unsigned int currentMetaFrameIndex; // Index of the meta frame currently being received from the server
-	unsigned int numMissingDepthFrames; // Number of depth frames still missing from the current meta frame
 	unsigned int numMissingColorFrames; // Number of color frames still missing from the current meta frame
+	unsigned int numMissingDepthFrames; // Number of depth frames still missing from the current meta frame
 	volatile bool keepReceiving; // Flag to cleanly shut down the receiving thread
 	
 	/* Private methods: */

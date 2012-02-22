@@ -1,6 +1,6 @@
 /***********************************************************************
 ColorFrameReader - Class to read compressed color frames from a source.
-Copyright (c) 2010 Oliver Kreylos
+Copyright (c) 2010-2011 Oliver Kreylos
 
 This file is part of the Kinect 3D Video Capture Project (Kinect).
 
@@ -20,8 +20,8 @@ Software Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA
 02111-1307 USA
 ***********************************************************************/
 
-#ifndef COLORFRAMEREADER_INCLUDED
-#define COLORFRAMEREADER_INCLUDED
+#ifndef KINECT_COLORFRAMEREADER_INCLUDED
+#define KINECT_COLORFRAMEREADER_INCLUDED
 
 #include <Video/Config.h>
 #if VIDEO_CONFIG_HAVE_THEORA
@@ -32,7 +32,11 @@ Software Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA
 namespace IO {
 class File;
 }
+namespace Kinect {
 class FrameBuffer;
+}
+
+namespace Kinect {
 
 class ColorFrameReader
 	{
@@ -47,7 +51,7 @@ class ColorFrameReader
 	
 	/* Constructors and destructors: */
 	public:
-	ColorFrameReader(IO::File& sSource); // Creates a color frame reader for the given sink
+	ColorFrameReader(IO::File& sSource); // Creates a color frame reader for the given source
 	~ColorFrameReader(void);
 	
 	/* Methods: */
@@ -57,5 +61,7 @@ class ColorFrameReader
 		}
 	FrameBuffer readNextFrame(void); // Reads, decompresses, and returns the next color frame
 	};
+
+}
 
 #endif

@@ -1,7 +1,7 @@
 /***********************************************************************
-KinectPlayback - Class implementing a fake Kinect device by playing back
-previously recorded time-stamped depth and color frames.
-Copyright (c) 2010 Oliver Kreylos
+FileFrameSource - Class to stream depth and color frames from a pair of
+time-stamped depth and color stream files.
+Copyright (c) 2010-2011 Oliver Kreylos
 
 This file is part of the Kinect 3D Video Capture Project (Kinect).
 
@@ -21,22 +21,42 @@ Software Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA
 02111-1307 USA
 ***********************************************************************/
 
-#include <Kinect/KinectPlayback.h>
+#include <Kinect/FileFrameSource.h>
 
-#include <Misc/FunctionCalls.h>
 #include <Misc/Time.h>
-#include <IO/File.h>
+#include <Misc/FunctionCalls.h>
 #include <IO/OpenFile.h>
 #include <Math/Constants.h>
 #include <Geometry/GeometryMarshallers.h>
-#include <Kinect/DepthFrameReader.h>
+#include <Kinect/FrameBuffer.h>
 #include <Kinect/ColorFrameReader.h>
+#include <Kinect/DepthFrameReader.h>
 
-/*******************************
-Methods of class KinectPlayback:
-*******************************/
+namespace Kinect {
 
-void* KinectPlayback::playbackThreadMethod(void)
+/********************************
+Methods of class FileFrameSource:
+********************************/
+
+void FileFrameSource::initialize(void)
+	{
+	/* Read the color and depth projections from their respective files: */
+	intrinsicParameters.colorProjection=Misc::Marshaller<FrameSource::IntrinsicParameters::PTransform>::read(*colorFrameFile);
+	intrinsicParameters.depthProjection=Misc::Marshaller<FrameSource::IntrinsicParameters::PTransform>::read(*depthFrameFile);
+	
+	/* Read the camera transformation from the depth file: */
+	extrinsicParameters=Misc::Marshaller<FrameSource::ExtrinsicParameters>::read(*depthFrameFile);
+	
+	/* Create the color and depth frame readers: */
+	colorFrameReader=new ColorFrameReader(*colorFrameFile);
+	depthFrameReader=new DepthFrameReader(*depthFrameFile);
+	
+	/* Get the depth reader's frame size: */
+	for(int i=0;i<2;++i)
+		depthSize[i]=depthFrameReader->getSize()[i];
+	}
+
+void* FileFrameSource::playbackThreadMethod(void)
 	{
 	Threads::Thread::setCancelState(Threads::Thread::CANCEL_ENABLE);
 	// Threads::Thread::setCancelType(Threads::Thread::CANCEL_ASYNCHRONOUS);
@@ -46,20 +66,20 @@ void* KinectPlayback::playbackThreadMethod(void)
 	int currentDepthFrame=2;
 	unsigned int numDepthFrames=0;
 	
+	/* Load the first color frame: */
+	FrameBuffer colorFrame=colorFrameReader->readNextFrame();
+	
 	/* Load the first depth frame: */
 	currentDepthFrame=(currentDepthFrame+1)%3;
 	depthFrames[currentDepthFrame]=depthFrameReader->readNextFrame();
 	++numDepthFrames;
 	
-	/* Load the first color frame: */
-	FrameBuffer colorFrame=colorFrameReader->readNextFrame();
-	
 	while(true)
 		{
 		/* Wait until the next frame is due: */
-		double dueTime=depthFrames[currentDepthFrame].timeStamp;
-		if(dueTime>colorFrame.timeStamp)
-			dueTime=colorFrame.timeStamp;
+		double dueTime=colorFrame.timeStamp;
+		if(dueTime>depthFrames[currentDepthFrame].timeStamp)
+			dueTime=depthFrames[currentDepthFrame].timeStamp;
 		double currentTime=frameTimer.peekTime();
 		if(currentTime<dueTime)
 			{
@@ -68,6 +88,17 @@ void* KinectPlayback::playbackThreadMethod(void)
 			}
 		
 		/* Check which frame has become active: */
+		if(currentTime>=colorFrame.timeStamp)
+			{
+			if(colorStreamingCallback!=0)
+				{
+				/* Post the next color frame to the consumer: */
+				(*colorStreamingCallback)(colorFrame);
+				}
+			
+			/* Read the next color frame: */
+			colorFrame=colorFrameReader->readNextFrame();
+			}
 		if(currentTime>=depthFrames[currentDepthFrame].timeStamp)
 			{
 			if(depthStreamingCallback!=0&&numDepthFrames>=3)
@@ -143,49 +174,38 @@ void* KinectPlayback::playbackThreadMethod(void)
 			depthFrames[currentDepthFrame]=depthFrameReader->readNextFrame();
 			++numDepthFrames;
 			}
-		if(currentTime>=colorFrame.timeStamp)
-			{
-			if(colorStreamingCallback!=0)
-				{
-				/* Post the next color frame to the consumer: */
-				(*colorStreamingCallback)(colorFrame);
-				}
-			
-			/* Read the next color frame: */
-			colorFrame=colorFrameReader->readNextFrame();
-			}
 		}
 	
 	return 0;
 	}
 
-KinectPlayback::KinectPlayback(const char* depthFrameFileName,const char* colorFrameFileName)
-	:depthFrameFile(IO::openFile(depthFrameFileName)),
-	 depthFrameReader(0),
-	 colorFrameFile(IO::openFile(colorFrameFileName)),
-	 colorFrameReader(0),
-	 depthStreamingCallback(0),colorStreamingCallback(0),
+FileFrameSource::FileFrameSource(const char* colorFrameFileName,const char* depthFrameFileName)
+	:colorFrameFile(IO::openFile(colorFrameFileName)),
+	 depthFrameFile(IO::openFile(depthFrameFileName)),
+	 colorFrameReader(0),depthFrameReader(0),
+	 colorStreamingCallback(0),depthStreamingCallback(0),
 	 numBackgroundFrames(0),backgroundFrame(0),removeBackground(false)
 	{
-	/* Read the depth frame file's header: */
-	depthFrameFile->setEndianness(Misc::LittleEndian);
-	depthFrameFile->read<double>(depthMatrix,4*4);
-	projectorTransform=Misc::Marshaller<Transform>::read(*depthFrameFile);
-	
-	/* Create the depth frame reader: */
-	depthFrameReader=new DepthFrameReader(*depthFrameFile);
-	for(int i=0;i<2;++i)
-		depthSize[i]=depthFrameReader->getSize()[i];
-	
-	/* Read the color frame file's header: */
+	/* Initialize the frame files: */
 	colorFrameFile->setEndianness(Misc::LittleEndian);
-	colorFrameFile->read<double>(colorMatrix,4*4);
+	depthFrameFile->setEndianness(Misc::LittleEndian);
 	
-	/* Create the color frame reader: */
-	colorFrameReader=new ColorFrameReader(*colorFrameFile);
+	/* Initialize the file frame source: */
+	initialize();
 	}
 
-KinectPlayback::~KinectPlayback(void)
+FileFrameSource::FileFrameSource(IO::FilePtr sColorFrameFile,IO::FilePtr sDepthFrameFile)
+	:colorFrameFile(sColorFrameFile),
+	 depthFrameFile(sDepthFrameFile),
+	 colorFrameReader(0),depthFrameReader(0),
+	 colorStreamingCallback(0),depthStreamingCallback(0),
+	 numBackgroundFrames(0),backgroundFrame(0),removeBackground(false)
+	{
+	/* Initialize the file frame source: */
+	initialize();
+	}
+
+FileFrameSource::~FileFrameSource(void)
 	{
 	/* Stop the playback thread: */
 	if(!playbackThread.isJoined())
@@ -195,35 +215,78 @@ KinectPlayback::~KinectPlayback(void)
 		}
 	
 	/* Delete the callbacks: */
-	delete depthStreamingCallback;
 	delete colorStreamingCallback;
+	delete depthStreamingCallback;
 	
 	/* Delete the frame readers: */
-	delete depthFrameReader;
 	delete colorFrameReader;
+	delete depthFrameReader;
 	
 	delete[] backgroundFrame;
 	}
 
-void KinectPlayback::resetFrameTimer(void)
+FrameSource::IntrinsicParameters FileFrameSource::getIntrinsicParameters(void) const
+	{
+	return intrinsicParameters;
+	}
+
+FrameSource::ExtrinsicParameters FileFrameSource::getExtrinsicParameters(void) const
+	{
+	return extrinsicParameters;
+	}
+
+const unsigned int* FileFrameSource::getActualFrameSize(int sensor) const
+	{
+	switch(sensor)
+		{
+		case COLOR:
+			return colorFrameReader->getSize();
+			break;
+		
+		case DEPTH:
+			return depthSize;
+			break;
+		
+		default:
+			return 0;
+		}
+	}
+
+void FileFrameSource::startStreaming(FrameSource::StreamingCallback* newColorStreamingCallback,FrameSource::StreamingCallback* newDepthStreamingCallback)
+	{
+	/* Set the streaming callbacks: */
+	delete colorStreamingCallback;
+	colorStreamingCallback=newColorStreamingCallback;
+	delete depthStreamingCallback;
+	depthStreamingCallback=newDepthStreamingCallback;
+	
+	/* Start the playback thread: */
+	playbackThread.start(this,&FileFrameSource::playbackThreadMethod);
+	}
+
+void FileFrameSource::stopStreaming(void)
+	{
+	/* Stop the playback thread: */
+	if(!playbackThread.isJoined())
+		{
+		playbackThread.cancel();
+		playbackThread.join();
+		}
+	
+	/* Delete the callbacks: */
+	delete colorStreamingCallback;
+	colorStreamingCallback=0;
+	delete depthStreamingCallback;
+	depthStreamingCallback=0;
+	}
+
+void FileFrameSource::resetFrameTimer(void)
 	{
 	/* Reset the frame timer: */
 	frameTimer.elapse();
 	}
 
-void KinectPlayback::startStreaming(KinectPlayback::StreamingCallback* newColorStreamingCallback,KinectPlayback::StreamingCallback* newDepthStreamingCallback)
-	{
-	/* Set the streaming callbacks: */
-	delete depthStreamingCallback;
-	depthStreamingCallback=newDepthStreamingCallback;
-	delete colorStreamingCallback;
-	colorStreamingCallback=newColorStreamingCallback;
-	
-	/* Start the playback thread: */
-	playbackThread.start(this,&KinectPlayback::playbackThreadMethod);
-	}
-
-void KinectPlayback::captureBackground(unsigned int newNumBackgroundFrames)
+void FileFrameSource::captureBackground(unsigned int newNumBackgroundFrames)
 	{
 	/* Initialize the background frame buffer: */
 	if(backgroundFrame==0)
@@ -239,24 +302,10 @@ void KinectPlayback::captureBackground(unsigned int newNumBackgroundFrames)
 	numBackgroundFrames=newNumBackgroundFrames;
 	}
 
-void KinectPlayback::setRemoveBackground(bool newRemoveBackground)
+void FileFrameSource::setRemoveBackground(bool newRemoveBackground)
 	{
 	/* Set the background removal flag: */
 	removeBackground=newRemoveBackground;
 	}
 
-void KinectPlayback::stopStreaming(void)
-	{
-	/* Stop the playback thread: */
-	if(!playbackThread.isJoined())
-		{
-		playbackThread.cancel();
-		playbackThread.join();
-		}
-	
-	/* Delete the callbacks: */
-	delete depthStreamingCallback;
-	depthStreamingCallback=0;
-	delete colorStreamingCallback;
-	colorStreamingCallback=0;
-	}
+}

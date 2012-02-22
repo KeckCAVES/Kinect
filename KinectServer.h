@@ -32,27 +32,29 @@ Software Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA
 #include <Comm/ListeningTCPSocket.h>
 #include <Geometry/OrthogonalTransformation.h>
 #include <Geometry/ProjectiveTransformation.h>
-#include <Kinect/KinectCamera.h>
+#include <Kinect/Camera.h>
 #include <Kinect/DepthFrameWriter.h>
 #include <Kinect/ColorFrameWriter.h>
 
 /* Forward declarations: */
+class libusb_device;
 namespace Misc {
 class ConfigurationFileSection;
+}
+namespace USB {
+class USBContext;
 }
 namespace Comm {
 class TCPPipe;
 }
-class USBContext;
+namespace Kinect {
 class FrameBuffer;
+}
 
 class KinectServer
 	{
 	/* Embedded classes: */
 	private:
-	typedef Geometry::OrthogonalTransformation<double,3> OGTransform; // Type for facade transformations
-	typedef Geometry::ProjectiveTransformation<double,3> PTransform; // Type for reprojection and texture transformations
-	
 	struct CameraState // Structure to hold state related to capturing and compressing a color and depth stream from a Kinect camera
 		{
 		/* Embedded classes: */
@@ -74,39 +76,35 @@ class KinectServer
 		
 		/* Elements: */
 		public:
-		KinectCamera camera; // Camera generating the depth and color streams
-		
-		IO::VariableMemoryFile depthFile; // In-memory file to receive compressed depth frame data
-		DepthFrameWriter depthCompressor; // Compressor for depth frames
-		IO::VariableMemoryFile::BufferChain depthHeaders; // Write buffer containing the depth compressor's header data
-		unsigned int depthFrameIndex; // Sequential frame index for depth frames
-		Threads::TripleBuffer<CompressedFrame> depthFrames; // Triple buffer of compressed depth frames
-		Threads::MutexCond& newDepthFrameCond; // Condition variable to signal a new depth frame
-		bool hasSentDepthFrame; // Flag whether the camera has sent a depth frame as part of the current meta-frame
+		Kinect::Camera camera; // Camera generating the depth and color streams
 		
 		IO::VariableMemoryFile colorFile; // In-memory file to receive compressed color frame data
-		ColorFrameWriter colorCompressor; // Compressor for color frames
+		Kinect::ColorFrameWriter colorCompressor; // Compressor for color frames
 		IO::VariableMemoryFile::BufferChain colorHeaders; // Write buffer containing the color compressor's header data
 		unsigned int colorFrameIndex; // Sequential frame index for color frames
 		Threads::TripleBuffer<CompressedFrame> colorFrames; // Triple buffer of compressed color frames
 		Threads::MutexCond& newColorFrameCond; // Condition variable to signal a new depth frame
 		bool hasSentColorFrame; // Flag whether the camera has sent a color frame as part of the current meta-frame
 		
-		PTransform depthMatrix; // Reprojection transformation for depth pixels
-		PTransform colorMatrix; // Reprojection transformation for color pixels
-		OGTransform facadeTransform; // The camera's facade transform
+		IO::VariableMemoryFile depthFile; // In-memory file to receive compressed depth frame data
+		Kinect::DepthFrameWriter depthCompressor; // Compressor for depth frames
+		IO::VariableMemoryFile::BufferChain depthHeaders; // Write buffer containing the depth compressor's header data
+		unsigned int depthFrameIndex; // Sequential frame index for depth frames
+		Threads::TripleBuffer<CompressedFrame> depthFrames; // Triple buffer of compressed depth frames
+		Threads::MutexCond& newDepthFrameCond; // Condition variable to signal a new depth frame
+		bool hasSentDepthFrame; // Flag whether the camera has sent a depth frame as part of the current meta-frame
 		
 		/* Private methods: */
-		void depthStreamingCallback(const FrameBuffer& frame);
-		void colorStreamingCallback(const FrameBuffer& frame);
+		void colorStreamingCallback(const Kinect::FrameBuffer& frame);
+		void depthStreamingCallback(const Kinect::FrameBuffer& frame);
 		
 		/* Constructors and destructors: */
-		CameraState(libusb_device* sDevice,Threads::MutexCond& sNewDepthFrameCond,Threads::MutexCond& sNewColorFrameCond); // Creates a capture and compression state for the given Kinect camera device
+		CameraState(libusb_device* sDevice,Threads::MutexCond& sNewColorFrameCond,Threads::MutexCond& sNewDepthFrameCond); // Creates a capture and compression state for the given Kinect camera device
 		~CameraState(void);
 		
 		/* Methods: */
 		void startStreaming(void); // Starts streaming from the Kinect camera
-		void writeHeaders(Comm::TCPPipe& socket) const; // Writes the camera's streaming headers to the given TCP socket
+		void writeHeaders(IO::File& sink) const; // Writes the camera's streaming headers to the given sink
 		};
 	
 	/* Elements: */
@@ -129,7 +127,7 @@ class KinectServer
 	
 	/* Constructors and destructors: */
 	public:
-	KinectServer(USBContext& usbContext,Misc::ConfigurationFileSection& configFileSection);
+	KinectServer(USB::Context& usbContext,Misc::ConfigurationFileSection& configFileSection);
 	~KinectServer(void);
 	
 	/* Methods: */

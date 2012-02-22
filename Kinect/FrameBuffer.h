@@ -1,7 +1,7 @@
 /***********************************************************************
 FrameBuffer - Class for reference-counted decoded color or depth frame
 buffers.
-Copyright (c) 2010 Oliver Kreylos
+Copyright (c) 2010-2011 Oliver Kreylos
 
 This file is part of the Kinect 3D Video Capture Project (Kinect).
 
@@ -21,19 +21,24 @@ Software Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA
 02111-1307 USA
 ***********************************************************************/
 
-#ifndef FRAMEBUFFER_INCLUDED
-#define FRAMEBUFFER_INCLUDED
+#ifndef KINECT_FRAMEBUFFER_INCLUDED
+#define KINECT_FRAMEBUFFER_INCLUDED
 
-#define FRAMEBUFFER_DEBUGLOCK 0
+#define KINECT_FRAMEBUFFER_DEBUGLOCK 0
 
-#if FRAMEBUFFER_DEBUGLOCK
+#if KINECT_FRAMEBUFFER_DEBUGLOCK
 #include <assert.h>
 #endif
 #include <new>
-#if FRAMEBUFFER_DEBUGLOCK
+#if KINECT_FRAMEBUFFER_DEBUGLOCK
 #include <iostream>
 #endif
-#include <Threads/Mutex.h>
+#include <Threads/Config.h>
+#if !THREADS_CONFIG_HAVE_BUILTIN_ATOMICS
+#include <Threads/Spinlock.h>
+#endif
+
+namespace Kinect {
 
 class FrameBuffer
 	{
@@ -43,23 +48,25 @@ class FrameBuffer
 		{
 		/* Elements: */
 		public:
-		Threads::Mutex refCountMutex; // Mutex protecting the reference counter
+		#if !THREADS_CONFIG_HAVE_BUILTIN_ATOMICS
+		Threads::Spinlock refCountMutex; // Mutex protecting the reference counter
+		#endif
 		unsigned int refCount; // Reference counter
-		#if FRAMEBUFFER_DEBUGLOCK
+		#if KINECT_FRAMEBUFFER_DEBUGLOCK
 		int destroyed;
 		#endif
 		
 		/* Constructors and destructors: */
 		BufferHeader(void)
 			:refCount(1)
-			#if FRAMEBUFFER_DEBUGLOCK
+			#if KINECT_FRAMEBUFFER_DEBUGLOCK
 			 ,destroyed(0)
 			#endif
 			{
 			}
 		~BufferHeader(void)
 			{
-			#if FRAMEBUFFER_DEBUGLOCK
+			#if KINECT_FRAMEBUFFER_DEBUGLOCK
 			destroyed=1;
 			#endif
 			}
@@ -67,20 +74,32 @@ class FrameBuffer
 		/* Methods: */
 		void ref(void) // References the buffer
 			{
-			#if FRAMEBUFFER_DEBUGLOCK
+			#if KINECT_FRAMEBUFFER_DEBUGLOCK
 			assert(destroyed==0);
 			#endif
-			Threads::Mutex::Lock refCountLock(refCountMutex);
+			#if THREADS_CONFIG_HAVE_BUILTIN_ATOMICS
+			__sync_add_and_fetch(&refCount,1);
+			#else
+			Threads::Spinlock::Lock refCountLock(refCountMutex);
 			++refCount;
+			#endif
 			}
 		bool unref(void) // Unreferences the buffer; returns true if buffer becomes orphaned
 			{
-			#if FRAMEBUFFER_DEBUGLOCK
+			bool result;
+			#if KINECT_FRAMEBUFFER_DEBUGLOCK
 			assert(destroyed==0);
 			#endif
-			Threads::Mutex::Lock refCountLock(refCountMutex);
+			#if THREADS_CONFIG_HAVE_BUILTIN_ATOMICS
+			result=__sync_sub_and_fetch(&refCount,1)==0;
+			#else
+			{
+			Threads::Spinlock::Lock refCountLock(refCountMutex);
 			--refCount;
-			return refCount==0;
+			result=refCount==0;
+			}
+			#endif
+			return result;
 			}
 		};
 	
@@ -127,7 +146,7 @@ class FrameBuffer
 		{
 		if(buffer!=source.buffer)
 			{
-			#if FRAMEBUFFER_DEBUGLOCK
+			#if KINECT_FRAMEBUFFER_DEBUGLOCK
 			void* oldBuffer=buffer;
 			#endif
 			
@@ -188,5 +207,7 @@ class FrameBuffer
 		return buffer;
 		}
 	};
+
+}
 
 #endif

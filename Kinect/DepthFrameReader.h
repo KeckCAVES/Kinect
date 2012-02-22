@@ -1,7 +1,7 @@
 /***********************************************************************
 DepthFrameReader - Class to read compressed depth frames from a source,
 and pass decompressed time-stamped depth frames to a client.
-Copyright (c) 2010 Oliver Kreylos
+Copyright (c) 2010-2011 Oliver Kreylos
 
 This file is part of the Kinect 3D Video Capture Project (Kinect).
 
@@ -21,8 +21,8 @@ Software Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA
 02111-1307 USA
 ***********************************************************************/
 
-#ifndef DEPTHFRAMEREADER_INCLUDED
-#define DEPTHFRAMEREADER_INCLUDED
+#ifndef KINECT_DEPTHFRAMEREADER_INCLUDED
+#define KINECT_DEPTHFRAMEREADER_INCLUDED
 
 #include <stddef.h>
 #include <Kinect/HilbertCurve.h>
@@ -31,7 +31,11 @@ Software Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA
 namespace IO {
 class File;
 }
+namespace Kinect {
 class FrameBuffer;
+}
+
+namespace Kinect {
 
 class DepthFrameReader
 	{
@@ -88,5 +92,7 @@ class DepthFrameReader
 		}
 	FrameBuffer readNextFrame(void); // Reads, decompresses, and returns the next depth frame
 	};
+
+}
 
 #endif

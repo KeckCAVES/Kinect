@@ -32,9 +32,8 @@ Software Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA
 #include <GL/gl.h>
 #include <GL/GLTransformationWrappers.h>
 #include <Sound/SoundPlayer.h>
-#include <Kinect/DepthFrameReader.h>
 #include <Kinect/ColorFrameReader.h>
-#include <Kinect/KinectProjector.h>
+#include <Kinect/DepthFrameReader.h>
 #include <Vrui/Vrui.h>
 #include <Vrui/VisletManager.h>
 #include <Vrui/OpenFile.h>
@@ -142,52 +141,16 @@ extern "C" void destroyKinectPlayerFactory(Vrui::VisletFactory* factory)
 Methods of class KinectPlayer::KinectStreamer:
 *********************************************/
 
-void* KinectPlayer::KinectStreamer::depthDecompressorThreadMethod(void)
-	{
-	Threads::Thread::setCancelState(Threads::Thread::CANCEL_ENABLE);
-	// Threads::Thread::setCancelType(Threads::Thread::CANCEL_ASYNCHRONOUS);
-	
-	/* Create a depth frame reader for the depth file: */
-	DepthFrameReader depthFrameReader(*depthFile);
-	
-	/* Read depth frames: */
-	while(true)
-		{
-		/* Read the next depth frame: */
-		FrameBuffer nextFrame=depthFrameReader.readNextFrame();
-		
-		/* Put the new depth frame into the queue: */
-		{
-		Threads::MutexCond::Lock frameQueueLock(frameQueueCond);
-		while(numDepthFrames==2)
-			frameQueueCond.wait(frameQueueLock);
-		mostRecentDepthFrame=1-mostRecentDepthFrame;
-		depthFrames[mostRecentDepthFrame]=nextFrame;
-		++numDepthFrames;
-		if(numDepthFrames==1)
-			frameQueueCond.broadcast();
-		}
-		
-		if(nextFrame.timeStamp==Math::Constants<double>::max)
-			break;
-		}
-	
-	return 0;
-	}
-
 void* KinectPlayer::KinectStreamer::colorDecompressorThreadMethod(void)
 	{
 	Threads::Thread::setCancelState(Threads::Thread::CANCEL_ENABLE);
 	// Threads::Thread::setCancelType(Threads::Thread::CANCEL_ASYNCHRONOUS);
 	
-	/* Create a color frame reader for the color file: */
-	ColorFrameReader colorFrameReader(*colorFile);
-	
 	/* Read color frames: */
 	while(true)
 		{
 		/* Read the next color frame: */
-		FrameBuffer nextFrame=colorFrameReader.readNextFrame();
+		Kinect::FrameBuffer nextFrame=colorDecompressor->readNextFrame();
 		
 		/* Put the new color frame into the queue: */
 		{
@@ -208,27 +171,41 @@ void* KinectPlayer::KinectStreamer::colorDecompressorThreadMethod(void)
 	return 0;
 	}
 
-KinectPlayer::KinectStreamer::KinectStreamer(const KinectPlayerFactory::KinectConfig& config)
-	:projector(0),
-	 numDepthFrames(0),mostRecentDepthFrame(0),
-	 numColorFrames(0),mostRecentColorFrame(0)
+void* KinectPlayer::KinectStreamer::depthDecompressorThreadMethod(void)
 	{
-	/* Open the depth file: */
-	std::string depthFileName=config.saveFileNamePrefix;
-	depthFileName.push_back('-');
-	depthFileName.append(config.deviceSerialNumber);
-	depthFileName.append(".depth");
-	depthFile=Vrui::openFile(depthFileName.c_str());
-	depthFile->setEndianness(Misc::LittleEndian);
+	Threads::Thread::setCancelState(Threads::Thread::CANCEL_ENABLE);
+	// Threads::Thread::setCancelType(Threads::Thread::CANCEL_ASYNCHRONOUS);
 	
-	/* Read the depth matrix and projector transformation: */
-	double depthMatrix[4*4];
-	depthFile->read<double>(depthMatrix,4*4);
-	projectorTransform=Misc::Marshaller<OGTransform>::read(*depthFile);
+	/* Read depth frames: */
+	while(true)
+		{
+		/* Read the next depth frame: */
+		Kinect::FrameBuffer nextFrame=depthDecompressor->readNextFrame();
+		
+		/* Put the new depth frame into the queue: */
+		{
+		Threads::MutexCond::Lock frameQueueLock(frameQueueCond);
+		while(numDepthFrames==2)
+			frameQueueCond.wait(frameQueueLock);
+		mostRecentDepthFrame=1-mostRecentDepthFrame;
+		depthFrames[mostRecentDepthFrame]=nextFrame;
+		++numDepthFrames;
+		if(numDepthFrames==1)
+			frameQueueCond.broadcast();
+		}
+		
+		if(nextFrame.timeStamp==Math::Constants<double>::max)
+			break;
+		}
 	
-	/* Start the depth decompression thread: */
-	depthDecompressorThread.start(this,&KinectPlayer::KinectStreamer::depthDecompressorThreadMethod);
-	
+	return 0;
+	}
+
+KinectPlayer::KinectStreamer::KinectStreamer(const KinectPlayerFactory::KinectConfig& config)
+	:colorDecompressor(0),depthDecompressor(0),
+	 numColorFrames(0),mostRecentColorFrame(0),
+	 numDepthFrames(0),mostRecentDepthFrame(0)
+	{
 	/* Open the color file: */
 	std::string colorFileName=config.saveFileNamePrefix;
 	colorFileName.push_back('-');
@@ -237,48 +214,54 @@ KinectPlayer::KinectStreamer::KinectStreamer(const KinectPlayerFactory::KinectCo
 	colorFile=Vrui::openFile(colorFileName.c_str());
 	colorFile->setEndianness(Misc::LittleEndian);
 	
-	/* Read the color matrix: */
-	double colorMatrix[4*4];
-	colorFile->read<double>(colorMatrix,4*4);
+	/* Open the depth file: */
+	std::string depthFileName=config.saveFileNamePrefix;
+	depthFileName.push_back('-');
+	depthFileName.append(config.deviceSerialNumber);
+	depthFileName.append(".depth");
+	depthFile=Vrui::openFile(depthFileName.c_str());
+	depthFile->setEndianness(Misc::LittleEndian);
 	
-	/* Start the color decompression thread: */
+	/* Read the color and depth projections from their respective files: */
+	Kinect::FrameSource::IntrinsicParameters ips;
+	ips.colorProjection=Misc::Marshaller<Kinect::FrameSource::IntrinsicParameters::PTransform>::read(*colorFile);
+	ips.depthProjection=Misc::Marshaller<Kinect::FrameSource::IntrinsicParameters::PTransform>::read(*depthFile);
+	projector.setIntrinsicParameters(ips);
+	
+	/* Read the camera transformation from the depth file: */
+	Kinect::FrameSource::ExtrinsicParameters eps;
+	eps=Misc::Marshaller<Kinect::FrameSource::ExtrinsicParameters>::read(*depthFile);
+	projector.setExtrinsicParameters(eps);
+	
+	/* Create the color and depth decompressors: */
+	colorDecompressor=new Kinect::ColorFrameReader(*colorFile);
+	depthDecompressor=new Kinect::DepthFrameReader(*depthFile);
+	
+	/* Start the color and depth decompression threads: */
 	colorDecompressorThread.start(this,&KinectPlayer::KinectStreamer::colorDecompressorThreadMethod);
-	
-	/* Create the facade projector: */
-	projector=new KinectProjector(depthMatrix,colorMatrix);
+	depthDecompressorThread.start(this,&KinectPlayer::KinectStreamer::depthDecompressorThreadMethod);
 	}
 
 KinectPlayer::KinectStreamer::~KinectStreamer(void)
 	{
-	/* Delete the facade projector: */
-	delete projector;
-	
 	/* Shut down the depth and color decompression threads: */
-	depthDecompressorThread.cancel();
 	colorDecompressorThread.cancel();
-	depthDecompressorThread.join();
+	depthDecompressorThread.cancel();
 	colorDecompressorThread.join();
+	depthDecompressorThread.join();
+	
+	/* Delete the color and depth decompressors: */
+	delete colorDecompressor;
+	delete depthDecompressor;
 	}
 
 void KinectPlayer::KinectStreamer::updateFrames(double currentTimeStamp)
 	{
 	/* Wait until the next frame is newer than the new time step: */
-	FrameBuffer currentDepthFrame;
-	FrameBuffer currentColorFrame;
-	while(nextDepthFrame.timeStamp<=currentTimeStamp||nextColorFrame.timeStamp<=currentTimeStamp)
+	Kinect::FrameBuffer currentColorFrame;
+	Kinect::FrameBuffer currentDepthFrame;
+	while(nextColorFrame.timeStamp<=currentTimeStamp||nextDepthFrame.timeStamp<=currentTimeStamp)
 		{
-		if(nextDepthFrame.timeStamp<=currentTimeStamp)
-			{
-			currentDepthFrame=nextDepthFrame;
-			{
-			Threads::MutexCond::Lock frameQueueLock(frameQueueCond);
-			while(numDepthFrames==0)
-				frameQueueCond.wait(frameQueueLock);
-			nextDepthFrame=depthFrames[(mostRecentDepthFrame-numDepthFrames+3)%2];
-			if(--numDepthFrames==1)
-				frameQueueCond.broadcast();
-			}
-			}
 		if(nextColorFrame.timeStamp<=currentTimeStamp)
 			{
 			currentColorFrame=nextColorFrame;
@@ -291,26 +274,31 @@ void KinectPlayer::KinectStreamer::updateFrames(double currentTimeStamp)
 				frameQueueCond.broadcast();
 			}
 			}
+		if(nextDepthFrame.timeStamp<=currentTimeStamp)
+			{
+			currentDepthFrame=nextDepthFrame;
+			{
+			Threads::MutexCond::Lock frameQueueLock(frameQueueCond);
+			while(numDepthFrames==0)
+				frameQueueCond.wait(frameQueueLock);
+			nextDepthFrame=depthFrames[(mostRecentDepthFrame-numDepthFrames+3)%2];
+			if(--numDepthFrames==1)
+				frameQueueCond.broadcast();
+			}
+			}
 		}
 	
 	/* Update the projector: */
-	if(currentDepthFrame.timeStamp!=0.0)
-		projector->setDepthFrame(currentDepthFrame);
 	if(currentColorFrame.timeStamp!=0.0)
-		projector->setColorFrame(currentColorFrame);
+		projector.setColorFrame(currentColorFrame);
+	if(currentDepthFrame.timeStamp!=0.0)
+		projector.setDepthFrame(currentDepthFrame);
 	}
 
 void KinectPlayer::KinectStreamer::glRenderAction(GLContextData& contextData) const
 	{
-	/* Go to the camera's facade's coordinate system: */
-	glPushMatrix();
-	glMultMatrix(projectorTransform);
-	
 	/* Draw the camera's facade: */
-	projector->draw(contextData);
-	
-	/* Go back to the previous coordinate system: */
-	glPopMatrix();
+	projector.draw(contextData);
 	}
 
 /*************************************

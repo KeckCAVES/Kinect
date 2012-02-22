@@ -1,6 +1,6 @@
 /***********************************************************************
 KinectRecorder - Simple utility to save color and depth image streams
-from one or more Kinect devices to a time-stamped file.
+from one or more Kinect devices to a set of time-stamped files.
 Copyright (c) 2011 Oliver Kreylos
 
 This file is part of the Kinect 3D Video Capture Project (Kinect).
@@ -27,125 +27,82 @@ Software Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA
 #include <iostream>
 #include <Misc/FunctionCalls.h>
 #include <Misc/File.h>
+#include <USB/Context.h>
 #include <Geometry/GeometryValueCoders.h>
-#include <Kinect/USBContext.h>
 #include <Kinect/FrameBuffer.h>
-#include <Kinect/KinectCamera.h>
-#include <Kinect/KinectFrameSaver.h>
+#include <Kinect/Camera.h>
+#include <Kinect/FrameSaver.h>
 
 /**************
 Helper classes:
 **************/
 	
-class KinectStreamer // Helper class to stream 3D video data from a Kinect camera to a time-stamped file
+class KinectSaver // Helper class to save 3D video data from a Kinect camera to a pair of time-stamped files
 	{
 	/* Elements: */
 	public:
-	KinectCamera* camera; // Pointer to the camera
-	std::string serialNumber; // The camera's serial number
-	KinectFrameSaver* frameSaver; // Pointer to helper object saving depth and color frames received from the Kinect
-	
-	/* Private methods: */
-	void depthStreamingCallback(const FrameBuffer& frameBuffer); // Callback receiving depth frames from the Kinect camera
-	void colorStreamingCallback(const FrameBuffer& frameBuffer); // Callback receiving color frames from the Kinect camera
+	Kinect::Camera camera; // The camera whose video stream to save
+	Kinect::FrameSaver* frameSaver; // Pointer to helper object saving depth and color frames received from the Kinect
 	
 	/* Constructors and destructors: */
 	public:
-	KinectStreamer(USBContext& usbContext,int cameraIndex,bool highres,const char* fileNamePrefix); // Creates a streamer for the Kinect camera of the given index in the given USB context
-	~KinectStreamer(void); // Destroys the streamer
+	KinectSaver(USB::Context& usbContext,int cameraIndex,bool highres,const char* fileNamePrefix); // Creates a video stream saver for the Kinect camera of the given index in the given USB context
+	~KinectSaver(void); // Destroys the streamer
 	
 	/* Methods: */
-	KinectCamera* getCamera(void) // Returns a pointer to the streamer's camera
+	Kinect::Camera& getCamera(void) // Returns a pointer to the streamer's camera
 		{
 		return camera;
 		}
 	void startStreaming(void); // Begins streaming from the Kinect camera
 	};
 
-/*******************************
-Methods of class KinectStreamer:
-*******************************/
+/****************************
+Methods of class KinectSaver:
+****************************/
 
-void KinectStreamer::depthStreamingCallback(const FrameBuffer& frameBuffer)
+KinectSaver::KinectSaver(USB::Context& context,int cameraIndex,bool highres,const char* fileNamePrefix)
+	:camera(context,cameraIndex),frameSaver(0)
 	{
-	/* Save the frame: */
-	frameSaver->saveDepthFrame(frameBuffer);
-	}
-
-void KinectStreamer::colorStreamingCallback(const FrameBuffer& frameBuffer)
-	{
-	/* Save the frame: */
-	frameSaver->saveColorFrame(frameBuffer);
-	}
-
-KinectStreamer::KinectStreamer(USBContext& context,int cameraIndex,bool highres,const char* fileNamePrefix)
-	:camera(0),frameSaver(0)
-	{
-	/* Attach to and open the Kinect camera: */
-	camera=new KinectCamera(context,cameraIndex);
-	camera->open();
-	
-	/* Get the camera's serial number to load the proper calibration matrices: */
-	serialNumber=camera->getSerialNumber();
-	
-	/* Create the name of the calibration matrices file: */
-	std::string calibrationFileName="CameraCalibrationMatrices-";
-	calibrationFileName.append(serialNumber);
-	if(highres)
-		calibrationFileName.append("-high");
-	calibrationFileName.append(".dat");
-	
-	/* Read the camera's model space transformation: */
-	std::string transformFileName="ProjectorTransform-";
-	transformFileName.append(serialNumber);
-	transformFileName.append(".txt");
-	Misc::File transformFile(transformFileName.c_str(),"rt");
-	char transform[1024];
-	transformFile.gets(transform,sizeof(transform));
-	KinectFrameSaver::Transform projectorTransform=Misc::ValueCoder<KinectFrameSaver::Transform>::decode(transform,transform+strlen(transform),0);
-	
 	/* Set the camera's frame size: */
-	camera->setFrameSize(KinectCamera::COLOR,highres?KinectCamera::FS_1280_1024:KinectCamera::FS_640_480);
+	camera.setFrameSize(Kinect::FrameSource::COLOR,highres?Kinect::Camera::FS_1280_1024:Kinect::Camera::FS_640_480);
 	
 	/* Create the frame saver: */
-	std::string depthFrameFileName=fileNamePrefix;
-	depthFrameFileName.push_back('-');
-	depthFrameFileName.append(serialNumber);
-	depthFrameFileName.append(".depth");
 	std::string colorFrameFileName=fileNamePrefix;
 	colorFrameFileName.push_back('-');
-	colorFrameFileName.append(serialNumber);
+	colorFrameFileName.append(camera.getSerialNumber());
 	colorFrameFileName.append(".color");
-	frameSaver=new KinectFrameSaver(*camera,calibrationFileName.c_str(),projectorTransform,depthFrameFileName.c_str(),colorFrameFileName.c_str());
+	std::string depthFrameFileName=fileNamePrefix;
+	depthFrameFileName.push_back('-');
+	depthFrameFileName.append(camera.getSerialNumber());
+	depthFrameFileName.append(".depth");
+	frameSaver=new Kinect::FrameSaver(camera,colorFrameFileName.c_str(),depthFrameFileName.c_str());
 	}
 
-KinectStreamer::~KinectStreamer(void)
+KinectSaver::~KinectSaver(void)
 	{
 	/* Stop streaming: */
-	camera->stopStreaming();
-	
-	/* Close and disconnect from the Kinect camera device: */
-	delete camera;
+	camera.stopStreaming();
 	
 	/* Delete the frame saver: */
 	delete frameSaver;
 	}
 
-void KinectStreamer::startStreaming(void)
+void KinectSaver::startStreaming(void)
 	{
 	/* Start streaming: */
-	camera->startStreaming(Misc::createFunctionCall(this,&KinectStreamer::colorStreamingCallback),Misc::createFunctionCall(this,&KinectStreamer::depthStreamingCallback));
+	camera.startStreaming(Misc::createFunctionCall(frameSaver,&Kinect::FrameSaver::saveColorFrame),Misc::createFunctionCall(frameSaver,&Kinect::FrameSaver::saveDepthFrame));
 	}
 
 /*************
 Program state:
 *************/
 	
-USBContext usbContext; // USB device context
-std::vector<KinectStreamer*> streamers; // List of Kinect streamers, each connected to one Kinect camera
+USB::Context usbContext; // USB device context
+std::vector<KinectSaver*> savers; // List of Kinect video stream savers, each connected to one Kinect camera
 const char* backgroundFileNamePrefix=0;
 
-void saveBackground(KinectCamera& camera)
+void saveBackground(Kinect::Camera& camera)
 	{
 	if(backgroundFileNamePrefix!=0)
 		{ 
@@ -159,7 +116,7 @@ int main(int argc,char* argv[])
 	/* Enable background USB event handling: */
 	usbContext.startEventHandling();
 	
-	/* Add a streamer for each camera index passed on the command line: */
+	/* Add a video stream saver for each camera index passed on the command line: */
 	const char* fileNamePrefix="KinectRecorder";
 	bool highres=false;
 	int numBackgroundFrames=150;
@@ -203,52 +160,52 @@ int main(int argc,char* argv[])
 			{
 			/* Add a streamer for the selected camera: */
 			int cameraIndex=atoi(argv[i]);
-			streamers.push_back(new KinectStreamer(usbContext,cameraIndex,highres,fileNamePrefix));
+			savers.push_back(new KinectSaver(usbContext,cameraIndex,highres,fileNamePrefix));
 			}
 		}
-	
-	/* Synchronize all cameras' time bases: */
-	for(std::vector<KinectStreamer*>::iterator sIt=streamers.begin();sIt!=streamers.end();++sIt)
-		(*sIt)->getCamera()->resetFrameTimer();
-	
-	/* Start recording: */
-	for(std::vector<KinectStreamer*>::iterator sIt=streamers.begin();sIt!=streamers.end();++sIt)
-		(*sIt)->startStreaming();
 	
 	if(numBackgroundFrames>0)
 		{
 		/* Enable background removal on all cameras: */
-		for(std::vector<KinectStreamer*>::iterator sIt=streamers.begin();sIt!=streamers.end();++sIt)
+		for(std::vector<KinectSaver*>::iterator sIt=savers.begin();sIt!=savers.end();++sIt)
 			{
 			if(backgroundFileNamePrefix!=0)
-				(*sIt)->getCamera()->captureBackground(numBackgroundFrames,true,Misc::createFunctionCall(saveBackground));
+				(*sIt)->getCamera().captureBackground(numBackgroundFrames,true,Misc::createFunctionCall(saveBackground));
 			else
-				(*sIt)->getCamera()->captureBackground(numBackgroundFrames,true);
+				(*sIt)->getCamera().captureBackground(numBackgroundFrames,true);
 			
 			if(maxDepth>0)
-				(*sIt)->getCamera()->setMaxDepth(maxDepth);
+				(*sIt)->getCamera().setMaxDepth(maxDepth);
 			
-			(*sIt)->getCamera()->setRemoveBackground(true);
-			(*sIt)->getCamera()->setBackgroundRemovalFuzz(backgroundRemovalFuzz);
+			(*sIt)->getCamera().setRemoveBackground(true);
+			(*sIt)->getCamera().setBackgroundRemovalFuzz(backgroundRemovalFuzz);
 			}
 		}
 	else if(backgroundFileNamePrefix!=0)
 		{
 		/* Load a background file and enable background removal on all cameras: */
-		for(std::vector<KinectStreamer*>::iterator sIt=streamers.begin();sIt!=streamers.end();++sIt)
+		for(std::vector<KinectSaver*>::iterator sIt=savers.begin();sIt!=savers.end();++sIt)
 			{
-			(*sIt)->getCamera()->loadBackground(backgroundFileNamePrefix);
-			(*sIt)->getCamera()->setRemoveBackground(true);
-			(*sIt)->getCamera()->setBackgroundRemovalFuzz(backgroundRemovalFuzz);
+			(*sIt)->getCamera().loadBackground(backgroundFileNamePrefix);
+			(*sIt)->getCamera().setRemoveBackground(true);
+			(*sIt)->getCamera().setBackgroundRemovalFuzz(backgroundRemovalFuzz);
 			}
 		}
+	
+	/* Synchronize all cameras' time bases: */
+	for(std::vector<KinectSaver*>::iterator sIt=savers.begin();sIt!=savers.end();++sIt)
+		(*sIt)->getCamera().resetFrameTimer();
+	
+	/* Start recording: */
+	for(std::vector<KinectSaver*>::iterator sIt=savers.begin();sIt!=savers.end();++sIt)
+		(*sIt)->startStreaming();
 	
 	std::cout<<"Streaming... press any key to exit"<<std::endl;
 	char key;
 	std::cin>>key;
 	
-	/* Delete all streamers: */
-	for(std::vector<KinectStreamer*>::iterator sIt=streamers.begin();sIt!=streamers.end();++sIt)
+	/* Delete all video stream savers: */
+	for(std::vector<KinectSaver*>::iterator sIt=savers.begin();sIt!=savers.end();++sIt)
 		delete *sIt;
 	
 	return 0;

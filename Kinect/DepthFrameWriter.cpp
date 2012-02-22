@@ -1,6 +1,6 @@
 /***********************************************************************
 DepthFrameWriter - Class to write compressed depth frames to a sink.
-Copyright (c) 2010 Oliver Kreylos
+Copyright (c) 2010-2011 Oliver Kreylos
 
 This file is part of the Kinect 3D Video Capture Project (Kinect).
 
@@ -24,6 +24,8 @@ Software Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA
 
 #include <IO/File.h>
 #include <Kinect/FrameBuffer.h>
+
+namespace Kinect {
 
 /*****************************************
 Static elements of class DepthFrameWriter:
@@ -267,3 +269,5 @@ size_t DepthFrameWriter::writeFrame(const FrameBuffer& frame)
 	
 	return compressedSize;
 	}
+
+}

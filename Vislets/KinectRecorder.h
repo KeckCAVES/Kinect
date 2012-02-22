@@ -26,17 +26,19 @@ Software Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA
 
 #include <string>
 #include <vector>
+#include <USB/Context.h>
 #include <Sound/SoundDataFormat.h>
-#include <Kinect/USBContext.h>
-#include <Kinect/KinectCamera.h>
+#include <Kinect/Camera.h>
 #include <Vrui/Vislet.h>
 
 /* Forward declarations: */
 namespace Sound {
 class SoundRecorder;
 }
+namespace Kinect {
 class FrameBuffer;
-class KinectFrameSaver;
+class FrameSaver;
+}
 
 class KinectRecorder;
 
@@ -53,8 +55,6 @@ class KinectRecorderFactory:public Vrui::VisletFactory
 		int nodeIndex; // Index of Vrui cluster node to which the Kinect device is connected
 		std::string deviceSerialNumber; // Serial number of Kinect device
 		bool highResolution; // Flag whether to capture high-resolution color images
-		std::string calibrationFileName; // Name of Kinect device's calibration file
-		std::string transformFileName; // Name of Kinect device's transformation file
 		std::string saveFileNamePrefix; // Prefix for recorded camera streams
 		std::string backgroundFileName; // Prefix for pre-recorded background images
 		unsigned int captureBackgroundFrames; // Number of background frames to capture for background removal
@@ -97,12 +97,8 @@ class KinectRecorder:public Vrui::Vislet
 		{
 		/* Elements: */
 		public:
-		KinectCamera camera; // The Kinect camera from which to receive depth and color streams
-		KinectFrameSaver* frameSaver; // Pointer to helper object saving depth and color frames received from the Kinect
-		
-		/* Private methods: */
-		void depthStreamingCallback(const FrameBuffer& frameBuffer); // Callback receiving depth frames from the Kinect camera
-		void colorStreamingCallback(const FrameBuffer& frameBuffer); // Callback receiving color frames from the Kinect camera
+		Kinect::Camera camera; // The Kinect camera from which to receive depth and color streams
+		Kinect::FrameSaver* frameSaver; // Pointer to helper object saving depth and color frames received from the Kinect
 		
 		/* Constructors and destructors: */
 		public:
@@ -110,7 +106,7 @@ class KinectRecorder:public Vrui::Vislet
 		~KinectStreamer(void); // Destroys the streamer
 		
 		/* Methods: */
-		KinectCamera& getCamera(void) // Returns a reference to the streamer's camera
+		Kinect::Camera& getCamera(void) // Returns a reference to the streamer's camera
 			{
 			return camera;
 			}
@@ -120,7 +116,7 @@ class KinectRecorder:public Vrui::Vislet
 	/* Elements: */
 	private:
 	static KinectRecorderFactory* factory; // Pointer to the class' factory object
-	USBContext usbContext; // USB device context
+	USB::Context usbContext; // USB device context
 	std::vector<KinectStreamer*> streamers; // List of Kinect streamers, each connected to one Kinect camera
 	Sound::SoundRecorder* soundRecorder; // Pointer to optional sound recorder
 	bool firstFrame; // Flag indicating the first Vrui frame
