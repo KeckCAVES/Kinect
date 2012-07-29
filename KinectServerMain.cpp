@@ -22,6 +22,7 @@ Software Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA
 
 #include <string.h>
 #include <signal.h>
+#include <string>
 #include <iostream>
 #include <Misc/ConfigurationFile.h>
 #include <USB/Context.h>
@@ -53,7 +54,10 @@ int main(void)
 		std::cerr<<"KinectServerMain: Cannot intercept SIG_INT signals. Server won't shut down cleanly."<<std::endl;
 	
 	/* Open the server's configuration file: */
-	Misc::ConfigurationFile serverConfig(KINECTSERVER_CONFIGURATIONFILENAME);
+	std::string serverConfigName=KINECT_CONFIG_DIR;
+	serverConfigName.push_back('/');
+	serverConfigName.append(KINECTSERVER_CONFIGURATIONFILENAME);
+	Misc::ConfigurationFile serverConfig(serverConfigName.c_str());
 	
 	/* Open the USB context: */
 	USB::Context usbContext;

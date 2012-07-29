@@ -2,7 +2,7 @@
 FrameSaver - Helper class to save raw color and video frames from a
 Kinect camera to a time-stamped file on disk for playback and further
 processing.
-Copyright (c) 2010-2011 Oliver Kreylos
+Copyright (c) 2010-2012 Oliver Kreylos
 
 This file is part of the Kinect 3D Video Capture Project (Kinect).
 
@@ -39,6 +39,22 @@ Methods of class FrameSaver:
 
 void FrameSaver::initialize(const FrameSource& frameSource)
 	{
+	/* Write the file formats' version numbers to the depth and color files: */
+	colorFrameFile->write<unsigned int>(1);
+	depthFrameFile->write<unsigned int>(2);
+	
+	/* Check if the frame source has depth correction coefficients: */
+	if(frameSource.hasDepthCorrectionCoefficients())
+		{
+		/* Write the frame source's depth correction coefficients to the depth file: */
+		depthFrameFile->write<unsigned char>(1);
+		FrameBuffer depthCorrection=frameSource.getDepthCorrectionCoefficients();
+		depthFrameFile->write<int>(depthCorrection.getSize(),2);
+		depthFrameFile->write<float>(static_cast<const float*>(depthCorrection.getBuffer()),depthCorrection.getSize(1)*depthCorrection.getSize(0)*2);
+		}
+	else
+		depthFrameFile->write<unsigned char>(0);
+	
 	/* Get the frame source's intrinsic calibration parameters: */
 	FrameSource::IntrinsicParameters ips=frameSource.getIntrinsicParameters();
 	
@@ -116,7 +132,8 @@ void* FrameSaver::depthFrameWritingThreadMethod(void)
 	}
 
 FrameSaver::FrameSaver(const FrameSource& frameSource,const char* colorFrameFileName,const char* depthFrameFileName)
-	:done(false),
+	:timeStampOffset(0.0),
+	 done(false),
 	 colorFrameFile(IO::openFile(colorFrameFileName,IO::File::WriteOnly)),
 	 colorFrameWriter(0),
 	 depthFrameFile(IO::openFile(depthFrameFileName,IO::File::WriteOnly)),
@@ -131,7 +148,8 @@ FrameSaver::FrameSaver(const FrameSource& frameSource,const char* colorFrameFile
 	}
 
 FrameSaver::FrameSaver(const FrameSource& frameSource,IO::FilePtr sColorFrameFile,IO::FilePtr sDepthFrameFile)
-	:done(false),
+	:timeStampOffset(0.0),
+	 done(false),
 	 colorFrameFile(sColorFrameFile),
 	 colorFrameWriter(0),
 	 depthFrameFile(sDepthFrameFile),
@@ -157,11 +175,22 @@ FrameSaver::~FrameSaver(void)
 	delete depthFrameWriter;
 	}
 
+void FrameSaver::setTimeStampOffset(double newTimeStampOffset)
+	{
+	/* Copy the new time stamp offset: */
+	timeStampOffset=newTimeStampOffset;
+	}
+
 void FrameSaver::saveColorFrame(const FrameBuffer& newFrame)
 	{
 	/* Enqueue the color frame: */
 	Threads::MutexCond::Lock colorFramesLock(colorFramesCond);
 	colorFrames.push_back(newFrame);
+	
+	/* Offset the new frame's time stamp: */
+	colorFrames.back().timeStamp-=timeStampOffset;
+	
+	/* Wake up the color frame saver: */
 	colorFramesCond.signal();
 	}
 
@@ -170,6 +199,11 @@ void FrameSaver::saveDepthFrame(const FrameBuffer& newFrame)
 	/* Enqueue the depth frame: */
 	Threads::MutexCond::Lock depthFramesLock(depthFramesCond);
 	depthFrames.push_back(newFrame);
+	
+	/* Offset the new frame's time stamp: */
+	depthFrames.back().timeStamp-=timeStampOffset;
+	
+	/* Wake up the depth frame saver: */
 	depthFramesCond.signal();
 	}
 

@@ -1,7 +1,7 @@
 /***********************************************************************
 KinectClientPlugin - Client object to implement the Kinect 3D video
 tele-immersion protocol for the Vrui collaboration infrastructure.
-Copyright (c) 2010-2011 Oliver Kreylos
+Copyright (c) 2010-2012 Oliver Kreylos
 
 This file is part of the Kinect 3D Video Capture Project (Kinect).
 
@@ -31,6 +31,8 @@ Software Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA
 #include <Misc/ConfigurationFile.h>
 #include <Comm/NetPipe.h>
 #include <GL/gl.h>
+#include <GL/GLClipPlaneTracker.h>
+#include <GL/GLContextData.h>
 #include <GL/GLTransformationWrappers.h>
 #include <Vrui/Vrui.h>
 
@@ -237,9 +239,15 @@ void KinectClientPlugin::glRenderAction(const Collaboration::ProtocolClient::Rem
 		/* Go to the client's navigational space: */
 		glPushMatrix();
 		glMultMatrix(myRcs->inverseNavigationTransform.getLockedValue());
-	
+		
+		/* Temporarily disable all clipping planes: */
+		contextData.getClipPlaneTracker()->pause();
+		
 		/* Call the Kinect client's glRenderAction method: */
 		myRcs->client->glRenderAction(contextData);
+		
+		/* Re-enable clipping: */
+		contextData.getClipPlaneTracker()->resume();
 		
 		glPopMatrix();
 		}

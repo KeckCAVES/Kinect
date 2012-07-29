@@ -1,7 +1,7 @@
 /***********************************************************************
 KinectViewer - Vislet to draw 3D reconstructions captured from a Kinect
 device in 3D space.
-Copyright (c) 2010-2011 Oliver Kreylos
+Copyright (c) 2010-2012 Oliver Kreylos
 
 This file is part of the Kinect 3D Video Capture Project (Kinect).
 
@@ -25,16 +25,16 @@ Software Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA
 #define VISLETS_KINECTVIEWER_INCLUDED
 
 #include <string>
-#include <Threads/TripleBuffer.h>
 #include <USB/Context.h>
 #include <Geometry/OrthogonalTransformation.h>
 #include <Vrui/Geometry.h>
 #include <Vrui/Vislet.h>
-#include <Kinect/FrameBuffer.h>
 
 /* Forward declarations: */
 namespace Kinect {
-class Camera;
+class FrameBuffer;
+class FrameSource;
+class MeshBuffer;
 class Projector;
 }
 
@@ -63,14 +63,12 @@ class KinectViewer:public Vrui::Vislet
 	static KinectViewerFactory* factory; // Pointer to the class' factory object
 	
 	USB::Context usbContext; // USB device context
-	Kinect::Camera* camera; // Pointer to camera aspect of Kinect device
-	Threads::TripleBuffer<Kinect::FrameBuffer> depthFrames; // Triple buffer of depth frames received from the camera
-	Threads::TripleBuffer<Kinect::FrameBuffer> colorFrames; // Triple buffer of color frames received from the camera
+	Kinect::FrameSource* source; // Pointer to depth and color frame source
 	Kinect::Projector* projector; // Object to project depth and color frames back into 3D camera space
 	
 	/* Private methods: */
 	void colorStreamingCallback(const Kinect::FrameBuffer& frameBuffer); // Callback called when a new color frame was received
-	void depthStreamingCallback(const Kinect::FrameBuffer& frameBuffer); // Callback called when a new depth frame was received
+	void meshStreamingCallback(const Kinect::MeshBuffer& meshBuffer); // Callback called when a new depth frame was processed by the frame projector
 	
 	/* Constructors and destructors: */
 	public:

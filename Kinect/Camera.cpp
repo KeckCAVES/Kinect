@@ -1,7 +1,7 @@
 /***********************************************************************
 Camera - Wrapper class to represent the color and depth camera interface
 aspects of the Kinect sensor.
-Copyright (c) 2010-2011 Oliver Kreylos
+Copyright (c) 2010-2012 Oliver Kreylos
 
 This file is part of the Kinect 3D Video Capture Project (Kinect).
 
@@ -30,6 +30,7 @@ Software Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA
 #include <iostream>
 #include <Misc/ThrowStdErr.h>
 #include <Misc/FunctionCalls.h>
+#include <Misc/FileTests.h>
 #include <USB/Context.h>
 #include <USB/DeviceList.h>
 #include <IO/File.h>
@@ -780,7 +781,7 @@ Camera::Camera(libusb_device* sDevice)
 	:device(sDevice),
 	 messageSequenceNumber(0x2000U),
 	 frameTimerOffset(0.0),
-	 compressDepthFrames(true),
+	 compressDepthFrames(true),smoothDepthFrames(true),
 	 numBackgroundFrames(0),backgroundFrame(0),
 	 backgroundCaptureCallback(0),
 	 removeBackground(false),backgroundRemovalFuzz(5)
@@ -804,7 +805,7 @@ Camera::Camera(libusb_device* sDevice)
 Camera::Camera(USB::Context& usbContext,size_t index)
 	:messageSequenceNumber(0x2000U),
 	 frameTimerOffset(0.0),
-	 compressDepthFrames(true),
+	 compressDepthFrames(true),smoothDepthFrames(true),
 	 numBackgroundFrames(0),backgroundFrame(0),
 	 backgroundCaptureCallback(0),
 	 removeBackground(false),backgroundRemovalFuzz(5)
@@ -844,10 +845,59 @@ Camera::~Camera(void)
 	// device.reset(); // This seems to confuse the device
 	}
 
+bool Camera::hasDepthCorrectionCoefficients(void) const
+	{
+	/* Assemble the name of the depth correction coefficient file: */
+	std::string depthCorrectionFileName=KINECT_CONFIG_DIR;
+	depthCorrectionFileName.push_back('/');
+	depthCorrectionFileName.append(KINECT_CAMERA_DEPTHCORRECTIONFILENAMEPREFIX);
+	depthCorrectionFileName.push_back('-');
+	depthCorrectionFileName.append(serialNumber);
+	depthCorrectionFileName.append(".dat");
+	
+	/* Check if a file of the given name exists and is readable: */
+	return Misc::getPathType(depthCorrectionFileName.c_str())==Misc::PATHTYPE_FILE;
+	}
+
+FrameBuffer Camera::getDepthCorrectionCoefficients(void) const
+	{
+	/* Assemble the name of the depth correction coefficient file: */
+	std::string depthCorrectionFileName=KINECT_CONFIG_DIR;
+	depthCorrectionFileName.push_back('/');
+	depthCorrectionFileName.append(KINECT_CAMERA_DEPTHCORRECTIONFILENAMEPREFIX);
+	depthCorrectionFileName.push_back('-');
+	depthCorrectionFileName.append(serialNumber);
+	depthCorrectionFileName.append(".dat");
+	
+	/* Check if a file of the given name exists and is readable: */
+	if(Misc::getPathType(depthCorrectionFileName.c_str())==Misc::PATHTYPE_FILE)
+		{
+		/* Open the depth correction file: */
+		IO::FilePtr depthCorrectionFile(IO::openFile(depthCorrectionFileName.c_str()));
+		depthCorrectionFile->setEndianness(Misc::LittleEndian);
+		
+		/* Get the source's frame size and create a result frame buffer: */
+		const unsigned int* frameSize=getActualFrameSize(DEPTH);
+		FrameBuffer result(frameSize[0],frameSize[1],frameSize[1]*frameSize[0]*sizeof(PixelDepthCorrection));
+		
+		/* Read the per-pixel depth correction coefficients: */
+		depthCorrectionFile->read<float>(static_cast<float*>(result.getBuffer()),frameSize[1]*frameSize[0]*2);
+		
+		return result;
+		}
+	else
+		{
+		/* Return a default depth correction map: */
+		return FrameSource::getDepthCorrectionCoefficients();
+		}
+	}
+
 FrameSource::IntrinsicParameters Camera::getIntrinsicParameters(void) const
 	{
 	/* Assemble the name of the intrinsic parameter file: */
-	std::string intrinsicParameterFileName=KINECT_CAMERA_INTRINSICPARAMETERSFILENAMEPREFIX;
+	std::string intrinsicParameterFileName=KINECT_CONFIG_DIR;
+	intrinsicParameterFileName.push_back('/');
+	intrinsicParameterFileName.append(KINECT_CAMERA_INTRINSICPARAMETERSFILENAMEPREFIX);
 	intrinsicParameterFileName.push_back('-');
 	intrinsicParameterFileName.append(serialNumber);
 	if(frameSizes[COLOR]==FS_1280_1024)
@@ -918,7 +968,9 @@ FrameSource::IntrinsicParameters Camera::getIntrinsicParameters(void) const
 FrameSource::ExtrinsicParameters Camera::getExtrinsicParameters(void) const
 	{
 	/* Assemble the name of the extrinsic parameter file: */
-	std::string extrinsicParameterFileName=KINECT_CAMERA_EXTRINSICPARAMETERSFILENAMEPREFIX;
+	std::string extrinsicParameterFileName=KINECT_CONFIG_DIR;
+	extrinsicParameterFileName.push_back('/');
+	extrinsicParameterFileName.append(KINECT_CAMERA_EXTRINSICPARAMETERSFILENAMEPREFIX);
 	extrinsicParameterFileName.push_back('-');
 	extrinsicParameterFileName.append(serialNumber);
 	extrinsicParameterFileName.append(".txt");
@@ -1041,9 +1093,21 @@ void Camera::startStreaming(FrameSource::StreamingCallback* newColorStreamingCal
 		sequenceOk=sequenceOk&&sendCommand(0x0012U,0x0001U); // Request RLE/differential compressed depth images
 	else
 		sequenceOk=sequenceOk&&sendCommand(0x0012U,0x0003U); // Request 11-bit packed depth images
-	sequenceOk=sequenceOk&&sendCommand(0x0013U,0x0001U); // Request 640x480 depth images
-	sequenceOk=sequenceOk&&sendCommand(0x0014U,0x001eU); // Request 30 Hz depth image frame rate
-	sequenceOk=sequenceOk&&sendCommand(0x0016U,0x0001U); // Enable depth smoothing
+	switch(frameSizes[DEPTH])
+		{
+		case FS_640_480:
+			sequenceOk=sequenceOk&&sendCommand(0x0013U,0x0001U); // Request 640x480 depth images
+			break;
+		
+		case FS_1280_1024:
+			sequenceOk=sequenceOk&&sendCommand(0x0013U,0x0002U); // Request 1280x1024 depth images
+			break;
+		}
+	sequenceOk=sequenceOk&&sendCommand(0x0014U,getActualFrameRate(DEPTH)); // Request selected depth image frame rate
+	if(smoothDepthFrames)
+		sequenceOk=sequenceOk&&sendCommand(0x0016U,0x0001U); // Enable depth smoothing
+	else
+		sequenceOk=sequenceOk&&sendCommand(0x0016U,0x0000U); // Enable depth smoothing
 	sequenceOk=sequenceOk&&sendCommand(0x0018U,0x0000U); // Unknown semantics
 	sequenceOk=sequenceOk&&sendCommand(0x0002U,0x0000U); // Unknown semantics
 	sequenceOk=sequenceOk&&sendCommand(0x0105U,0x0000U); // Disable IR pattern checking
@@ -1092,6 +1156,10 @@ void Camera::stopStreaming(void)
 
 void Camera::setFrameSize(int camera,Camera::FrameSize newFrameSize)
 	{
+	/* The depth camera can only do 640x480: */
+	if(camera==DEPTH)
+		newFrameSize=FS_640_480;
+	
 	/* Set the camera's frame size: */
 	frameSizes[camera]=newFrameSize;
 	
@@ -1125,6 +1193,11 @@ void Camera::resetFrameTimer(double newFrameTimerOffset)
 void Camera::setCompressDepthFrames(bool newCompressDepthFrames)
 	{
 	compressDepthFrames=newCompressDepthFrames; 
+	}
+
+void Camera::setSmoothDepthFrames(bool newSmoothDepthFrames)
+	{
+	smoothDepthFrames=newSmoothDepthFrames; 
 	}
 
 void Camera::captureBackground(unsigned int newNumBackgroundFrames,bool replace,Camera::BackgroundCaptureCallback* newBackgroundCaptureCallback)

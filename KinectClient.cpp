@@ -239,6 +239,7 @@ void KinectClient::frame(void)
 			{
 			cameraStates[i]->projector.setColorFrame(fbs[i*2+0]);
 			cameraStates[i]->projector.setDepthFrame(fbs[i*2+1]);
+			cameraStates[i]->projector.updateFrames();
 			}
 		
 		/* Remove the metaframe: */
@@ -255,6 +256,7 @@ void KinectClient::frame(void)
 			{
 			cameraStates[i]->projector.setColorFrame(fbs[i*2+0]);
 			cameraStates[i]->projector.setDepthFrame(fbs[i*2+1]);
+			cameraStates[i]->projector.updateFrames();
 			}
 		}
 	#endif
@@ -265,6 +267,6 @@ void KinectClient::glRenderAction(GLContextData& contextData) const
 	for(unsigned int i=0;i<numCameras;++i)
 		{
 		/* Draw the camera's facade: */
-		cameraStates[i]->projector.draw(contextData);
+		cameraStates[i]->projector.glRenderAction(contextData);
 		}
 	}
