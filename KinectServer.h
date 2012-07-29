@@ -32,6 +32,7 @@ Software Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA
 #include <Comm/ListeningTCPSocket.h>
 #include <Geometry/OrthogonalTransformation.h>
 #include <Geometry/ProjectiveTransformation.h>
+#include <Kinect/FrameBuffer.h>
 #include <Kinect/Camera.h>
 #include <Kinect/DepthFrameWriter.h>
 #include <Kinect/ColorFrameWriter.h>
@@ -46,9 +47,6 @@ class USBContext;
 }
 namespace Comm {
 class TCPPipe;
-}
-namespace Kinect {
-class FrameBuffer;
 }
 
 class KinectServer
@@ -86,6 +84,7 @@ class KinectServer
 		Threads::MutexCond& newColorFrameCond; // Condition variable to signal a new depth frame
 		bool hasSentColorFrame; // Flag whether the camera has sent a color frame as part of the current meta-frame
 		
+		Kinect::FrameBuffer depthCorrection; // Buffer containing per-pixel depth correction coefficients
 		IO::VariableMemoryFile depthFile; // In-memory file to receive compressed depth frame data
 		Kinect::DepthFrameWriter depthCompressor; // Compressor for depth frames
 		IO::VariableMemoryFile::BufferChain depthHeaders; // Write buffer containing the depth compressor's header data

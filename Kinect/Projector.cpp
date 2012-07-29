@@ -2,7 +2,7 @@
 Projector - Class to project a depth frame captured from a Kinect camera
 back into calibrated 3D camera space, and texture-map it with a matching
 color frame.
-Copyright (c) 2010-2011 Oliver Kreylos
+Copyright (c) 2010-2012 Oliver Kreylos
 
 This file is part of the Kinect 3D Video Capture Project (Kinect).
 
@@ -24,9 +24,11 @@ Software Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA
 
 #include <Kinect/Projector.h>
 
+#include <Misc/FunctionCalls.h>
+#include <IO/File.h>
+#include <IO/OpenFile.h>
 #include <GL/gl.h>
 #include <GL/GLVertexArrayParts.h>
-#include <GL/GLVertex.h>
 #include <GL/GLContextData.h>
 #include <GL/Extensions/GLARBVertexBufferObject.h>
 #include <GL/GLTransformationWrappers.h>
@@ -39,8 +41,8 @@ Methods of class Projector::DataItem:
 
 Projector::DataItem::DataItem(void)
 	:vertexBufferId(0),
-	 indexBufferId(0),numIndices(0),
-	 depthFrameVersion(0),
+	 indexBufferId(0),
+	 meshVersion(0),
 	 textureId(0),
 	 colorFrameVersion(0)
 	{
@@ -71,31 +73,148 @@ Projector::DataItem::~DataItem(void)
 	glDeleteTextures(1,&textureId);
 	}
 
+/**********************************
+Static elements of class Projector:
+**********************************/
+
+const unsigned int Projector::quadCaseNumTriangles[16]={0,0,0,0,0,0,0,1,0,0,0,1,0,1,1,2};
+
 /**************************
 Methods of class Projector:
 **************************/
 
-Projector::Projector(void)
-	:colorFrameVersion(0),
-	 depthFrameVersion(0)
-	 #if KINECT_PROJECTOR_FILTERING
-	 ,filteredDepthFrame(0)
-	 #endif
+void* Projector::depthFrameProcessingThreadMethod(void)
 	{
+	unsigned int rawDepthFrameVersion=0;
+	FrameBuffer rawDepthFrame;
+	while(true)
+		{
+		/* Get the next incoming raw depth frame: */
+		{
+		Threads::MutexCond::Lock inDepthFrameLock(inDepthFrameCond);
+		
+		/* Wait until a new raw depth frame arrives: */
+		while(rawDepthFrameVersion==inDepthFrameVersion)
+			inDepthFrameCond.wait(inDepthFrameLock);
+		
+		/* Grab the new raw depth frame: */
+		rawDepthFrameVersion=inDepthFrameVersion;
+		rawDepthFrame=inDepthFrame;
+		}
+		
+		/* Process the depth frame: */
+		const MeshBuffer& newMesh=processDepthFrame(rawDepthFrame);
+		
+		/* Call the mesh streaming callback: */
+		if(streamingCallback!=0)
+			(*streamingCallback)(newMesh);
+		}
+	
+	return 0;
+	}
+
+Projector::Projector(void)
+	:hasDepthCorrection(false),
+	 inDepthFrameVersion(0),
+	 filterDepthFrames(false),filteredDepthFrame(0),spatialFilterBuffer(0),
+	 triangleDepthRange(5),
+	 meshVersion(0),streamingCallback(0),colorFrameVersion(0)
+	{
+	/* Initialize the depth frame size: */
+	for(int i=0;i<2;++i)
+		depthSize[i]=0;
 	}
 
 Projector::Projector(const FrameSource& frameSource)
-	:colorFrameVersion(0),
-	 depthFrameVersion(0)
-	 #if KINECT_PROJECTOR_FILTERING
-	 ,filteredDepthFrame(0)
-	 #endif
+	:hasDepthCorrection(false),
+	 inDepthFrameVersion(0),
+	 filterDepthFrames(false),filteredDepthFrame(0),spatialFilterBuffer(0),
+	 triangleDepthRange(5),
+	 meshVersion(0),streamingCallback(0),colorFrameVersion(0)
 	{
+	/* Set the depth frame size: */
+	setDepthFrameSize(frameSource.getActualFrameSize(FrameSource::DEPTH));
+	
 	/* Query the source's intrinsic and extrinsic parameters: */
 	FrameSource::IntrinsicParameters ips=frameSource.getIntrinsicParameters();
 	colorProjection=ips.colorProjection;
 	depthProjection=ips.depthProjection;
 	projectorTransform=frameSource.getExtrinsicParameters();
+	
+	/* Check if the source has per-pixel depth correction: */
+	hasDepthCorrection=frameSource.hasDepthCorrectionCoefficients();
+	if(hasDepthCorrection)
+		{
+		/* Get the depth correction coefficients: */
+		depthCorrection=frameSource.getDepthCorrectionCoefficients();
+		}
+	}
+
+Projector::~Projector(void)
+	{
+	/* Stop background processing, just in case: */
+	stopStreaming();
+	
+	/* Delete the frame filtering buffers: */
+	delete[] filteredDepthFrame;
+	delete[] spatialFilterBuffer;
+	}
+
+void Projector::initContext(GLContextData& contextData) const
+	{
+	/* Create and register the data item: */
+	DataItem* dataItem=new DataItem;
+	contextData.addDataItem(this,dataItem);
+	
+	if(dataItem->vertexBufferId!=0)
+		{
+		/* Initialize the vertex and index buffers: */
+		glBindBufferARB(GL_ARRAY_BUFFER_ARB,dataItem->vertexBufferId);
+		glBufferDataARB(GL_ARRAY_BUFFER_ARB,size_t(depthSize[1])*size_t(depthSize[0])*sizeof(MeshBuffer::Vertex),0,GL_DYNAMIC_DRAW_ARB);
+		glBindBufferARB(GL_ARRAY_BUFFER_ARB,0);
+		glBindBufferARB(GL_ELEMENT_ARRAY_BUFFER_ARB,dataItem->indexBufferId);
+		glBufferDataARB(GL_ELEMENT_ARRAY_BUFFER_ARB,size_t(depthSize[1]-1)*size_t(depthSize[0]-1)*2*3*sizeof(MeshBuffer::Index),0,GL_DYNAMIC_DRAW_ARB); // Worst-case index buffer size
+		glBindBufferARB(GL_ELEMENT_ARRAY_BUFFER_ARB,0);
+		}
+	}
+
+void Projector::setDepthFrameSize(const unsigned int newDepthFrameSize[2])
+	{
+	/* Copy the depth frame size: */
+	for(int i=0;i<2;++i)
+		depthSize[i]=newDepthFrameSize[i];
+	
+	/*********************************************************************
+	Initialize the quad case vertex offset table:
+	*********************************************************************/
+	
+	/* Case 0x7 - triangle in lower-left corner of quad: */
+	quadCaseVertexOffsets[0x7][0]=0;
+	quadCaseVertexOffsets[0x7][1]=1;
+	quadCaseVertexOffsets[0x7][2]=depthSize[0];
+	
+	/* Case 0xb - triangle in lower-right corner of quad: */
+	quadCaseVertexOffsets[0xb][0]=0;
+	quadCaseVertexOffsets[0xb][1]=1;
+	quadCaseVertexOffsets[0xb][2]=depthSize[0]+1;
+	
+	/* Case 0xd - triangle in upper-left corner of quad: */
+	quadCaseVertexOffsets[0xd][0]=0;
+	quadCaseVertexOffsets[0xd][1]=depthSize[0];
+	quadCaseVertexOffsets[0xd][2]=depthSize[0]+1;
+	
+	/* Case 0xe - triangle in upper-right corner of quad: */
+	quadCaseVertexOffsets[0xe][0]=1;
+	quadCaseVertexOffsets[0xe][1]=depthSize[0];
+	quadCaseVertexOffsets[0xe][2]=depthSize[0]+1;
+	
+	/* Case 0xf - two triangles in quad, split into lower-left and upper-right: */
+	quadCaseVertexOffsets[0xf][0]=0;
+	quadCaseVertexOffsets[0xf][1]=1;
+	quadCaseVertexOffsets[0xf][2]=depthSize[0];
+	quadCaseVertexOffsets[0xf][3]=depthSize[0];
+	quadCaseVertexOffsets[0xf][4]=1;
+	quadCaseVertexOffsets[0xf][5]=depthSize[0]+1;
 	}
 
 void Projector::setIntrinsicParameters(const FrameSource::IntrinsicParameters& ips)
@@ -109,99 +228,398 @@ void Projector::setExtrinsicParameters(const FrameSource::ExtrinsicParameters& e
 	projectorTransform=eps;
 	}
 
-Projector::~Projector(void)
+void Projector::setDepthCorrection(const FrameBuffer& newDepthCorrection)
 	{
-	#if KINECT_PROJECTOR_FILTERING
-	delete[] filteredDepthFrame;
-	#endif
+	/* Enable depth correction and set the coefficients: */
+	hasDepthCorrection=true;
+	depthCorrection=newDepthCorrection;
 	}
 
-void Projector::initContext(GLContextData& contextData) const
+void Projector::setFilterDepthFrames(bool newFilterDepthFrames)
 	{
-	/* Create and register the data item: */
-	DataItem* dataItem=new DataItem;
-	contextData.addDataItem(this,dataItem);
+	/* Just set the flag; the depth frame processing thread will take care of the rest: */
+	filterDepthFrames=newFilterDepthFrames;
 	}
 
-void Projector::setColorFrame(const FrameBuffer& newColorFrame)
+void Projector::setTriangleDepthRange(unsigned short newTriangleDepthRange)
 	{
-	/* Copy the color frame: */
-	colorFrame=newColorFrame;
+	/* Set the triangle depth range immediately; it won't kill the depth frame processing thread if changed in mid-process: */
+	triangleDepthRange=newTriangleDepthRange;
+	}
+
+const MeshBuffer& Projector::processDepthFrame(const FrameBuffer& depthFrame)
+	{
+	/* Start a new mesh in the mesh triple buffer: */
+	MeshBuffer& newMesh=meshes.startNewValue();
 	
-	/* Increment the frame version number to invalidate all per-context color frame caches: */
-	++colorFrameVersion;
+	/* Check if the buffer is invalid, or is still referenced by someone else: */
+	if(!newMesh.isValid()||!newMesh.isPrivate())
+		{
+		/* Create a new mesh buffer of the largest possible size: */
+		newMesh=MeshBuffer(depthSize[1]*depthSize[0],(depthSize[1]-1)*(depthSize[0]-1)*2);
+		
+		/* Initialize the x and y positions of all vertices: */
+		MeshBuffer::Vertex* vPtr=newMesh.getVertices();
+		for(unsigned int y=0;y<depthSize[1];++y)
+			for(unsigned int x=0;x<depthSize[0];++x,++vPtr)
+				{
+				vPtr->position[0]=GLfloat(x)+0.5f;
+				vPtr->position[1]=GLfloat(y)+0.5f;
+				}
+		}
+	
+	if(filterDepthFrames)
+		{
+		/*******************************************************************
+		Temporally filter the incoming depth frame using a stupid-man's
+		Kalman filter.
+		*******************************************************************/
+		
+		if(filteredDepthFrame!=0)
+			{
+			/* Update the filtered frame buffer with the new raw frame and update the vertex array: */
+			GLfloat* fdfPtr=filteredDepthFrame;
+			const unsigned short* dfPtr=static_cast<const unsigned short*>(depthFrame.getBuffer());
+			if(hasDepthCorrection)
+				{
+				const FrameSource::PixelDepthCorrection* pdcPtr=static_cast<const FrameSource::PixelDepthCorrection*>(depthCorrection.getBuffer());
+				for(unsigned int y=0;y<depthSize[1];++y)
+					for(unsigned int x=0;x<depthSize[0];++x,++fdfPtr,++dfPtr,++pdcPtr)
+						{
+						GLfloat newDepth=GLfloat(*dfPtr)*pdcPtr->scale+pdcPtr->offset;
+						
+						/* If the new depth value is dissimilar, replace the old; otherwise, filter the old: */
+						if(Math::abs(newDepth-*fdfPtr)>=3.0f)
+							{
+							/* Replace the old value: */
+							*fdfPtr=newDepth;
+							}
+						else
+							{
+							/* Merge the old and new values: */
+							*fdfPtr=(*fdfPtr*15.0f+newDepth*1.0f)/16.0f;
+							}
+						}
+				}
+			else
+				{
+				for(unsigned int y=0;y<depthSize[1];++y)
+					for(unsigned int x=0;x<depthSize[0];++x,++fdfPtr,++dfPtr)
+						{
+						GLfloat newDepth=GLfloat(*dfPtr);
+						
+						/* If the new depth value is dissimilar, replace the old; otherwise, filter the old: */
+						if(Math::abs(newDepth-*fdfPtr)>=3.0f)
+							{
+							/* Replace the old value: */
+							*fdfPtr=newDepth;
+							}
+						else
+							{
+							/* Merge the old and new values: */
+							*fdfPtr=(*fdfPtr*15.0f+newDepth*1.0f)/16.0f;
+							}
+						}
+				}
+			}
+		else
+			{
+			/* Initialize the filtered frame buffer with the new raw frame and update the vertex array: */
+			filteredDepthFrame=new GLfloat[depthSize[1]*depthSize[0]];
+			GLfloat* fdfPtr=filteredDepthFrame;
+			const unsigned short* dfPtr=static_cast<const unsigned short*>(depthFrame.getBuffer());
+			if(hasDepthCorrection)
+				{
+				const FrameSource::PixelDepthCorrection* pdcPtr=static_cast<const FrameSource::PixelDepthCorrection*>(depthCorrection.getBuffer());
+				for(unsigned int y=0;y<depthSize[1];++y)
+					for(unsigned int x=0;x<depthSize[0];++x,++fdfPtr,++dfPtr,++pdcPtr)
+						*fdfPtr=GLfloat(*dfPtr)*pdcPtr->scale+pdcPtr->offset;
+				}
+			else
+				{
+				for(unsigned int y=0;y<depthSize[1];++y)
+					for(unsigned int x=0;x<depthSize[0];++x,++fdfPtr,++dfPtr)
+						*fdfPtr=GLfloat(*dfPtr);
+				}
+			}
+		
+		/* Filter the temporally-filtered frame with a spatial low-pass filter: */
+		if(spatialFilterBuffer==0)
+			spatialFilterBuffer=new GLfloat[depthSize[1]*depthSize[0]];
+		GLfloat invalidDepth=GLfloat(FrameSource::invalidDepth);
+		
+		/***********************************
+		First pass: filter frame vertically:
+		***********************************/
+		
+		int stride=depthSize[0];
+		for(unsigned int x=0;x<depthSize[0];++x)
+			{
+			const unsigned short* sCol=static_cast<const unsigned short*>(depthFrame.getBuffer())+x;
+			// GLfloat* sCol=filteredDepthFrame+x;
+			GLfloat* dCol=spatialFilterBuffer+x;
+			unsigned int sum=0;
+			// GLfloat sum=0.0f;
+			GLfloat weight=0.0f;
+			if(sCol[0]!=invalidDepth)
+				{
+				sum+=sCol[0]*2.0f;
+				weight+=2.0f;
+				}
+			if(sCol[stride]!=invalidDepth)
+				{
+				sum+=sCol[stride];
+				weight+=1.0f;
+				}
+			*dCol=weight!=0.0f?sum/weight:invalidDepth;
+			sCol+=depthSize[0];
+			dCol+=depthSize[0];
+			for(unsigned int y=1;y<depthSize[1]-1;++y,sCol+=depthSize[0],dCol+=depthSize[0])
+				{
+				sum=0.0f;
+				weight=0.0f;
+				if(sCol[-stride]!=invalidDepth)
+					{
+					sum+=sCol[-stride];
+					weight+=1.0f;
+					}
+				if(sCol[0]!=invalidDepth)
+					{
+					sum+=sCol[0]*2.0f;
+					weight+=2.0f;
+					}
+				if(sCol[stride]!=invalidDepth)
+					{
+					sum+=sCol[stride];
+					weight+=1.0f;
+					}
+				*dCol=weight!=0.0f?sum/weight:invalidDepth;
+				}
+			sum=0.0f;
+			weight=0.0f;
+			if(sCol[-stride]!=invalidDepth)
+				{
+				sum+=sCol[-stride];
+				weight+=1.0f;
+				}
+			if(sCol[0]!=invalidDepth)
+				{
+				sum+=sCol[0]*2.0f;
+				weight+=2.0f;
+				}
+			*dCol=weight!=0.0f?sum/weight:invalidDepth;
+			}
+		
+		/**************************************
+		Second pass: filter frame horizontally:
+		**************************************/
+		
+		GLfloat* sPtr=spatialFilterBuffer;
+		MeshBuffer::Vertex* vPtr=newMesh.getVertices();
+		for(unsigned int y=0;y<depthSize[1];++y)
+			{
+			GLfloat sum=0.0f;
+			GLfloat weight=0.0f;
+			if(sPtr[0]!=invalidDepth)
+				{
+				sum+=sPtr[0]*2.0f;
+				weight+=2.0f;
+				}
+			if(sPtr[1]!=invalidDepth)
+				{
+				sum+=sPtr[1];
+				weight+=1.0f;
+				}
+			vPtr->position[2]=weight!=0.0f?sum/weight:invalidDepth;
+			++sPtr;
+			++vPtr;
+			for(unsigned int x=1;x<depthSize[0]-1;++x,++sPtr,++vPtr)
+				{
+				sum=0.0f;
+				weight=0.0f;
+				if(sPtr[-1]!=invalidDepth)
+					{
+					sum+=sPtr[-1];
+					weight+=1.0f;
+					}
+				if(sPtr[0]!=invalidDepth)
+					{
+					sum+=sPtr[0]*2.0f;
+					weight+=2.0f;
+					}
+				if(sPtr[1]!=invalidDepth)
+					{
+					sum+=sPtr[1];
+					weight+=1.0f;
+					}
+				vPtr->position[2]=weight!=0.0f?sum/weight:invalidDepth;
+				}
+			sum=0.0f;
+			weight=0.0f;
+			if(sPtr[-1]!=invalidDepth)
+				{
+				sum+=sPtr[-1];
+				weight+=1.0f;
+				}
+			if(sPtr[0]!=invalidDepth)
+				{
+				sum+=sPtr[0]*2.0f;
+				weight+=2.0f;
+				}
+			vPtr->position[2]=weight!=0.0f?sum/weight:invalidDepth;
+			++sPtr;
+			++vPtr;
+			}
+		}
+	else
+		{
+		/* Delete the filtered frame buffers: */
+		if(filteredDepthFrame!=0)
+			{
+			delete[] filteredDepthFrame;
+			filteredDepthFrame=0;
+			}
+		if(spatialFilterBuffer!=0)
+			{
+			delete[] spatialFilterBuffer;
+			spatialFilterBuffer=0;
+			}
+		
+		/* Update the vertex array: */
+		const unsigned short* dfPtr=static_cast<const unsigned short*>(depthFrame.getBuffer());
+		MeshBuffer::Vertex* vPtr=newMesh.getVertices();
+		if(hasDepthCorrection)
+			{
+			const FrameSource::PixelDepthCorrection* pdcPtr=static_cast<const FrameSource::PixelDepthCorrection*>(depthCorrection.getBuffer());
+			for(unsigned int y=0;y<depthSize[1];++y)
+				for(unsigned int x=0;x<depthSize[0];++x,++dfPtr,++pdcPtr,++vPtr)
+					vPtr->position[2]=GLfloat(*dfPtr)*pdcPtr->scale+pdcPtr->offset;
+			}
+		else
+			{
+			for(unsigned int y=0;y<depthSize[1];++y)
+				for(unsigned int x=0;x<depthSize[0];++x,++dfPtr,++vPtr)
+					vPtr->position[2]=GLfloat(*dfPtr);
+			}
+		}
+	
+	/* Store the number of generated vertices: */
+	newMesh.numVertices=depthSize[1]*depthSize[0];
+	
+	/*******************************************************************
+	Create triangle indices for all valid pixels that don't exceed the
+	valid depth range.
+	*******************************************************************/
+	
+	/* Iterate through all quads and generate triangles: */
+	unsigned short tdr=triangleDepthRange; // Get the currently set triangle depth range
+	newMesh.numTriangles=0;
+	MeshBuffer::Index* tiPtr=newMesh.getTriangleIndices();
+	const unsigned short* dfRowPtr=static_cast<const unsigned short*>(depthFrame.getBuffer());
+	GLuint rowIndex=0;
+	for(unsigned int y=1;y<depthSize[1];++y,dfRowPtr+=depthSize[0],rowIndex+=depthSize[0])
+		{
+		const unsigned short* dfPtr=dfRowPtr;
+		GLuint index=rowIndex;
+		for(unsigned int x=1;x<depthSize[0];++x,++dfPtr,++index)
+			{
+			/* Calculate the quad's validity case index: */
+			unsigned int caseIndex=0x0U;
+			if(dfPtr[0]<FrameSource::invalidDepth-1)
+				caseIndex|=0x1U;
+			if(dfPtr[1]<FrameSource::invalidDepth-1)
+				caseIndex|=0x2U;
+			if(dfPtr[depthSize[0]]<FrameSource::invalidDepth-1)
+				caseIndex|=0x4U;
+			if(dfPtr[depthSize[0]+1]<FrameSource::invalidDepth-1)
+				caseIndex|=0x8U;
+			
+			/* Generate candidate triangles according to the quad's case index: */
+			const int* cvo=quadCaseVertexOffsets[caseIndex];
+			for(unsigned int i=0;i<quadCaseNumTriangles[caseIndex];++i,cvo+=3)
+				{
+				/* Calculate the depth range of the candidate triangle: */
+				unsigned short minDepth,maxDepth;
+				minDepth=maxDepth=dfPtr[cvo[0]];
+				for(int j=1;j<3;++j)
+					{
+					if(minDepth>dfPtr[cvo[j]])
+						minDepth=dfPtr[cvo[j]];
+					if(maxDepth<dfPtr[cvo[j]])
+						maxDepth=dfPtr[cvo[j]];
+					}
+				
+				/* Generate the triangle if it doesn't exceed the maximum depth range: */
+				if(maxDepth-minDepth<=tdr)
+					{
+					/* Generate the triangle: */
+					for(int j=0;j<3;++j)
+						*(tiPtr++)=index+cvo[j];
+					++newMesh.numTriangles;
+					}
+				}
+			}
+		}
+	
+	/* Post the finished projected depth frame to the foreground thread: */
+	newMesh.timeStamp=depthFrame.timeStamp;
+	meshes.postNewValue();
+	
+	/* Return the finish mesh: */
+	return newMesh;
+	}
+
+void Projector::startStreaming(Projector::StreamingCallback* newStreamingCallback)
+	{
+	/* Delete the old streaming callback and install the new one: */
+	delete streamingCallback;
+	streamingCallback=newStreamingCallback;
+	
+	/* Start the depth frame processing thread: */
+	depthFrameProcessingThread.start(this,&Projector::depthFrameProcessingThreadMethod);
 	}
 
 void Projector::setDepthFrame(const FrameBuffer& newDepthFrame)
 	{
-	/* Copy the depth frame: */
-	depthFrame=newDepthFrame;
-	
-	#if KINECT_PROJECTOR_FILTERING
-	
-	if(filteredDepthFrame!=0)
-		{
-		/* Add the new frame to the filtered depth buffer: */
-		float* fdfPtr=filteredDepthFrame;
-		const unsigned short* dfPtr=static_cast<const unsigned short*>(depthFrame.getBuffer());
-		for(int y=0;y<depthFrame.getSize(1);++y)
-			for(int x=0;x<depthFrame.getSize(0);++x,++fdfPtr,++dfPtr)
-				{
-				/* Add the new depth using a stupid-man's Kalman filter: */
-				float newDepth=float(*dfPtr);
-				if(Math::abs(newDepth-*fdfPtr)>=3.0f)
-					{
-					/* Replace the old value: */
-					*fdfPtr=newDepth;
-					}
-				else
-					{
-					/* Merge the old and new values: */
-					*fdfPtr=(*fdfPtr*15.0f+newDepth*1.0f)/16.0f;
-					}
-				}
-		}
-	else
-		{
-		/* Create a new filtered depth frame and copy the unfiltered frame: */
-		filteredDepthFrame=new float[depthFrame.getSize(1)*depthFrame.getSize(0)];
-		float* fdfPtr=filteredDepthFrame;
-		const unsigned short* dfPtr=static_cast<const unsigned short*>(depthFrame.getBuffer());
-		for(int y=0;y<depthFrame.getSize(1);++y)
-			for(int x=0;x<depthFrame.getSize(0);++x,++fdfPtr,++dfPtr)
-				*fdfPtr=float(*dfPtr);
-		}
-	
-	#endif
-	
-	/* Increment the frame version number to invalidate all per-context depth frame caches: */
-	++depthFrameVersion;
+	/* Put the new depth frame into the input slot and wake up the depth frame processing thread: */
+	Threads::MutexCond::Lock inDepthFrameLock(inDepthFrameCond);
+	++inDepthFrameVersion;
+	inDepthFrame=newDepthFrame;
+	inDepthFrameCond.signal();
 	}
 
-namespace {
-
-/****************************************
-Helper functions to create triangle sets:
-****************************************/
-
-inline unsigned short depthRange(unsigned short d0,unsigned short d1,unsigned short d2)
+void Projector::setColorFrame(const FrameBuffer& newColorFrame)
 	{
-	unsigned short min=d0;
-	unsigned short max=d0;
-	if(min>d1)
-		min=d1;
-	if(max<d1)
-		max=d1;
-	if(min>d2)
-		min=d2;
-	if(max<d2)
-		max=d2;
-	return max-min;
+	/* Post the new color frame into the triple buffer: */
+	colorFrames.postNewValue(newColorFrame);
 	}
 
-}
+void Projector::stopStreaming(void)
+	{
+	if(!depthFrameProcessingThread.isJoined())
+		{
+		/* Shut down the depth processing thread: */
+		depthFrameProcessingThread.cancel();
+		depthFrameProcessingThread.join();
+		}
+	
+	/* Delete the streaming callback: */
+	delete streamingCallback;
+	streamingCallback=0;
+	}
 
-void Projector::draw(GLContextData& contextData) const
+void Projector::updateFrames(void)
+	{
+	/* Lock the most recent mesh: */
+	if(meshes.lockNewValue())
+		++meshVersion;
+	
+	/* Lock the most recent color frame: */
+	if(colorFrames.lockNewValue())
+		++colorFrameVersion;
+	}
+
+void Projector::glRenderAction(GLContextData& contextData) const
 	{
 	/* Get the context data item: */
 	DataItem* dataItem=contextData.retrieveDataItem<DataItem>(this);
@@ -216,131 +634,24 @@ void Projector::draw(GLContextData& contextData) const
 	glMultMatrix(projectorTransform);
 	glMultMatrix(depthProjection);
 	
+	/* Get the currently locked mesh: */
+	const MeshBuffer& mesh=meshes.getLockedValue();
+	
 	/* Bind the vertex and index buffers: */
 	glBindBufferARB(GL_ARRAY_BUFFER_ARB,dataItem->vertexBufferId);
 	glBindBufferARB(GL_ELEMENT_ARRAY_BUFFER_ARB,dataItem->indexBufferId);
 	
 	/* Check if the cached depth frame needs to be updated: */
-	if(dataItem->depthFrameVersion!=depthFrameVersion)
+	if(dataItem->meshVersion!=meshVersion)
 		{
-		/* Generate all vertices of the new frame: */
-		unsigned int width=depthFrame.getSize(0);
-		unsigned int height=depthFrame.getSize(1);
+		/* Load the mesh's vertices into the vertex buffer object: */
+		glBufferSubDataARB(GL_ARRAY_BUFFER_ARB,0,mesh.numVertices*sizeof(MeshBuffer::Vertex),mesh.getVertices());
 		
-		/* Initialize and get a pointer to the vertex buffer object: */
-		glBufferDataARB(GL_ARRAY_BUFFER_ARB,size_t(width)*size_t(height)*sizeof(Vertex),0,GL_DYNAMIC_DRAW_ARB);
-		Vertex* vPtr=static_cast<Vertex*>(glMapBufferARB(GL_ARRAY_BUFFER_ARB,GL_WRITE_ONLY_ARB));
+		/* Load the mesh's triangle indices into the index buffer object: */
+		glBufferSubDataARB(GL_ELEMENT_ARRAY_BUFFER_ARB,0,mesh.numTriangles*3*sizeof(MeshBuffer::Index),mesh.getTriangleIndices());
 		
-		/* Upload vertices: */
-		#if KINECT_PROJECTOR_FILTERING
-		
-		const float* fdfPtr=filteredDepthFrame;
-		for(unsigned int y=0;y<height;++y)
-			for(unsigned int x=0;x<width;++x,++vPtr,++fdfPtr)
-				{
-				vPtr->position[0]=GLfloat(x)+0.5f;
-				vPtr->position[1]=GLfloat(y)+0.5f;
-				vPtr->position[2]=GLfloat(*fdfPtr);
-				}
-		
-		#else
-		
-		const unsigned short* dfPtr=static_cast<const unsigned short*>(depthFrame.getBuffer());
-		for(unsigned int y=0;y<height;++y)
-			for(unsigned int x=0;x<width;++x,++vPtr,++dfPtr)
-				{
-				vPtr->position[0]=GLfloat(x)+0.5f;
-				vPtr->position[1]=GLfloat(y)+0.5f;
-				vPtr->position[2]=GLfloat(*dfPtr);
-				}
-		
-		#endif
-		
-		/* Release the vertex buffer object: */
-		glUnmapBufferARB(GL_ARRAY_BUFFER_ARB);
-		
-		/* Generate all triangles of the current frame: */
-		unsigned short maxDepthRange=5U;
-		
-		/* Initialize and get a pointer to the index buffer object: */
-		glBufferDataARB(GL_ELEMENT_ARRAY_BUFFER_ARB,size_t(width-1)*size_t(height-1)*2*3*sizeof(GLuint),0,GL_DYNAMIC_DRAW_ARB); // Worst-case index buffer size
-		GLuint* iPtr=static_cast<GLuint*>(glMapBufferARB(GL_ELEMENT_ARRAY_BUFFER_ARB,GL_WRITE_ONLY_ARB));
-		
-		/* Generate a case table of triangle vertices for each possible quad validity case: */
-		static const unsigned int caseNumTriangles[16]={0,0,0,0,0,0,0,1,0,0,0,1,0,1,1,2};
-		GLuint caseVertexOffsets[16][6];
-		
-		/* Case 0x7: */
-		caseVertexOffsets[7][0]=0;
-		caseVertexOffsets[7][1]=1;
-		caseVertexOffsets[7][2]=width;
-		
-		/* Case 0xb: */
-		caseVertexOffsets[11][0]=0;
-		caseVertexOffsets[11][1]=1;
-		caseVertexOffsets[11][2]=width+1;
-		
-		/* Case 0xd: */
-		caseVertexOffsets[13][0]=0;
-		caseVertexOffsets[13][1]=width;
-		caseVertexOffsets[13][2]=width+1;
-		
-		/* Case 0xe: */
-		caseVertexOffsets[14][0]=1;
-		caseVertexOffsets[14][1]=width;
-		caseVertexOffsets[14][2]=width+1;
-		
-		/* Case 0xf: */
-		caseVertexOffsets[15][0]=0;
-		caseVertexOffsets[15][1]=1;
-		caseVertexOffsets[15][2]=width;
-		caseVertexOffsets[15][3]=width;
-		caseVertexOffsets[15][4]=1;
-		caseVertexOffsets[15][5]=width+1;
-		
-		/* Generate triangle vertex indices: */
-		dataItem->numIndices=0;
-		const unsigned short* dfRowPtr=static_cast<const unsigned short*>(depthFrame.getBuffer());
-		GLuint rowIndex=0;
-		for(unsigned int y=1;y<height;++y,dfRowPtr+=width,rowIndex+=width)
-			{
-			/* Process a horizontal strip of triangles one quad at a time: */
-			const unsigned short* dfPtr=dfRowPtr;
-			GLuint index=rowIndex;
-			for(unsigned int x=1;x<width;++x,++dfPtr,++index)
-				{
-				/* Calculate the quad's validity case index: */
-				unsigned int caseIndex=0x0;
-				if(dfPtr[0]<FrameSource::invalidDepth-1)
-					caseIndex|=0x1U;
-				if(dfPtr[1]<FrameSource::invalidDepth-1)
-					caseIndex|=0x2U;
-				if(dfPtr[width]<FrameSource::invalidDepth-1)
-					caseIndex|=0x4U;
-				if(dfPtr[width+1]<FrameSource::invalidDepth-1)
-					caseIndex|=0x8U;
-				
-				/* Generate candidate triangles according to the quad's case index: */
-				const GLuint* cvo=caseVertexOffsets[caseIndex];
-				for(unsigned int i=0;i<caseNumTriangles[caseIndex];++i,cvo+=3)
-					{
-					/* Ensure that the candidate triangle is not a fringe triangle: */
-					if(depthRange(dfPtr[cvo[0]],dfPtr[cvo[1]],dfPtr[cvo[2]])<=maxDepthRange)
-						{
-						/* Generate the triangle: */
-						for(int j=0;j<3;++j)
-							*(iPtr++)=index+cvo[j];
-						dataItem->numIndices+=3;
-						}
-					}
-				}
-			}
-		
-		/* Release the index buffer object: */
-		glUnmapBufferARB(GL_ELEMENT_ARRAY_BUFFER_ARB);
-		
-		/* Mark the cached depth frame as valid: */
-		dataItem->depthFrameVersion=depthFrameVersion;
+		/* Mark the cached mesh as valid: */
+		dataItem->meshVersion=meshVersion;
 		}
 	
 	/* Bind the color texture object: */
@@ -349,6 +660,9 @@ void Projector::draw(GLContextData& contextData) const
 	/* Check if the cached color frame needs to be updated: */
 	if(dataItem->colorFrameVersion!=colorFrameVersion)
 		{
+		/* Get the currently locked color frame: */
+		const FrameBuffer& colorFrame=colorFrames.getLockedValue();
+		
 		/* Upload the color frame into the texture object: */
 		unsigned int width=colorFrame.getSize(0);
 		unsigned int height=colorFrame.getSize(1);
@@ -387,10 +701,10 @@ void Projector::draw(GLContextData& contextData) const
 	glTexGendv(GL_Q,GL_OBJECT_PLANE,colorProjection.getMatrix().getEntries()+12);
 	
 	/* Draw the cached indexed triangle set: */
-	GLVertexArrayParts::enable(Vertex::getPartsMask());
-	glVertexPointer(static_cast<const Vertex*>(0));
-	glDrawElements(GL_TRIANGLES,dataItem->numIndices,GL_UNSIGNED_INT,static_cast<const GLuint*>(0));
-	GLVertexArrayParts::disable(Vertex::getPartsMask());
+	GLVertexArrayParts::enable(MeshBuffer::Vertex::getPartsMask());
+	glVertexPointer(static_cast<const MeshBuffer::Vertex*>(0));
+	glDrawElements(GL_TRIANGLES,mesh.numTriangles*3,GL_UNSIGNED_INT,static_cast<const MeshBuffer::Index*>(0));
+	GLVertexArrayParts::disable(MeshBuffer::Vertex::getPartsMask());
 	
 	/* Protect the color texture object: */
 	glBindTexture(GL_TEXTURE_2D,0);

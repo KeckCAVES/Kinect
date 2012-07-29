@@ -24,7 +24,7 @@
 # matches the default Vrui installation; if Vrui's installation
 # directory was changed during Vrui's installation, the directory below
 # must be adapted.
-VRUI_MAKEDIR := $(HOME)/Vrui-2.2/share/make
+VRUI_MAKEDIR := $(HOME)/Vrui-2.4/share/make
 
 ########################################################################
 # Everything below here should not have to be changed
@@ -34,9 +34,9 @@ VRUI_MAKEDIR := $(HOME)/Vrui-2.2/share/make
 PACKAGEROOT := $(shell pwd)
 
 # Specify version of created dynamic shared libraries
-KINECT_VERSION = 2000
+KINECT_VERSION = 2001
 MAJORLIBVERSION = 2
-MINORLIBVERSION = 0
+MINORLIBVERSION = 1
 KINECT_NAME := Kinect-$(MAJORLIBVERSION).$(MINORLIBVERSION)
 
 # Check if Vrui's collaboration infrastructure is installed
@@ -120,17 +120,8 @@ LIBRARIES += $(LIBRARY_NAMES:%=$(call LIBRARYNAME,%))
 EXECUTABLES += $(EXEDIR)/KinectUtil \
                $(EXEDIR)/RawKinectViewer \
                $(EXEDIR)/AlignPoints \
-               $(EXEDIR)/KinectRecorder \
                $(EXEDIR)/KinectServer \
-               $(EXEDIR)/KinectViewer \
-               $(EXEDIR)/CompressDepthFile \
-               $(EXEDIR)/DepthCompressionTest \
-               $(EXEDIR)/ColorCompressionTest \
-               $(EXEDIR)/CalibrateDepth \
-               $(EXEDIR)/CalibrateCameras \
-               $(EXEDIR)/NewCalibrateCameras \
-               $(EXEDIR)/TestAlignment \
-               $(EXEDIR)/KinectClientTest
+               $(EXEDIR)/KinectViewer
 
 #
 # The Kinect vislets:
@@ -181,6 +172,10 @@ ifneq ($(HAVE_COLLABORATION),0)
 	@echo "Vrui collaboration infrastructure detected"
 	@echo "Collaboration protocol plug-in directory: $(PLUGININSTALLDIR)/$(COLLABORATIONPLUGINSDIREXT)"
 endif
+ifeq ($(SYSTEM_HAVE_LIBUSB1),0)
+	@echo "ERROR: Vrui was not built with libusb-1 support. Please install missing development package(s) and rebuild Vrui"
+	@exit 1
+endif
 
 .PHONY: Configure-End
 Configure-End: Configure-Begin
@@ -209,6 +204,13 @@ extrasqueakyclean:
 include $(VRUI_MAKEDIR)/BasicMakefile
 
 ########################################################################
+# Specify additional per-package compiler flags
+########################################################################
+
+# Define location for configuration files:
+CFLAGS += -DKINECT_CONFIG_DIR='"$(ETCINSTALLDIR)/$(KINECTCONFIGDIREXT)"'
+
+########################################################################
 # Specify build rules for dynamic shared objects
 ########################################################################
 
@@ -216,8 +218,10 @@ LIBKINECT_HEADERS = $(wildcard Kinect/*.h)
 
 LIBKINECT_SOURCES = $(wildcard Kinect/*.cpp)
 
-$(OBJDIR)/Kinect/Camera.o: CFLAGS += -DKINECT_CAMERA_INTRINSICPARAMETERSFILENAMEPREFIX='"$(ETCINSTALLDIR)/$(KINECTCONFIGDIREXT)/IntrinsicParameters"'
-$(OBJDIR)/Kinect/Camera.o: CFLAGS += -DKINECT_CAMERA_EXTRINSICPARAMETERSFILENAMEPREFIX='"$(ETCINSTALLDIR)/$(KINECTCONFIGDIREXT)/ExtrinsicParameters"'
+# Define names for camera calibration files:
+$(OBJDIR)/Kinect/Camera.o: CFLAGS += -DKINECT_CAMERA_DEPTHCORRECTIONFILENAMEPREFIX='"DepthCorrection"'
+$(OBJDIR)/Kinect/Camera.o: CFLAGS += -DKINECT_CAMERA_INTRINSICPARAMETERSFILENAMEPREFIX='"IntrinsicParameters"'
+$(OBJDIR)/Kinect/Camera.o: CFLAGS += -DKINECT_CAMERA_EXTRINSICPARAMETERSFILENAMEPREFIX='"ExtrinsicParameters"'
 
 $(call LIBRARYNAME,libKinect): PACKAGES += $(MYKINECT_DEPENDS)
 $(call LIBRARYNAME,libKinect): EXTRACINCLUDEFLAGS += $(MYKINECT_INCLUDE)
@@ -245,10 +249,17 @@ KinectUtil: $(EXEDIR)/KinectUtil
 # internally and externally calibrate Kinect cameras:
 #
 
-$(OBJDIR)/RawKinectViewer.o: CFLAGS += -DKINECT_CAMERA_INTRINSICPARAMETERSFILENAMEPREFIX='"$(ETCINSTALLDIR)/$(KINECTCONFIGDIREXT)/IntrinsicParameters"'
+$(OBJDIR)/DepthCorrectionTool.o: CFLAGS += -DKINECT_CAMERA_DEPTHCORRECTIONFILENAMEPREFIX='"DepthCorrection"'
+$(OBJDIR)/GridTool.o: CFLAGS += -DKINECT_CAMERA_INTRINSICPARAMETERSFILENAMEPREFIX='"IntrinsicParameters"'
 
 $(EXEDIR)/RawKinectViewer: PACKAGES += MYVRUI MYKINECT
-$(EXEDIR)/RawKinectViewer: $(OBJDIR)/RawKinectViewer.o
+$(EXEDIR)/RawKinectViewer: $(OBJDIR)/PauseTool.o \
+                           $(OBJDIR)/TiePointTool.o \
+                           $(OBJDIR)/LineTool.o \
+                           $(OBJDIR)/DepthCorrectionTool.o \
+                           $(OBJDIR)/GridTool.o \
+                           $(OBJDIR)/PlaneTool.o \
+                           $(OBJDIR)/RawKinectViewer.o
 .PHONY: RawKinectViewer
 RawKinectViewer: $(EXEDIR)/RawKinectViewer
 
@@ -263,20 +274,16 @@ $(EXEDIR)/AlignPoints: $(OBJDIR)/AlignPoints.o
 AlignPoints: $(EXEDIR)/AlignPoints
 
 #
-# Utility to record color and depth streams from one or more Kinect
-# devices to pairs of compressed files:
-#
-
-$(EXEDIR)/KinectRecorder: PACKAGES += MYKINECT
-$(EXEDIR)/KinectRecorder: $(OBJDIR)/KinectRecorder.o
-.PHONY: KinectRecorder
-KinectRecorder: $(EXEDIR)/KinectRecorder
-
-#
 # Server for real-time 3D video streaming protocol:
 #
 
-$(OBJDIR)/KinectServerMain.o: CFLAGS += -DKINECTSERVER_CONFIGURATIONFILENAME='"$(ETCINSTALLDIR)/KinectServer.cfg"'
+# Tell Kinect server to print status info:
+$(OBJDIR)/KinectServer.o: CFLAGS += -DVERBOSE
+
+# Tell Kinect server to be extremely verbose:
+#$(OBJDIR)/KinectServer.o: CFLAGS += -DVVERBOSE
+
+$(OBJDIR)/KinectServerMain.o: CFLAGS += -DKINECTSERVER_CONFIGURATIONFILENAME='"KinectServer.cfg"'
 
 $(EXEDIR)/KinectServer: PACKAGES += MYKINECT MYCOMM
 $(EXEDIR)/KinectServer: $(OBJDIR)/KinectServer.o \
@@ -338,12 +345,6 @@ $(EXEDIR)/SpaceCarver: $(OBJDIR)/SpaceCarver.o
 .PHONY: SpaceCarver
 SpaceCarver: $(EXEDIR)/SpaceCarver
 
-$(EXEDIR)/KinectClientTest: PACKAGES += MYVRUI MYKINECT MYCOMM
-$(EXEDIR)/KinectClientTest: $(OBJDIR)/KinectClient.o \
-                            $(OBJDIR)/KinectClientTest.o
-.PHONY: KinectClientTest
-KinectClientTest: $(EXEDIR)/KinectClientTest
-
 ########################################################################
 # Specify build rules for vislet plug-ins
 ########################################################################
@@ -376,7 +377,7 @@ $(call VISLETNAME,KinectRecorder): $(OBJDIR)/pic/Vislets/KinectRecorder.o
 # application:
 #
 
-$(call VISLETNAME,KinectPlayback): $(OBJDIR)/pic/Vislets/KinectPlayback.o
+$(call VISLETNAME,KinectPlayer): $(OBJDIR)/pic/Vislets/KinectPlayer.o
 
 # Mark all vislet plugin object files as intermediate:
 .SECONDARY: $(VISLET_NAMES:%=$(OBJDIR)/pic/Vislets/%.o)
@@ -406,6 +407,9 @@ $(call PLUGINNAME,KinectServer): $(OBJDIR)/pic/KinectProtocol.o \
 #
 # Client-side plugin:
 #
+
+# Tell Kinect client to be extremely verbose:
+#$(OBJDIR)/pic/KinectClient.o: CFLAGS += -DVVERBOSE
 
 $(call PLUGINNAME,KinectClient): PACKAGES += MYKINECT MYCOLLABORATIONCLIENT
 $(call PLUGINNAME,KinectClient): $(OBJDIR)/pic/KinectProtocol.o \

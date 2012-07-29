@@ -1,7 +1,7 @@
 /***********************************************************************
 FileFrameSource - Class to stream depth and color frames from a pair of
 time-stamped depth and color stream files.
-Copyright (c) 2010-2011 Oliver Kreylos
+Copyright (c) 2010-2012 Oliver Kreylos
 
 This file is part of the Kinect 3D Video Capture Project (Kinect).
 
@@ -40,6 +40,20 @@ Methods of class FileFrameSource:
 
 void FileFrameSource::initialize(void)
 	{
+	/* Read the file's format version numbers: */
+	fileFormatVersions[0]=colorFrameFile->read<unsigned int>();
+	fileFormatVersions[1]=depthFrameFile->read<unsigned int>();
+	
+	/* Check if there are per-pixel depth correction coefficients: */
+	if(fileFormatVersions[1]>=2&&depthFrameFile->read<char>()!=0)
+		{
+		/* Read the depth correction buffer: */
+		int size[2];
+		depthFrameFile->read<int>(size,2);
+		depthCorrection=FrameBuffer(size[0],size[1],size[1]*size[0]*2*sizeof(float));
+		depthFrameFile->read<float>(static_cast<float*>(depthCorrection.getBuffer()),size[1]*size[0]*2);
+		}
+	
 	/* Read the color and depth projections from their respective files: */
 	intrinsicParameters.colorProjection=Misc::Marshaller<FrameSource::IntrinsicParameters::PTransform>::read(*colorFrameFile);
 	intrinsicParameters.depthProjection=Misc::Marshaller<FrameSource::IntrinsicParameters::PTransform>::read(*depthFrameFile);
@@ -222,7 +236,29 @@ FileFrameSource::~FileFrameSource(void)
 	delete colorFrameReader;
 	delete depthFrameReader;
 	
+	/* Delete allocated frame buffers: */
 	delete[] backgroundFrame;
+	}
+
+bool FileFrameSource::hasDepthCorrectionCoefficients(void) const
+	{
+	/* Check if the depth correction buffer has valid data: */
+	return depthCorrection.getBuffer()!=0;
+	}
+
+FrameBuffer FileFrameSource::getDepthCorrectionCoefficients(void) const
+	{
+	/* Check if the depth correction buffer has valid data: */
+	if(depthCorrection.getBuffer()!=0)
+		{
+		/* Return the depth correction buffer: */
+		return depthCorrection;
+		}
+	else
+		{
+		/* Return an identity depth correction: */
+		return FrameSource::getDepthCorrectionCoefficients();
+		}
 	}
 
 FrameSource::IntrinsicParameters FileFrameSource::getIntrinsicParameters(void) const
@@ -278,6 +314,16 @@ void FileFrameSource::stopStreaming(void)
 	colorStreamingCallback=0;
 	delete depthStreamingCallback;
 	depthStreamingCallback=0;
+	}
+
+FrameBuffer FileFrameSource::readNextColorFrame(void)
+	{
+	return colorFrameReader->readNextFrame();
+	}
+
+FrameBuffer FileFrameSource::readNextDepthFrame(void)
+	{
+	return depthFrameReader->readNextFrame();
 	}
 
 void FileFrameSource::resetFrameTimer(void)

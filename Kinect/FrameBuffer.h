@@ -1,7 +1,7 @@
 /***********************************************************************
 FrameBuffer - Class for reference-counted decoded color or depth frame
 buffers.
-Copyright (c) 2010-2011 Oliver Kreylos
+Copyright (c) 2010-2012 Oliver Kreylos
 
 This file is part of the Kinect 3D Video Capture Project (Kinect).
 
@@ -33,10 +33,7 @@ Software Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA
 #if KINECT_FRAMEBUFFER_DEBUGLOCK
 #include <iostream>
 #endif
-#include <Threads/Config.h>
-#if !THREADS_CONFIG_HAVE_BUILTIN_ATOMICS
-#include <Threads/Spinlock.h>
-#endif
+#include <Threads/Atomic.h>
 
 namespace Kinect {
 
@@ -48,10 +45,7 @@ class FrameBuffer
 		{
 		/* Elements: */
 		public:
-		#if !THREADS_CONFIG_HAVE_BUILTIN_ATOMICS
-		Threads::Spinlock refCountMutex; // Mutex protecting the reference counter
-		#endif
-		unsigned int refCount; // Reference counter
+		Threads::Atomic<unsigned int> refCount; // Reference counter
 		#if KINECT_FRAMEBUFFER_DEBUGLOCK
 		int destroyed;
 		#endif
@@ -77,29 +71,16 @@ class FrameBuffer
 			#if KINECT_FRAMEBUFFER_DEBUGLOCK
 			assert(destroyed==0);
 			#endif
-			#if THREADS_CONFIG_HAVE_BUILTIN_ATOMICS
-			__sync_add_and_fetch(&refCount,1);
-			#else
-			Threads::Spinlock::Lock refCountLock(refCountMutex);
-			++refCount;
-			#endif
+			
+			refCount.preAdd(1);
 			}
 		bool unref(void) // Unreferences the buffer; returns true if buffer becomes orphaned
 			{
-			bool result;
 			#if KINECT_FRAMEBUFFER_DEBUGLOCK
 			assert(destroyed==0);
 			#endif
-			#if THREADS_CONFIG_HAVE_BUILTIN_ATOMICS
-			result=__sync_sub_and_fetch(&refCount,1)==0;
-			#else
-			{
-			Threads::Spinlock::Lock refCountLock(refCountMutex);
-			--refCount;
-			result=refCount==0;
-			}
-			#endif
-			return result;
+			
+			return refCount.preSub(1)==0;
 			}
 		};
 	

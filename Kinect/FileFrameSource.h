@@ -1,7 +1,7 @@
 /***********************************************************************
 FileFrameSource - Class to stream depth and color frames from a pair of
 time-stamped depth and color stream files.
-Copyright (c) 2010-2011 Oliver Kreylos
+Copyright (c) 2010-2012 Oliver Kreylos
 
 This file is part of the Kinect 3D Video Capture Project (Kinect).
 
@@ -28,6 +28,7 @@ Software Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA
 #include <IO/File.h>
 #include <Threads/Thread.h>
 #include <Geometry/OrthogonalTransformation.h>
+#include <Kinect/FrameBuffer.h>
 #include <Kinect/FrameSource.h>
 
 /* Forward declarations: */
@@ -45,9 +46,11 @@ class FileFrameSource:public FrameSource
 	Misc::Timer frameTimer; // Free-running timer to synchronize playback of depth and color frames
 	IO::FilePtr colorFrameFile; // File containing color frames
 	IO::FilePtr depthFrameFile; // File containing depth frames
+	unsigned int fileFormatVersions[2]; // Format version numbers of the color and depth files, respectively
 	ColorFrameReader* colorFrameReader; // Reader for color frames
 	DepthFrameReader* depthFrameReader; // Reader for depth frames
 	unsigned int depthSize[2]; // Size of depth frames in pixels
+	FrameBuffer depthCorrection; // Buffer of depth correction coefficients
 	IntrinsicParameters intrinsicParameters; // Intrinsic parameters read from the color and depth files
 	ExtrinsicParameters extrinsicParameters; // Extrinsic parameters read from the color and depth files
 	StreamingCallback* colorStreamingCallback; // Callback to be called when a new color frame has been loaded
@@ -68,6 +71,8 @@ class FileFrameSource:public FrameSource
 	~FileFrameSource(void);
 	
 	/* Methods from FrameSource: */
+	virtual bool hasDepthCorrectionCoefficients(void) const;
+	virtual FrameBuffer getDepthCorrectionCoefficients(void) const;
 	virtual IntrinsicParameters getIntrinsicParameters(void) const;
 	virtual ExtrinsicParameters getExtrinsicParameters(void) const;
 	virtual const unsigned int* getActualFrameSize(int sensor) const;
@@ -75,6 +80,8 @@ class FileFrameSource:public FrameSource
 	virtual void stopStreaming(void);
 	
 	/* New methods: */
+	FrameBuffer readNextColorFrame(void); // Immediately reads, decompresses, and returns the next frame from the color file
+	FrameBuffer readNextDepthFrame(void); // Immediately reads, decompresses, and returns the next frame from the depth file
 	void resetFrameTimer(void); // Resets the internal frame timer
 	void captureBackground(unsigned int newNumBackgroundFrames); // Captures the given number of frames to create a background removal buffer
 	void setRemoveBackground(bool newRemoveBackground); // Enables or disables background removal

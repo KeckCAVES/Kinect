@@ -1,7 +1,7 @@
 /***********************************************************************
 FrameSource - Base class for objects that create streams of depth and
 color frames.
-Copyright (c) 2011 Oliver Kreylos
+Copyright (c) 2011-2012 Oliver Kreylos
 
 This file is part of the Kinect 3D Video Capture Project (Kinect).
 
@@ -50,6 +50,13 @@ class FrameSource
 		COLOR=0,DEPTH
 		};
 	
+	struct PixelDepthCorrection // Structure defining per-pixel depth correction coefficients
+		{
+		/* Elements: */
+		public:
+		float scale,offset; // Coefficients of the affine correction formula depthOut = depthIn * scale + offset
+		};
+	
 	struct IntrinsicParameters // Structure defining the intrinsic parameters of a depth and color frame source
 		{
 		/* Embedded classes: */
@@ -58,7 +65,7 @@ class FrameSource
 		
 		/* Elements: */
 		PTransform depthProjection; // The projection transformation from depth image space into 3D camera space
-		PTransform colorProjection; // The projection transformation from color image space into 3D camera space
+		PTransform colorProjection; // The projection transformation from 3D camera space into color image space
 		};
 	
 	typedef Geometry::OrthogonalTransformation<double,3> ExtrinsicParameters; // Type for extrinsic camera parameters
@@ -72,6 +79,8 @@ class FrameSource
 	virtual ~FrameSource(void);
 	
 	/* Methods: */
+	virtual bool hasDepthCorrectionCoefficients(void) const; // Returns true if the frame source has per-pixel depth correction coefficients
+	virtual FrameBuffer getDepthCorrectionCoefficients(void) const; // Returns a frame buffer containing per-pixel affine depth correction coefficients
 	virtual IntrinsicParameters getIntrinsicParameters(void) const =0; // Returns the intrinsic camera parameters, i.e., the virtual camera's projection matrix in camera space
 	virtual ExtrinsicParameters getExtrinsicParameters(void) const =0; // Returns the extrinsic camera parameters, i.e., the position and orientation of the virtual camera in 3D world space
 	virtual const unsigned int* getActualFrameSize(int sensor) const =0; // Returns the selected frame size of the color or depth stream as an array of (width, height) in pixels

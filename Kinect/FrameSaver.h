@@ -2,7 +2,7 @@
 FrameSaver - Helper class to save raw color and video frames from a
 Kinect frame source to a set of time-stamped files for playback and
 further processing.
-Copyright (c) 2010-2011 Oliver Kreylos
+Copyright (c) 2010-2012 Oliver Kreylos
 
 This file is part of the Kinect 3D Video Capture Project (Kinect).
 
@@ -45,6 +45,7 @@ class FrameSaver
 	{
 	/* Elements: */
 	private:
+	double timeStampOffset; // Offset value subtracted from the time stamps of all incoming color and depth frames
 	volatile bool done; // Flag set when all frames have been queued for saving
 	Threads::MutexCond colorFramesCond; // Condition variable to signal new frames in the depth queue
 	std::deque<FrameBuffer> colorFrames; // Queue of color frames still to be saved
@@ -69,6 +70,7 @@ class FrameSaver
 	~FrameSaver(void);
 	
 	/* Methods: */
+	void setTimeStampOffset(double newTimeStampOffset); // Sets the time stamp offset for all subsequent frames
 	void saveColorFrame(const FrameBuffer& newFrame); // Queues a new color frame for writing
 	void saveDepthFrame(const FrameBuffer& newFrame); // Queues a new depth frame for writing
 	};

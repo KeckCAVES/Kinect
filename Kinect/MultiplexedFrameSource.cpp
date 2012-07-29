@@ -1,7 +1,7 @@
 /***********************************************************************
 MultiplexedFrameSource - Class to stream several pairs of color and
 depth frames from a single source file or pipe.
-Copyright (c) 2010-2011 Oliver Kreylos
+Copyright (c) 2010-2012 Oliver Kreylos
 
 This file is part of the Kinect 3D Video Capture Project (Kinect).
 
@@ -44,6 +44,19 @@ MultiplexedFrameSource::Stream::Stream(MultiplexedFrameSource* sOwner,unsigned i
 	++owner->numStreamsAlive;
 	}
 	
+	/* Read the format versions of the color and depth streams: */
+	source.read<unsigned int>(streamFormatVersions,2);
+	
+	/* Check if the depth stream has per-pixel depth correction coefficients: */
+	if(streamFormatVersions[1]>=2&&source.read<char>()!=0)
+		{
+		/* Read the depth correction buffer: */
+		int size[2];
+		source.read<int>(size,2);
+		depthCorrection=FrameBuffer(size[0],size[1],size[1]*size[0]*2*sizeof(float));
+		source.read<float>(static_cast<float*>(depthCorrection.getBuffer()),size[1]*size[0]*2);
+		}
+	
 	/* Read the intrinsic and extrinsic camera parameters from the source: */
 	ips.colorProjection=Misc::Marshaller<IntrinsicParameters::PTransform>::read(source);
 	ips.depthProjection=Misc::Marshaller<IntrinsicParameters::PTransform>::read(source);
@@ -73,6 +86,27 @@ MultiplexedFrameSource::Stream::~Stream(void)
 	/* Destroy theowner if this was the last stream to die: */
 	if(lastOneOut)
 		delete owner;
+	}
+
+bool MultiplexedFrameSource::Stream::hasDepthCorrectionCoefficients(void) const
+	{
+	/* Check if the depth correction buffer has valid data: */
+	return depthCorrection.getBuffer()!=0;
+	}
+
+FrameBuffer MultiplexedFrameSource::Stream::getDepthCorrectionCoefficients(void) const
+	{
+	/* Check if the depth correction buffer has valid data: */
+	if(depthCorrection.getBuffer()!=0)
+		{
+		/* Return the depth correction buffer: */
+		return depthCorrection;
+		}
+	else
+		{
+		/* Return an identity depth correction: */
+		return FrameSource::getDepthCorrectionCoefficients();
+		}
 	}
 
 FrameSource::IntrinsicParameters MultiplexedFrameSource::Stream::getIntrinsicParameters(void) const
