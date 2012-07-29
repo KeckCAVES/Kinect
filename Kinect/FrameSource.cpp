@@ -1,7 +1,7 @@
 /***********************************************************************
 FrameSource - Base class for objects that create streams of depth and
 color frames.
-Copyright (c) 2011 Oliver Kreylos
+Copyright (c) 2011-2012 Oliver Kreylos
 
 This file is part of the Kinect 3D Video Capture Project (Kinect).
 
@@ -21,6 +21,7 @@ Software Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA
 02111-1307 USA
 ***********************************************************************/
 
+#include <Kinect/FrameBuffer.h>
 #include <Kinect/FrameSource.h>
 
 namespace Kinect {
@@ -35,6 +36,30 @@ FrameSource::FrameSource(void)
 
 FrameSource::~FrameSource(void)
 	{
+	}
+
+bool FrameSource::hasDepthCorrectionCoefficients(void) const
+	{
+	return false;
+	}
+
+FrameBuffer FrameSource::getDepthCorrectionCoefficients(void) const
+	{
+	/* Get the source's frame size and create a result frame buffer: */
+	const unsigned int* frameSize=getActualFrameSize(DEPTH);
+	FrameBuffer result(frameSize[0],frameSize[1],frameSize[1]*frameSize[0]*sizeof(PixelDepthCorrection));
+	
+	/* Initialize the frame buffer to the identity transformation: */
+	PixelDepthCorrection* pdcPtr=static_cast<PixelDepthCorrection*>(result.getBuffer());
+	for(unsigned int y=0;y<frameSize[1];++y)
+		for(unsigned int x=0;x<frameSize[0];++x,++pdcPtr)
+			{
+			pdcPtr->scale=1.0f;
+			pdcPtr->offset=0.0f;
+			}
+	
+	/* Return the identity correction map: */
+	return result;
 	}
 
 }

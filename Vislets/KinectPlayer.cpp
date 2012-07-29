@@ -293,12 +293,13 @@ void KinectPlayer::KinectStreamer::updateFrames(double currentTimeStamp)
 		projector.setColorFrame(currentColorFrame);
 	if(currentDepthFrame.timeStamp!=0.0)
 		projector.setDepthFrame(currentDepthFrame);
+	projector.updateFrames();
 	}
 
 void KinectPlayer::KinectStreamer::glRenderAction(GLContextData& contextData) const
 	{
 	/* Draw the camera's facade: */
-	projector.draw(contextData);
+	projector.glRenderAction(contextData);
 	}
 
 /*************************************

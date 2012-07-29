@@ -34,7 +34,6 @@ Software Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA
 #include <IO/File.h>
 #include <Comm/TCPPipe.h>
 #include <Geometry/GeometryMarshallers.h>
-#include <Kinect/FrameBuffer.h>
 
 /******************************************
 Methods of class KinectServer::CameraState:
@@ -77,6 +76,13 @@ KinectServer::CameraState::CameraState(libusb_device* sDevice,Threads::MutexCond
 	 depthFile(16384),depthCompressor(depthFile,camera.getActualFrameSize(Kinect::FrameSource::DEPTH)),
 	 depthFrameIndex(0),newDepthFrameCond(sNewDepthFrameCond),hasSentDepthFrame(false)
 	{
+	/* Check if the camera has per-pixel depth correction coefficients: */
+	if(camera.hasDepthCorrectionCoefficients())
+		{
+		/* Get the per-pixel depth correction coefficients: */
+		depthCorrection=camera.getDepthCorrectionCoefficients();
+		}
+	
 	/* Extract the depth and color compressors' stream header data: */
 	colorFile.storeBuffers(colorHeaders);
 	depthFile.storeBuffers(depthHeaders);
@@ -99,6 +105,21 @@ void KinectServer::CameraState::writeHeaders(IO::File& sink) const
 	/* Write the color and depth compression headers: */
 	colorHeaders.writeToSink(sink);
 	depthHeaders.writeToSink(sink);
+	
+	/* Write the stream format versions: */
+	sink.write<unsigned int>(1);
+	sink.write<unsigned int>(2);
+	
+	/* Check if the camera has per-pixel depth correction: */
+	if(depthCorrection.getBuffer()!=0)
+		{
+		/* Write the per-pixel depth correction parameters: */
+		sink.write<char>(1);
+		sink.write<int>(depthCorrection.getSize(),2);
+		sink.write<float>(static_cast<const float*>(depthCorrection.getBuffer()),depthCorrection.getSize(1)*depthCorrection.getSize(0)*2);
+		}
+	else
+		sink.write<char>(0);
 	
 	/* Get the camera's intrinsic and extrinsic parameters: */
 	Kinect::FrameSource::IntrinsicParameters ips=camera.getIntrinsicParameters();

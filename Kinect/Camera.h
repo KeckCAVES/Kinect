@@ -1,7 +1,7 @@
 /***********************************************************************
 Camera - Wrapper class to represent the color and depth camera interface
 aspects of the Kinect sensor.
-Copyright (c) 2010-2011 Oliver Kreylos
+Copyright (c) 2010-2012 Oliver Kreylos
 
 This file is part of the Kinect 3D Video Capture Project (Kinect).
 
@@ -124,6 +124,7 @@ class Camera:public FrameSource
 	Misc::Timer frameTimer; // Free-running timer to time-stamp depth and color frames
 	double frameTimerOffset; // Time offset to apply to cameras' timers
 	bool compressDepthFrames; // Flag whether to request RLE/differential compressed depth frames from the depth camera
+	bool smoothDepthFrames; // Flag whether to smooth depth frames inside the Kinect's processor, whatever that means
 	StreamingState* streamers[2]; // Streaming states for color and depth frames
 	unsigned int numBackgroundFrames; // Number of background frames left to capture
 	unsigned short* backgroundFrame; // Frame containing minimal depth values for a captured background
@@ -146,9 +147,11 @@ class Camera:public FrameSource
 	public:
 	Camera(libusb_device* sDevice); // Creates a Kinect camera wrapper around the given USB device, which is assumed to be a Kinect camera
 	Camera(USB::Context& usbContext,size_t index =0); // Opens the index-th Kinect camera device on the given USB context
-	~Camera(void); // Destroys the camera
+	virtual ~Camera(void); // Destroys the camera
 	
 	/* Methods from FrameSource: */
+	virtual bool hasDepthCorrectionCoefficients(void) const;
+	virtual FrameBuffer getDepthCorrectionCoefficients(void) const;
 	virtual IntrinsicParameters getIntrinsicParameters(void) const;
 	virtual ExtrinsicParameters getExtrinsicParameters(void) const;
 	virtual const unsigned int* getActualFrameSize(int sensor) const;
@@ -173,6 +176,7 @@ class Camera:public FrameSource
 	unsigned int getActualFrameRate(int camera) const; // Returns the selected frame rate of the color or depth camera in Hz
 	void resetFrameTimer(double newFrameTimerOffset =0.0); // Resets the frame timer to zero
 	void setCompressDepthFrames(bool newCompressDepthFrames); // Enables or disables depth frame compression for the next streaming operation
+	void setSmoothDepthFrames(bool newSmoothDepthFrames); // Enables or disables depth frame smoothing for the next streaming operation
 	void captureBackground(unsigned int newNumBackgroundFrames,bool replace,BackgroundCaptureCallback* newBackgroundCaptureCallback =0); // Captures the given number of frames to create a background removal buffer and calls optional callback upon completion
 	void loadBackground(const char* fileNamePrefix); // Loads a background removal buffer from a file with the given prefix
 	void loadBackground(IO::File& file); // Ditto, from already opened file

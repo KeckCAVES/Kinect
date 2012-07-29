@@ -1,7 +1,7 @@
 /***********************************************************************
 KinectViewer - Vislet to draw 3D reconstructions captured from a Kinect
 device in 3D space.
-Copyright (c) 2010-2011 Oliver Kreylos
+Copyright (c) 2010-2012 Oliver Kreylos
 
 This file is part of the Kinect 3D Video Capture Project (Kinect).
 
@@ -105,48 +105,45 @@ Methods of class KinectViewer:
 
 void KinectViewer::colorStreamingCallback(const Kinect::FrameBuffer& frameBuffer)
 	{
-	/* Post the new frame into the color frame triple buffer: */
-	colorFrames.postNewValue(frameBuffer);
+	/* Forward the new color frame to the projector: */
+	projector->setColorFrame(frameBuffer);
 	
 	/* Update application state: */
 	Vrui::requestUpdate();
 	}
 
-void KinectViewer::depthStreamingCallback(const Kinect::FrameBuffer& frameBuffer)
+void KinectViewer::meshStreamingCallback(const Kinect::MeshBuffer& meshBuffer)
 	{
-	/* Post the new frame into the depth frame triple buffer: */
-	depthFrames.postNewValue(frameBuffer);
-	
 	/* Update application state: */
 	Vrui::requestUpdate();
 	}
 
 KinectViewer::KinectViewer(int numArguments,const char* const arguments[])
-	:camera(0),
+	:source(0),
 	 projector(0)
 	{
 	/* Enable background USB event handling: */
 	usbContext.startEventHandling();
 	
 	/* Connect to first Kinect camera device on the host: */
-	camera=new Kinect::Camera(usbContext);
+	source=new Kinect::Camera(usbContext);
 	
 	/* Create a Kinect projector: */
-	projector=new Kinect::Projector(*camera);
+	projector=new Kinect::Projector(*source);
 	
 	/* Start streaming: */
-	camera->startStreaming(Misc::createFunctionCall(this,&KinectViewer::colorStreamingCallback),Misc::createFunctionCall(this,&KinectViewer::depthStreamingCallback));
+	projector->startStreaming(Misc::createFunctionCall(this,&KinectViewer::meshStreamingCallback));
+	source->startStreaming(Misc::createFunctionCall(this,&KinectViewer::colorStreamingCallback),Misc::createFunctionCall(projector,&Kinect::Projector::setDepthFrame));
 	}
 
 KinectViewer::~KinectViewer(void)
 	{
 	/* Stop streaming: */
-	camera->stopStreaming();
+	source->stopStreaming();
+	projector->stopStreaming();
 	
 	delete projector;
-	
-	/* Disconnect from the Kinect camera device: */
-	delete camera;
+	delete source;
 	}
 
 Vrui::VisletFactory* KinectViewer::getFactory(void) const
@@ -156,23 +153,12 @@ Vrui::VisletFactory* KinectViewer::getFactory(void) const
 
 void KinectViewer::frame(void)
 	{
-	/* Lock the most recent frame in the color frame triple buffer: */
-	if(colorFrames.lockNewValue())
-		{
-		/* Push the new frame to the Kinect projector: */
-		projector->setColorFrame(colorFrames.getLockedValue());
-		}
-	
-	/* Lock the most recent frame in the depth frame triple buffer: */
-	if(depthFrames.lockNewValue())
-		{
-		/* Push the new frame to the Kinect projector: */
-		projector->setDepthFrame(depthFrames.getLockedValue());
-		}
+	/* Update the projector: */
+	projector->updateFrames();
 	}
 
 void KinectViewer::display(GLContextData& contextData) const
 	{
 	/* Draw the current 3D video facade: */
-	projector->draw(contextData);
+	projector->glRenderAction(contextData);
 	}
