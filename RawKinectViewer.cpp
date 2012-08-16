@@ -35,6 +35,8 @@ Software Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA
 #include <GL/gl.h>
 #include <GL/Extensions/GLARBTextureNonPowerOfTwo.h>
 #include <GL/GLContextData.h>
+#include <Images/RGBImage.h>
+#include <Images/WriteImageFile.h>
 #include <GLMotif/PopupMenu.h>
 #include <GLMotif/Menu.h>
 #include <GLMotif/Button.h>
@@ -313,6 +315,55 @@ void RawKinectViewer::saveAverageFrameCallback(Misc::CallbackData* cbData)
 		}
 	}
 
+void RawKinectViewer::saveColorFrameOKCallback(GLMotif::FileSelectionDialog::OKCallbackData* cbData)
+	{
+	try
+		{
+		/* Convert the current color frame into an RGB image: */
+		const unsigned char* sPtr=static_cast<const unsigned char*>(colorFrames.getLockedValue().getBuffer());
+		Images::RGBImage colorImage(colorFrameSize[0],colorFrameSize[1]);
+		Images::RGBImage::Color* dPtr=colorImage.modifyPixels();
+		for(unsigned int y=0;y<colorFrameSize[1];++y)
+			for(unsigned int x=0;x<colorFrameSize[0];++x,sPtr+=3,++dPtr)
+				for(int i=0;i<3;++i)
+					(*dPtr)[i]=sPtr[i];
+		
+		/* Write the RGB image to the file: */
+		Images::writeImageFile(colorImage,cbData->selectedFileName);
+		}
+	catch(std::runtime_error err)
+		{
+		/* Show an error message: */
+		Vrui::showErrorMessage("Save Color Frame...",Misc::printStdErrMsg("Could not write color frame file %s due to exception %s",cbData->getSelectedPath().c_str(),err.what()));
+		}
+	
+	/* Destroy the file selection dialog: */
+	cbData->fileSelectionDialog->close();
+	}
+
+void RawKinectViewer::saveColorFrameCallback(Misc::CallbackData* cbData)
+	{
+	try
+		{
+		/* Create a uniquely-named color image file in the current directory: */
+		IO::DirectoryPtr currentDir=Vrui::openDirectory(".");
+		std::string colorFrameFileName=currentDir->createNumberedFileName("ColorFrame.png",4);
+		
+		/* Create a file selection dialog to select an alternative color frame file name: */
+		Misc::SelfDestructPointer<GLMotif::FileSelectionDialog> saveColorFrameDialog(new GLMotif::FileSelectionDialog(Vrui::getWidgetManager(),"Save Color Frame...",currentDir,colorFrameFileName.c_str(),".png"));
+		saveColorFrameDialog->getOKCallbacks().add(this,&RawKinectViewer::saveColorFrameOKCallback);
+		saveColorFrameDialog->getCancelCallbacks().add(&GLMotif::PopupWindow::defaultCloseCallback);
+		
+		/* Show the file selection dialog: */
+		Vrui::popupPrimaryWidget(saveColorFrameDialog.releaseTarget());
+		}
+	catch(std::runtime_error err)
+		{
+		/* Show an error message: */
+		Vrui::showErrorMessage("Save Color Frame...",Misc::printStdErrMsg("Could not save color frame due to exception %s",err.what()));
+		}
+	}
+
 GLMotif::PopupMenu* RawKinectViewer::createMainMenu(void)
 	{
 	/* Create a popup shell to hold the main menu: */
@@ -342,6 +393,10 @@ GLMotif::PopupMenu* RawKinectViewer::createMainMenu(void)
 	/* Create a button to save the current averaged depth frame: */
 	GLMotif::Button* saveAverageFrameButton=new GLMotif::Button("SaveAverageFrameButton",mainMenu,"Save Average Frame");
 	saveAverageFrameButton->getSelectCallbacks().add(this,&RawKinectViewer::saveAverageFrameCallback);
+	
+	/* Create a button to save the current color frame: */
+	GLMotif::Button* saveColorFrameButton=new GLMotif::Button("SaveColorFrameButton",mainMenu,"Save Color Frame");
+	saveColorFrameButton->getSelectCallbacks().add(this,&RawKinectViewer::saveColorFrameCallback);
 	
 	/* Finish building the main menu: */
 	mainMenu->manageChild();

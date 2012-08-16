@@ -53,7 +53,7 @@ DepthCorrectionToolFactory* DepthCorrectionTool::initClass(Vrui::ToolManager& to
 	/* Set up the tool class' input layout: */
 	factory->setNumButtons(2);
 	factory->setButtonFunction(0,"Save Plane");
-	factory->setButtonFunction(0,"Calibrate");
+	factory->setButtonFunction(1,"Calibrate");
 	
 	/* Register and return the class: */
 	toolManager.addClass(factory,Vrui::ToolManager::defaultToolFactoryDestructor);

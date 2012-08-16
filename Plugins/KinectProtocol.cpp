@@ -28,4 +28,4 @@ Static elements of struct KinectProtocol:
 ****************************************/
 
 const char* KinectProtocol::protocolName="Kinect";
-const unsigned int KinectProtocol::protocolVersion=(1U<<16)+0U; // Version 1.0
+const unsigned int KinectProtocol::protocolVersion=(2U<<16)+0U; // Version 2.0
