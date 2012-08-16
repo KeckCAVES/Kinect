@@ -23,16 +23,23 @@ Software Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA
 
 #include "Vislets/KinectViewer.h"
 
+#include <string.h>
+#include <stdlib.h>
+#include <string>
+#include <iostream>
 #include <Misc/FunctionCalls.h>
-#include <Misc/StandardValueCoders.h>
-#include <Misc/ConfigurationFile.h>
-#include <Geometry/GeometryValueCoders.h>
+#include <Cluster/OpenPipe.h>
+#include <USB/Context.h>
 #include <GL/gl.h>
 #include <GL/GLTransformationWrappers.h>
 #include <Vrui/Vrui.h>
 #include <Vrui/VisletManager.h>
+#include <Vrui/OpenFile.h>
+#include <Kinect/FunctionCalls.h>
 #include <Kinect/Camera.h>
-#include <Kinect/Projector.h>
+#include <Kinect/FileFrameSource.h>
+#include <Kinect/MultiplexedFrameSource.h>
+#include <Kinect/Renderer.h>
 
 /************************************
 Methods of class KinectViewerFactory:
@@ -103,47 +110,102 @@ KinectViewerFactory* KinectViewer::factory=0;
 Methods of class KinectViewer:
 *****************************/
 
-void KinectViewer::colorStreamingCallback(const Kinect::FrameBuffer& frameBuffer)
-	{
-	/* Forward the new color frame to the projector: */
-	projector->setColorFrame(frameBuffer);
-	
-	/* Update application state: */
-	Vrui::requestUpdate();
-	}
-
-void KinectViewer::meshStreamingCallback(const Kinect::MeshBuffer& meshBuffer)
+void KinectViewer::updateCallback(void)
 	{
 	/* Update application state: */
 	Vrui::requestUpdate();
 	}
 
 KinectViewer::KinectViewer(int numArguments,const char* const arguments[])
-	:source(0),
-	 projector(0)
+	:usbContext(0)
 	{
-	/* Enable background USB event handling: */
-	usbContext.startEventHandling();
+	/* Parse the command line: */
+	bool highres=false;
+	bool compressDepth=false;
+	for(int i=0;i<numArguments;++i)
+		{
+		if(strcasecmp(arguments[i],"-high")==0)
+			highres=true;
+		else if(strcasecmp(arguments[i],"-low")==0)
+			highres=false;
+		else if(strcasecmp(arguments[i],"-compress")==0)
+			compressDepth=true;
+		else if(strcasecmp(arguments[i],"-nocompress")==0)
+			compressDepth=false;
+		else if(strcasecmp(arguments[i],"-c")==0)
+			{
+			if(usbContext==0)
+				{
+				/* Create a USB context: */
+				usbContext=new USB::Context;
+				
+				/* Enable background USB event handling: */
+				usbContext->startEventHandling();
+				}
+			
+			/* Connect to a local Kinect device: */
+			++i;
+			if(Vrui::getClusterMultiplexer()==0)
+				{
+				/* Open the camera of the given index: */
+				int cameraIndex=atoi(arguments[i]);
+				Kinect::Camera* camera=new Kinect::Camera(*usbContext,cameraIndex);
+				
+				/* Set the camera's frame size and compression flag: */
+				camera->setFrameSize(Kinect::FrameSource::COLOR,highres?Kinect::Camera::FS_1280_1024:Kinect::Camera::FS_640_480);
+				camera->setCompressDepthFrames(compressDepth);
+				
+				/* Add a renderer for the camera: */
+				renderers.push_back(new Kinect::Renderer(camera));
+				}
+			else if(Vrui::isMaster())
+				{
+				/* Can't stream from local camera in cluster mode: */
+				std::cerr<<"KinectViewer: Ignoring -c "<<arguments[i]<<" argument: Streaming from local Kinect camera(s) is not supported in cluster environments"<<std::endl;
+				}
+			}
+		else if(strcasecmp(arguments[i],"-f")==0)
+			{
+			/* Open a 3D video stream file: */
+			++i;
+			std::string colorFileName=arguments[i];
+			colorFileName.append(".color");
+			std::string depthFileName=arguments[i];
+			depthFileName.append(".depth");
+			Kinect::FileFrameSource* fileSource=new Kinect::FileFrameSource(Vrui::openFile(colorFileName.c_str()),Vrui::openFile(depthFileName.c_str()));
+			
+			/* Add a renderer for the file source: */
+			renderers.push_back(new Kinect::Renderer(fileSource));
+			}
+		else if(strcasecmp(arguments[i],"-p")==0)
+			{
+			/* Connect to a 3D video streaming server: */
+			i+=2;
+			Kinect::MultiplexedFrameSource* source=Kinect::MultiplexedFrameSource::create(Cluster::openTCPPipe(Vrui::getClusterMultiplexer(),arguments[i-1],atoi(arguments[i])));
+			
+			/* Add a renderer for each component stream in the multiplexer: */
+			for(unsigned int i=0;i<source->getNumStreams();++i)
+				renderers.push_back(new Kinect::Renderer(source->getStream(i)));
+			}
+		}
 	
-	/* Connect to first Kinect camera device on the host: */
-	source=new Kinect::Camera(usbContext);
+	/* Reset all renderers' frame timers: */
+	for(std::vector<Kinect::Renderer*>::iterator rIt=renderers.begin();rIt!=renderers.end();++rIt)
+		(*rIt)->resetFrameTimer();
 	
-	/* Create a Kinect projector: */
-	projector=new Kinect::Projector(*source);
-	
-	/* Start streaming: */
-	projector->startStreaming(Misc::createFunctionCall(this,&KinectViewer::meshStreamingCallback));
-	source->startStreaming(Misc::createFunctionCall(this,&KinectViewer::colorStreamingCallback),Misc::createFunctionCall(projector,&Kinect::Projector::setDepthFrame));
+	/* Start streaming on all renderers: */
+	for(std::vector<Kinect::Renderer*>::iterator rIt=renderers.begin();rIt!=renderers.end();++rIt)
+		(*rIt)->startStreaming(Misc::createFunctionCall(this,&KinectViewer::updateCallback));
 	}
 
 KinectViewer::~KinectViewer(void)
 	{
-	/* Stop streaming: */
-	source->stopStreaming();
-	projector->stopStreaming();
+	/* Delete all renderers: */
+	for(std::vector<Kinect::Renderer*>::iterator rIt=renderers.begin();rIt!=renderers.end();++rIt)
+		delete *rIt;
 	
-	delete projector;
-	delete source;
+	/* Close the USB context: */
+	delete usbContext;
 	}
 
 Vrui::VisletFactory* KinectViewer::getFactory(void) const
@@ -153,12 +215,14 @@ Vrui::VisletFactory* KinectViewer::getFactory(void) const
 
 void KinectViewer::frame(void)
 	{
-	/* Update the projector: */
-	projector->updateFrames();
+	/* Update all renderers: */
+	for(std::vector<Kinect::Renderer*>::iterator rIt=renderers.begin();rIt!=renderers.end();++rIt)
+		(*rIt)->frame();
 	}
 
 void KinectViewer::display(GLContextData& contextData) const
 	{
-	/* Draw the current 3D video facade: */
-	projector->glRenderAction(contextData);
+	/* Draw the current 3D video facades of all renderers: */
+	for(std::vector<Kinect::Renderer*>::const_iterator rIt=renderers.begin();rIt!=renderers.end();++rIt)
+		(*rIt)->glRenderAction(contextData);
 	}

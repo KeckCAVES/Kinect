@@ -103,6 +103,8 @@ class RawKinectViewer:public Vrui::Application,public GLObject
 	void averageFramesCallback(GLMotif::ToggleButton::ValueChangedCallbackData* cbData);
 	void saveAverageFrameOKCallback(GLMotif::FileSelectionDialog::OKCallbackData* cbData);
 	void saveAverageFrameCallback(Misc::CallbackData* cbData);
+	void saveColorFrameOKCallback(GLMotif::FileSelectionDialog::OKCallbackData* cbData);
+	void saveColorFrameCallback(Misc::CallbackData* cbData);
 	GLMotif::PopupMenu* createMainMenu(void); // Creates the program's main menu
 	
 	/* Constructors and destructors: */

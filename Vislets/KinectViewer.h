@@ -25,17 +25,15 @@ Software Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA
 #define VISLETS_KINECTVIEWER_INCLUDED
 
 #include <string>
-#include <USB/Context.h>
-#include <Geometry/OrthogonalTransformation.h>
-#include <Vrui/Geometry.h>
+#include <vector>
 #include <Vrui/Vislet.h>
 
 /* Forward declarations: */
+namespace USB {
+class Context;
+}
 namespace Kinect {
-class FrameBuffer;
-class FrameSource;
-class MeshBuffer;
-class Projector;
+class Renderer;
 }
 
 class KinectViewer;
@@ -62,13 +60,11 @@ class KinectViewer:public Vrui::Vislet
 	private:
 	static KinectViewerFactory* factory; // Pointer to the class' factory object
 	
-	USB::Context usbContext; // USB device context
-	Kinect::FrameSource* source; // Pointer to depth and color frame source
-	Kinect::Projector* projector; // Object to project depth and color frames back into 3D camera space
+	USB::Context* usbContext; // USB device context
+	std::vector<Kinect::Renderer*> renderers; // List of 3D video stream renderers
 	
 	/* Private methods: */
-	void colorStreamingCallback(const Kinect::FrameBuffer& frameBuffer); // Callback called when a new color frame was received
-	void meshStreamingCallback(const Kinect::MeshBuffer& meshBuffer); // Callback called when a new depth frame was processed by the frame projector
+	void updateCallback(void); // Callback called when any renderer's state changes
 	
 	/* Constructors and destructors: */
 	public:
