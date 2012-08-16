@@ -34,9 +34,9 @@ VRUI_MAKEDIR := $(HOME)/Vrui-2.4/share/make
 PACKAGEROOT := $(shell pwd)
 
 # Specify version of created dynamic shared libraries
-KINECT_VERSION = 2001
+KINECT_VERSION = 2002
 MAJORLIBVERSION = 2
-MINORLIBVERSION = 1
+MINORLIBVERSION = 2
 KINECT_NAME := Kinect-$(MAJORLIBVERSION).$(MINORLIBVERSION)
 
 # Check if Vrui's collaboration infrastructure is installed
@@ -387,7 +387,7 @@ $(call VISLETNAME,KinectPlayer): $(OBJDIR)/pic/Vislets/KinectPlayer.o
 ########################################################################
 
 # Implicit rule for creating collaboration infrastructure plug-ins:
-$(call PLUGINNAME,%): $(OBJDIR)/pic/%.o
+$(call PLUGINNAME,%): $(OBJDIR)/pic/Plugins/%.o
 	@mkdir -p $(PLUGINDESTDIR)
 ifdef SHOWCOMMAND
 	$(CCOMP) $(PLUGINLINKFLAGS) -o $@ $^ $(LINKDIRFLAGS) $(LINKLIBFLAGS)
@@ -401,20 +401,16 @@ endif
 #
 
 $(call PLUGINNAME,KinectServer): PACKAGES += MYCOLLABORATIONSERVER
-$(call PLUGINNAME,KinectServer): $(OBJDIR)/pic/KinectProtocol.o \
-                                 $(OBJDIR)/pic/KinectServerPlugin.o
+$(call PLUGINNAME,KinectServer): $(OBJDIR)/pic/Plugins/KinectProtocol.o \
+                                 $(OBJDIR)/pic/Plugins/KinectServer.o
 
 #
 # Client-side plugin:
 #
 
-# Tell Kinect client to be extremely verbose:
-#$(OBJDIR)/pic/KinectClient.o: CFLAGS += -DVVERBOSE
-
 $(call PLUGINNAME,KinectClient): PACKAGES += MYKINECT MYCOLLABORATIONCLIENT
-$(call PLUGINNAME,KinectClient): $(OBJDIR)/pic/KinectProtocol.o \
-                                 $(OBJDIR)/pic/KinectClient.o \
-                                 $(OBJDIR)/pic/KinectClientPlugin.o
+$(call PLUGINNAME,KinectClient): $(OBJDIR)/pic/Plugins/KinectProtocol.o \
+                                 $(OBJDIR)/pic/Plugins/KinectClient.o
 
 ########################################################################
 # Specify installation rules for header files, libraries, executables,

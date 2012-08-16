@@ -55,3 +55,11 @@ Kinect-2.1:
 - Added ability to save reconstructed surfaces as mesh files.
 - Changed collaboration plug-in to temporarily disable clipping while
   rendering remote 3D video.
+
+Kinect-2.2:
+- Created Kinect::Renderer class to handle common case of rendering 3D
+  video from a 3D video stream source.
+- Reimplemented Kinect collaboration plug-in using new Kinect::Renderer
+  class.
+- Moved collaboration plug-in classes into separate subdirectory and
+  fixed makefile.
