@@ -1,7 +1,7 @@
 ########################################################################
 # Packages.Kinect - List of Kinect sub-packages that can be included/
 # linked into projects.
-# Copyright (c) 2011 Oliver Kreylos
+# Copyright (c) 2011-2012 Oliver Kreylos
 #
 # This file is part of the WhyTools Build Environment.
 # 
@@ -22,7 +22,7 @@
 ########################################################################
 
 MYKINECT_BASEDIR      = $(VRUI_PACKAGEROOT)
-MYKINECT_DEPENDS      = MYVIDEO MYGLGEOMETRY MYGLSUPPORT MYGEOMETRY MYMATH MYIO MYUSB MYTHREADS MYMISC GL
+MYKINECT_DEPENDS      = MYVIDEO MYGLGEOMETRY MYGLSUPPORT MYGEOMETRY MYMATH MYCLUSTER MYIO MYUSB MYTHREADS MYMISC GL
 MYKINECT_INCLUDE      = -I$(VRUI_INCLUDEDIR)
 MYKINECT_LIBDIR       = -L$(VRUI_LIBDIR)
 MYKINECT_LIBS         = -lKinect.$(LDEXT)

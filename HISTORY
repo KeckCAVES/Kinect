@@ -63,3 +63,15 @@ Kinect-2.2:
   class.
 - Moved collaboration plug-in classes into separate subdirectory and
   fixed makefile.
+
+Kinect-2.3:
+- Bumped Vrui version requirement to Vrui-2.5-001.
+- Fixed behavior of Kinect::MultiplexedFrameSource in cluster
+  environments.
+- Fixed installation location of KinectServer.cfg. Pointed out by David
+  Raila.
+- Fixed cluster issues in Kinect client collaboration protocol plug-in.
+- Added button to load background removal images to KinectViewer.
+- Added detailed description of new intrinsic calibration procedure to
+  README file.
+- Made small changes to build system in line with Vrui.

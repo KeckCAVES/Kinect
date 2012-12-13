@@ -303,7 +303,7 @@ void RawKinectViewer::saveAverageFrameCallback(Misc::CallbackData* cbData)
 		/* Create a file selection dialog to select an alternative depth frame file name: */
 		Misc::SelfDestructPointer<GLMotif::FileSelectionDialog> saveAverageFrameDialog(new GLMotif::FileSelectionDialog(Vrui::getWidgetManager(),"Save Average Depth Frame...",currentDir,depthFrameFileName.c_str(),".dat"));
 		saveAverageFrameDialog->getOKCallbacks().add(this,&RawKinectViewer::saveAverageFrameOKCallback);
-		saveAverageFrameDialog->getCancelCallbacks().add(&GLMotif::PopupWindow::defaultCloseCallback);
+		saveAverageFrameDialog->deleteOnCancel();
 		
 		/* Show the file selection dialog: */
 		Vrui::popupPrimaryWidget(saveAverageFrameDialog.releaseTarget());
@@ -352,7 +352,7 @@ void RawKinectViewer::saveColorFrameCallback(Misc::CallbackData* cbData)
 		/* Create a file selection dialog to select an alternative color frame file name: */
 		Misc::SelfDestructPointer<GLMotif::FileSelectionDialog> saveColorFrameDialog(new GLMotif::FileSelectionDialog(Vrui::getWidgetManager(),"Save Color Frame...",currentDir,colorFrameFileName.c_str(),".png"));
 		saveColorFrameDialog->getOKCallbacks().add(this,&RawKinectViewer::saveColorFrameOKCallback);
-		saveColorFrameDialog->getCancelCallbacks().add(&GLMotif::PopupWindow::defaultCloseCallback);
+		saveColorFrameDialog->deleteOnCancel();
 		
 		/* Show the file selection dialog: */
 		Vrui::popupPrimaryWidget(saveColorFrameDialog.releaseTarget());

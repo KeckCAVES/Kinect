@@ -92,6 +92,8 @@ class KinectViewer:public Vrui::Application
 		void removeBackgroundCallback(GLMotif::ToggleButton::ValueChangedCallbackData* cbData);
 		void backgroundCaptureCompleteCallback(Kinect::Camera& camera);
 		void captureBackgroundCallback(Misc::CallbackData* cbData);
+		void loadBackgroundCallback(Misc::CallbackData* cbData);
+		void loadBackgroundOKCallback(GLMotif::FileSelectionDialog::OKCallbackData* cbData);
 		void saveBackgroundCallback(Misc::CallbackData* cbData);
 		void backgroundMaxDepthCallback(GLMotif::TextFieldSlider::ValueChangedCallbackData* cbData);
 		void backgroundRemovalFuzzCallback(GLMotif::TextFieldSlider::ValueChangedCallbackData* cbData);
@@ -127,6 +129,7 @@ class KinectViewer:public Vrui::Application
 	/* Private methods: */
 	GLMotif::PopupMenu* createMainMenu(void); // Creates the program's main menu
 	void resetNavigationCallback(Misc::CallbackData* cbData); // Callback when the user wants to reset the navigation transformation
+	void goToPhysicalCallback(Misc::CallbackData* cbData);
 	void saveStreamsCallback(GLMotif::ToggleButton::ValueChangedCallbackData* cbData);
 	void saveStreamsOKCallback(GLMotif::FileSelectionDialog::OKCallbackData* cbData);
 	
@@ -296,6 +299,9 @@ GLMotif::PopupWindow* KinectViewer::KinectStreamer::createStreamerDialog(void)
 		GLMotif::Button* captureBackgroundButton=new GLMotif::Button("CaptureBackgroundButton",backgroundBox,"Capture Background");
 		captureBackgroundButton->getSelectCallbacks().add(this,&KinectViewer::KinectStreamer::captureBackgroundCallback);
 		
+		GLMotif::Button* loadBackgroundButton=new GLMotif::Button("LoadBackgroundButton",backgroundBox,"Load Background...");
+		loadBackgroundButton->getSelectCallbacks().add(this,&KinectViewer::KinectStreamer::loadBackgroundCallback);
+		
 		GLMotif::Button* saveBackgroundButton=new GLMotif::Button("SaveBackgroundButton",backgroundBox,"Save Background");
 		saveBackgroundButton->getSelectCallbacks().add(this,&KinectViewer::KinectStreamer::saveBackgroundCallback);
 		
@@ -398,6 +404,36 @@ void KinectViewer::KinectStreamer::captureBackgroundCallback(Misc::CallbackData*
 		/* Capture five second worth of background frames: */
 		camera->captureBackground(150,Misc::createFunctionCall(this,&KinectViewer::KinectStreamer::backgroundCaptureCompleteCallback));
 		}
+	}
+
+void KinectViewer::KinectStreamer::loadBackgroundCallback(Misc::CallbackData* cbData)
+	{
+	Kinect::Camera* camera=dynamic_cast<Kinect::Camera*>(source);
+	if(camera!=0)
+		{
+		/* Show a file selection dialog: */
+		GLMotif::FileSelectionDialog* loadBackgroundDialog=new GLMotif::FileSelectionDialog(Vrui::getWidgetManager(),"Load Background...",Vrui::openDirectory("."),".background");
+		loadBackgroundDialog->getOKCallbacks().add(this,&KinectViewer::KinectStreamer::loadBackgroundOKCallback);
+		loadBackgroundDialog->deleteOnCancel();
+		
+		/* Show the file selection dialog: */
+		Vrui::popupPrimaryWidget(loadBackgroundDialog);
+		}
+	}
+
+void KinectViewer::KinectStreamer::loadBackgroundOKCallback(GLMotif::FileSelectionDialog::OKCallbackData* cbData)
+	{
+	Kinect::Camera* camera=dynamic_cast<Kinect::Camera*>(source);
+	if(camera!=0)
+		{
+		/* Load the selected background file: */
+		IO::FilePtr backgroundFile=cbData->selectedDirectory->openFile(cbData->selectedFileName);
+		backgroundFile->setEndianness(Misc::LittleEndian);
+		camera->loadBackground(*backgroundFile);
+		}
+	
+	/* Close the file selection dialog: */
+	cbData->fileSelectionDialog->close();
 	}
 
 void KinectViewer::KinectStreamer::saveBackgroundCallback(Misc::CallbackData* cbData)
@@ -531,6 +567,10 @@ GLMotif::PopupMenu* KinectViewer::createMainMenu(void)
 	GLMotif::Button* resetNavigationButton=new GLMotif::Button("ResetNavigationButton",mainMenu,"Reset Navigation");
 	resetNavigationButton->getSelectCallbacks().add(this,&KinectViewer::resetNavigationCallback);
 	
+	/* Create a button to go to physical coordinates: */
+	GLMotif::Button* goToPhysicalButton=new GLMotif::Button("GoToPhysicalButton",mainMenu,"Go To Physical Space");
+	goToPhysicalButton->getSelectCallbacks().add(this,&KinectViewer::goToPhysicalCallback);
+	
 	/* Create a toggle button for each Kinect streamer's control dialog: */
 	for(size_t i=0;i<streamers.size();++i)
 		{
@@ -573,6 +613,12 @@ void KinectViewer::resetNavigationCallback(Misc::CallbackData* cbData)
 	Vrui::setNavigationTransformation(Geometry::mid(bbox.min,bbox.max),Math::div2(Geometry::dist(bbox.min,bbox.max)));
 	}
 
+void KinectViewer::goToPhysicalCallback(Misc::CallbackData* cbData)
+	{
+	/* Set the navigation transformation to identity: */
+	Vrui::setNavigationTransformation(Vrui::NavTransform::identity);
+	}
+
 void KinectViewer::saveStreamsCallback(GLMotif::ToggleButton::ValueChangedCallbackData* cbData)
 	{
 	if(cbData->set)
@@ -580,7 +626,7 @@ void KinectViewer::saveStreamsCallback(GLMotif::ToggleButton::ValueChangedCallba
 		/* Show a file selection dialog to select a base file name for all stream files: */
 		GLMotif::FileSelectionDialog* saveStreamsDialog=new GLMotif::FileSelectionDialog(Vrui::getWidgetManager(),"Save Streams...",Vrui::openDirectory("."),"SavedStreams",".color;.depth");
 		saveStreamsDialog->getOKCallbacks().add(this,&KinectViewer::saveStreamsOKCallback);
-		saveStreamsDialog->getCancelCallbacks().add(&GLMotif::PopupWindow::defaultCloseCallback);
+		saveStreamsDialog->deleteOnCancel();
 		
 		/* Show the file selection dialog: */
 		Vrui::popupPrimaryWidget(saveStreamsDialog);
