@@ -25,6 +25,7 @@ Software Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA
 
 #include <Misc/ThrowStdErr.h>
 #include <Misc/FunctionCalls.h>
+#include <Cluster/ClusterPipe.h>
 #include <Geometry/GeometryMarshallers.h>
 
 namespace Kinect {
@@ -178,7 +179,7 @@ void* MultiplexedFrameSource::receivingThreadMethod(void)
 	
 	try
 		{
-		while(keepReceiving)
+		while(true)
 			{
 			/* Receive the next frame's identifier: */
 			unsigned int metaFrameIndex=pipe->read<unsigned int>();
@@ -246,6 +247,14 @@ MultiplexedFrameSource::MultiplexedFrameSource(Comm::PipePtr sPipe)
 	 numStreamsAlive(0),
 	 streams(0)
 	{
+	/* Check if the pipe is a cluster-forwarded pipe: */
+	Cluster::ClusterPipe* cPipe=dynamic_cast<Cluster::ClusterPipe*>(pipe.getPointer());
+	if(cPipe!=0)
+		{
+		/* Decouple the write direction of the pipe: */
+		cPipe->couple(true,false);
+		}
+	
 	/* Determine server's endianness: */
 	unsigned int endiannessFlag=pipe->read<unsigned int>();
 	if(endiannessFlag==0x78563412U)
@@ -302,14 +311,13 @@ MultiplexedFrameSource::MultiplexedFrameSource(Comm::PipePtr sPipe)
 	frames=new FrameBuffer[numStreams*2];
 	
 	/* Start the demultiplexer thread: */
-	keepReceiving=true;
 	receivingThread.start(this,&MultiplexedFrameSource::receivingThreadMethod);
 	}
 
 MultiplexedFrameSource::~MultiplexedFrameSource(void)
 	{
 	/* Signal the receiving thread to shut down: */
-	keepReceiving=false;
+	receivingThread.cancel();
 	receivingThread.join();
 	
 	/* Delete all streams: */

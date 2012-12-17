@@ -50,6 +50,9 @@ Software Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA
 #include <GLMotif/TextFieldSlider.h>
 #include <GLMotif/CascadeButton.h>
 #include <GLMotif/FileSelectionDialog.h>
+#include <Sound/SoundDataFormat.h>
+#include <Sound/SoundRecorder.h>
+#include <Sound/SoundPlayer.h>
 #include <Vrui/Vrui.h>
 #include <Vrui/Viewer.h>
 #include <Vrui/Application.h>
@@ -92,6 +95,8 @@ class KinectViewer:public Vrui::Application
 		void removeBackgroundCallback(GLMotif::ToggleButton::ValueChangedCallbackData* cbData);
 		void backgroundCaptureCompleteCallback(Kinect::Camera& camera);
 		void captureBackgroundCallback(Misc::CallbackData* cbData);
+		void loadBackgroundCallback(Misc::CallbackData* cbData);
+		void loadBackgroundOKCallback(GLMotif::FileSelectionDialog::OKCallbackData* cbData);
 		void saveBackgroundCallback(Misc::CallbackData* cbData);
 		void backgroundMaxDepthCallback(GLMotif::TextFieldSlider::ValueChangedCallbackData* cbData);
 		void backgroundRemovalFuzzCallback(GLMotif::TextFieldSlider::ValueChangedCallbackData* cbData);
@@ -119,6 +124,8 @@ class KinectViewer:public Vrui::Application
 	private:
 	USB::Context usbContext; // USB device context
 	std::vector<KinectStreamer*> streamers; // List of Kinect streamers, each connected to one Kinect camera
+	Sound::SoundRecorder* soundRecorder; // Recorder to save sound from the default sound source while saving 3D video streams
+	Sound::SoundPlayer* soundPlayer; // Player to play back sound from a previously saved 3D video stream
 	// Vrui::InputDevice* cameraDevice; // Pointer to the device to which the depth camera is attached
 	// MD5MeshAnimator anim; // An animator
 	
@@ -127,6 +134,7 @@ class KinectViewer:public Vrui::Application
 	/* Private methods: */
 	GLMotif::PopupMenu* createMainMenu(void); // Creates the program's main menu
 	void resetNavigationCallback(Misc::CallbackData* cbData); // Callback when the user wants to reset the navigation transformation
+	void goToPhysicalCallback(Misc::CallbackData* cbData);
 	void saveStreamsCallback(GLMotif::ToggleButton::ValueChangedCallbackData* cbData);
 	void saveStreamsOKCallback(GLMotif::FileSelectionDialog::OKCallbackData* cbData);
 	
@@ -296,6 +304,9 @@ GLMotif::PopupWindow* KinectViewer::KinectStreamer::createStreamerDialog(void)
 		GLMotif::Button* captureBackgroundButton=new GLMotif::Button("CaptureBackgroundButton",backgroundBox,"Capture Background");
 		captureBackgroundButton->getSelectCallbacks().add(this,&KinectViewer::KinectStreamer::captureBackgroundCallback);
 		
+		GLMotif::Button* loadBackgroundButton=new GLMotif::Button("LoadBackgroundButton",backgroundBox,"Load Background...");
+		loadBackgroundButton->getSelectCallbacks().add(this,&KinectViewer::KinectStreamer::loadBackgroundCallback);
+		
 		GLMotif::Button* saveBackgroundButton=new GLMotif::Button("SaveBackgroundButton",backgroundBox,"Save Background");
 		saveBackgroundButton->getSelectCallbacks().add(this,&KinectViewer::KinectStreamer::saveBackgroundCallback);
 		
@@ -398,6 +409,36 @@ void KinectViewer::KinectStreamer::captureBackgroundCallback(Misc::CallbackData*
 		/* Capture five second worth of background frames: */
 		camera->captureBackground(150,Misc::createFunctionCall(this,&KinectViewer::KinectStreamer::backgroundCaptureCompleteCallback));
 		}
+	}
+
+void KinectViewer::KinectStreamer::loadBackgroundCallback(Misc::CallbackData* cbData)
+	{
+	Kinect::Camera* camera=dynamic_cast<Kinect::Camera*>(source);
+	if(camera!=0)
+		{
+		/* Show a file selection dialog: */
+		GLMotif::FileSelectionDialog* loadBackgroundDialog=new GLMotif::FileSelectionDialog(Vrui::getWidgetManager(),"Load Background...",Vrui::openDirectory("."),".background");
+		loadBackgroundDialog->getOKCallbacks().add(this,&KinectViewer::KinectStreamer::loadBackgroundOKCallback);
+		loadBackgroundDialog->deleteOnCancel();
+		
+		/* Show the file selection dialog: */
+		Vrui::popupPrimaryWidget(loadBackgroundDialog);
+		}
+	}
+
+void KinectViewer::KinectStreamer::loadBackgroundOKCallback(GLMotif::FileSelectionDialog::OKCallbackData* cbData)
+	{
+	Kinect::Camera* camera=dynamic_cast<Kinect::Camera*>(source);
+	if(camera!=0)
+		{
+		/* Load the selected background file: */
+		IO::FilePtr backgroundFile=cbData->selectedDirectory->openFile(cbData->selectedFileName);
+		backgroundFile->setEndianness(Misc::LittleEndian);
+		camera->loadBackground(*backgroundFile);
+		}
+	
+	/* Close the file selection dialog: */
+	cbData->fileSelectionDialog->close();
 	}
 
 void KinectViewer::KinectStreamer::saveBackgroundCallback(Misc::CallbackData* cbData)
@@ -531,6 +572,10 @@ GLMotif::PopupMenu* KinectViewer::createMainMenu(void)
 	GLMotif::Button* resetNavigationButton=new GLMotif::Button("ResetNavigationButton",mainMenu,"Reset Navigation");
 	resetNavigationButton->getSelectCallbacks().add(this,&KinectViewer::resetNavigationCallback);
 	
+	/* Create a button to go to physical coordinates: */
+	GLMotif::Button* goToPhysicalButton=new GLMotif::Button("GoToPhysicalButton",mainMenu,"Go To Physical Space");
+	goToPhysicalButton->getSelectCallbacks().add(this,&KinectViewer::goToPhysicalCallback);
+	
 	/* Create a toggle button for each Kinect streamer's control dialog: */
 	for(size_t i=0;i<streamers.size();++i)
 		{
@@ -573,6 +618,12 @@ void KinectViewer::resetNavigationCallback(Misc::CallbackData* cbData)
 	Vrui::setNavigationTransformation(Geometry::mid(bbox.min,bbox.max),Math::div2(Geometry::dist(bbox.min,bbox.max)));
 	}
 
+void KinectViewer::goToPhysicalCallback(Misc::CallbackData* cbData)
+	{
+	/* Set the navigation transformation to identity: */
+	Vrui::setNavigationTransformation(Vrui::NavTransform::identity);
+	}
+
 void KinectViewer::saveStreamsCallback(GLMotif::ToggleButton::ValueChangedCallbackData* cbData)
 	{
 	if(cbData->set)
@@ -580,7 +631,7 @@ void KinectViewer::saveStreamsCallback(GLMotif::ToggleButton::ValueChangedCallba
 		/* Show a file selection dialog to select a base file name for all stream files: */
 		GLMotif::FileSelectionDialog* saveStreamsDialog=new GLMotif::FileSelectionDialog(Vrui::getWidgetManager(),"Save Streams...",Vrui::openDirectory("."),"SavedStreams",".color;.depth");
 		saveStreamsDialog->getOKCallbacks().add(this,&KinectViewer::saveStreamsOKCallback);
-		saveStreamsDialog->getCancelCallbacks().add(&GLMotif::PopupWindow::defaultCloseCallback);
+		saveStreamsDialog->deleteOnCancel();
 		
 		/* Show the file selection dialog: */
 		Vrui::popupPrimaryWidget(saveStreamsDialog);
@@ -590,11 +641,24 @@ void KinectViewer::saveStreamsCallback(GLMotif::ToggleButton::ValueChangedCallba
 		/* Destroy the frame savers attached to all streamers: */
 		for(std::vector<KinectStreamer*>::iterator sIt=streamers.begin();sIt!=streamers.end();++sIt)
 			(*sIt)->setFrameSaver(0);
+		
+		/* Stop recording audio: */
+		delete soundRecorder;
+		soundRecorder=0;
 		}
 	}
 
 void KinectViewer::saveStreamsOKCallback(GLMotif::FileSelectionDialog::OKCallbackData* cbData)
 	{
+	/* Create a sound recorder with default settings: */
+	Sound::SoundDataFormat sdf;
+	sdf.setStandardSampleFormat(16,true,Sound::SoundDataFormat::LittleEndian);
+	sdf.samplesPerFrame=1;
+	sdf.framesPerSecond=16000;
+	std::string soundFileName=cbData->getSelectedPath();
+	soundFileName.append(".wav");
+	soundRecorder=new Sound::SoundRecorder(sdf,soundFileName.c_str());
+	
 	/* Start saving streams on all streamers: */
 	for(size_t i=0;i<streamers.size();++i)
 		{
@@ -614,12 +678,16 @@ void KinectViewer::saveStreamsOKCallback(GLMotif::FileSelectionDialog::OKCallbac
 		streamers[i]->setFrameSaver(frameSaver);
 		}
 	
+	/* Start recording sound: */
+	soundRecorder->start();
+	
 	/* Close the file selection dialog: */
 	cbData->fileSelectionDialog->close();
 	}
 
 KinectViewer::KinectViewer(int& argc,char**& argv,char**& appDefaults)
 	:Vrui::Application(argc,argv,appDefaults),
+	 soundRecorder(0),soundPlayer(0),
 	 mainMenu(0)
 	{
 	/* Enable background USB event handling: */
@@ -680,6 +748,20 @@ KinectViewer::KinectViewer(int& argc,char**& argv,char**& appDefaults)
 				/* Add a new streamer for the file source: */
 				streamers.push_back(new KinectStreamer(fileSource));
 				}
+			else if(strcasecmp(argv[i]+1,"s")==0)
+				{
+				++i;
+				
+				/* Open a sound player: */
+				try
+					{
+					soundPlayer=new Sound::SoundPlayer(argv[i]);
+					}
+				catch(std::runtime_error err)
+					{
+					std::cerr<<"Could not open sound file "<<argv[i]<<" due to exception "<<err.what()<<std::endl;
+					}
+				}
 			else if(strcasecmp(argv[i]+1,"p")==0)
 				{
 				i+=2;
@@ -712,6 +794,8 @@ KinectViewer::KinectViewer(int& argc,char**& argv,char**& appDefaults)
 		std::cout<<"     Connects to the local Kinect camera of the given index (0: first camera on USB bus)"<<std::endl;
 		std::cout<<"  -f <stream file base name>"<<std::endl;
 		std::cout<<"     Opens a previously recorded pair of color and depth stream files for playback"<<std::endl;
+		std::cout<<"  -s <sound file name>"<<std::endl;
+		std::cout<<"     Opens a previously recorded sound file for playback"<<std::endl;
 		std::cout<<"  -p <host name of 3D video stream server> <port number of 3D video stream server>"<<std::endl;
 		std::cout<<"     Connects to a 3D video streaming server identified by host name and port number"<<std::endl;
 		}
@@ -730,6 +814,9 @@ KinectViewer::KinectViewer(int& argc,char**& argv,char**& appDefaults)
 	for(std::vector<KinectStreamer*>::iterator sIt=streamers.begin();sIt!=streamers.end();++sIt)
 		(*sIt)->startStreaming();
 	
+	if(soundPlayer!=0)
+		soundPlayer->start();
+	
 	/* Create the main menu: */
 	mainMenu=createMainMenu();
 	Vrui::setMainMenu(mainMenu);
@@ -741,6 +828,12 @@ KinectViewer::KinectViewer(int& argc,char**& argv,char**& appDefaults)
 KinectViewer::~KinectViewer(void)
 	{
 	delete mainMenu;
+	
+	/* Delete the sound recorder if it is still active: */
+	delete soundRecorder;
+	
+	/* Delete the sound player: */
+	delete soundPlayer;
 	
 	/* Delete all streamers: */
 	for(std::vector<KinectStreamer*>::iterator sIt=streamers.begin();sIt!=streamers.end();++sIt)

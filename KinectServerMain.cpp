@@ -1,6 +1,6 @@
 /***********************************************************************
 KinectServerMain - Main program for Kinect 3D video streamer.
-Copyright (c) 2010-2011 Oliver Kreylos
+Copyright (c) 2010-2012 Oliver Kreylos
 
 This file is part of the Kinect 3D Video Capture Project (Kinect).
 

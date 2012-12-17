@@ -1,7 +1,7 @@
 /***********************************************************************
 KinectServer - Server to stream 3D video data from one or more Kinect
 cameras to remote clients for tele-immersion.
-Copyright (c) 2010-2011 Oliver Kreylos
+Copyright (c) 2010-2012 Oliver Kreylos
 
 This file is part of the Kinect 3D Video Capture Project (Kinect).
 
@@ -157,11 +157,6 @@ void* KinectServer::listeningThreadMethod(void)
 		catch(std::runtime_error err)
 			{
 			std::cerr<<"KinectServer: Caught exception "<<err.what()<<" while waiting for new client connection"<<std::endl;
-			}
-		catch(...)
-			{
-			std::cerr<<"KinectServer: Caught spurious exception while waiting for new client connection; terminating"<<std::endl;
-			throw;
 			}
 		
 		try
@@ -429,7 +424,13 @@ KinectServer::KinectServer(USB::Context& usbContext,Misc::ConfigurationFileSecti
 				if(!backgroundFile.empty())
 					{
 					/* Load the background file: */
-					camera.loadBackground(backgroundFile.c_str());
+					std::string fullBackgroundFileName=KINECT_CONFIG_DIR;
+					fullBackgroundFileName.push_back('/');
+					fullBackgroundFileName.append(backgroundFile);
+					#ifdef VERBOSE
+					std::cout<<"KinectServer: Loading background depth image file "<<fullBackgroundFileName<<'-'<<serialNumber<<".background"<<std::endl;
+					#endif
+					camera.loadBackground(fullBackgroundFileName.c_str());
 					}
 				
 				/* Check whether to capture background: */
@@ -437,6 +438,9 @@ KinectServer::KinectServer(USB::Context& usbContext,Misc::ConfigurationFileSecti
 				if(captureBackgroundFrames>0)
 					{
 					/* Request background capture: */
+					#ifdef VERBOSE
+					std::cout<<"KinectServer: Capturing "<<captureBackgroundFrames<<" background depth frames"<<std::endl;
+					#endif
 					camera.captureBackground(captureBackgroundFrames,false);
 					}
 				
@@ -445,11 +449,18 @@ KinectServer::KinectServer(USB::Context& usbContext,Misc::ConfigurationFileSecti
 				if(maxDepth>0)
 					{
 					/* Set the maximum depth: */
+					#ifdef VERBOSE
+					std::cout<<"KinectServer: Setting maximum depth value to "<<maxDepth<<std::endl;
+					#endif
 					camera.setMaxDepth(maxDepth,false);
 					}
 				
 				/* Set the background removal fuzz value: */
-				camera.setBackgroundRemovalFuzz(cameraSection.retrieveValue<int>("./backgroundFuzz",camera.getBackgroundRemovalFuzz()));
+				int backgroundFuzz=cameraSection.retrieveValue<int>("./backgroundFuzz",camera.getBackgroundRemovalFuzz());
+				#ifdef VERBOSE
+				std::cout<<"KinectServer: Setting background depth fuzz value to "<<backgroundFuzz<<std::endl;
+				#endif
+				camera.setBackgroundRemovalFuzz(backgroundFuzz);
 				
 				/* Enable background removal: */
 				camera.setRemoveBackground(true);

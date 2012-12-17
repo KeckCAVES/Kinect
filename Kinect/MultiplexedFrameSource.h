@@ -85,7 +85,6 @@ class MultiplexedFrameSource
 	unsigned int numStreamsAlive; // Number of streams that are still receiving frames
 	Stream** streams; // Array of pointers to streams
 	Threads::Thread receivingThread; // The demultiplexer thread
-	volatile bool keepReceiving; // Flag to signal shutdown to the demultiplexer thread
 	
 	/* Private methods: */
 	void* receivingThreadMethod(void); // Thread method demultiplexing streams from the source
