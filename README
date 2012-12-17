@@ -1,12 +1,12 @@
 ========================================================================
-README for Kinect 3D Video Capture Project version 2.3
+README for Kinect 3D Video Capture Project version 2.4
 Copyright (c) 2010-2012 Oliver Kreylos
 ========================================================================
 
 Requirements
 ============
 
-This software requires the Vrui VR toolkit, version 2.5 build 001 or
+This software requires the Vrui VR toolkit, version 2.6 build 001 or
 newer. It also requires libusb version 1.0, and that Vrui was configured
 with support for libusb prior to its installation. This software can
 optionally create Kinect 3D video streaming plug-ins for Vrui's
@@ -36,8 +36,8 @@ instructions need to be changed.
 2. Change into the Kinect 3D Video Capture Project's base directory:
    > cd Kinect-<version>
 
-3. If the Vrui version installed in step 0 was not 2.5, or Vrui's
-   installation directory was changed from the default of ~/Vrui-2.5,
+3. If the Vrui version installed in step 0 was not 2.6, or Vrui's
+   installation directory was changed from the default of ~/Vrui-2.6,
    adapt the makefile using a text editor. Change the value of
    VRUI_MAKEDIR close to the beginning of the file as follows:
    VRUI_MAKEDIR := <Vrui install dir>/share/make
@@ -168,6 +168,25 @@ This is the calibration procedure for a Kinect:
     good calibration will create a match to a few percent. Keep in mind
     that measurements inside KinectViewer will be reported in
     centimeters.
+
+Recording 3D Movies
+===================
+
+KinectViewer now has a built-in recorder for 3D movies from one or more
+Kinect devices. When running a live view (using one or more
+-c <Kinect index> and/or -p <server host> <server port> command line
+arguments), the live 3D streams can be saved to a set of files by
+selecting the "Save Streams" main menu entry. KinectViewer will ask for
+a file name prefix, and then save the depth and color streams of all
+enabled Kinect devices to files <prefix>-<index>.depth and
+<prefix>-<index>.color. It will also record synchronized audio from the
+default capture device (selectable from the sound control panel) and
+save it to <prefix>.wav.
+
+Previously recorded 3D movies can be played back by running KinectViewer
+with one or more -f <file name prefix>-<index> arguments, one per saved
+3D stream, and an optional -s <sound file name> argument to play back
+synchronized audio.
 
 Merging 3D Facades from Multiple Kinects
 ========================================

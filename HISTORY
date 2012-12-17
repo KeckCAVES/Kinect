@@ -75,3 +75,8 @@ Kinect-2.3:
 - Added detailed description of new intrinsic calibration procedure to
   README file.
 - Made small changes to build system in line with Vrui.
+
+Kinect-2.4:
+- Bumped Vrui version requirement to Vrui-2.6-001.
+- Added ability to record and play back synchronized audio in
+  KinectViewer.

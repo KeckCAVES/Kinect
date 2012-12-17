@@ -173,7 +173,7 @@ void LineTool::constructGrid(void)
 	{
 	/* Start with an arbitrary line: */
 	LineSet::iterator l0=lines.begin();
-	Vector n0=l0->end-l0->start;
+	// Vector n0=l0->end-l0->start;
 	
 	/* Find all other lines intersecting the selected one: */
 	std::vector<LineSet::iterator> rows=getIntersectingLines(l0,lines);

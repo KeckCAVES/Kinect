@@ -50,6 +50,9 @@ Software Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA
 #include <GLMotif/TextFieldSlider.h>
 #include <GLMotif/CascadeButton.h>
 #include <GLMotif/FileSelectionDialog.h>
+#include <Sound/SoundDataFormat.h>
+#include <Sound/SoundRecorder.h>
+#include <Sound/SoundPlayer.h>
 #include <Vrui/Vrui.h>
 #include <Vrui/Viewer.h>
 #include <Vrui/Application.h>
@@ -121,6 +124,8 @@ class KinectViewer:public Vrui::Application
 	private:
 	USB::Context usbContext; // USB device context
 	std::vector<KinectStreamer*> streamers; // List of Kinect streamers, each connected to one Kinect camera
+	Sound::SoundRecorder* soundRecorder; // Recorder to save sound from the default sound source while saving 3D video streams
+	Sound::SoundPlayer* soundPlayer; // Player to play back sound from a previously saved 3D video stream
 	// Vrui::InputDevice* cameraDevice; // Pointer to the device to which the depth camera is attached
 	// MD5MeshAnimator anim; // An animator
 	
@@ -636,11 +641,24 @@ void KinectViewer::saveStreamsCallback(GLMotif::ToggleButton::ValueChangedCallba
 		/* Destroy the frame savers attached to all streamers: */
 		for(std::vector<KinectStreamer*>::iterator sIt=streamers.begin();sIt!=streamers.end();++sIt)
 			(*sIt)->setFrameSaver(0);
+		
+		/* Stop recording audio: */
+		delete soundRecorder;
+		soundRecorder=0;
 		}
 	}
 
 void KinectViewer::saveStreamsOKCallback(GLMotif::FileSelectionDialog::OKCallbackData* cbData)
 	{
+	/* Create a sound recorder with default settings: */
+	Sound::SoundDataFormat sdf;
+	sdf.setStandardSampleFormat(16,true,Sound::SoundDataFormat::LittleEndian);
+	sdf.samplesPerFrame=1;
+	sdf.framesPerSecond=16000;
+	std::string soundFileName=cbData->getSelectedPath();
+	soundFileName.append(".wav");
+	soundRecorder=new Sound::SoundRecorder(sdf,soundFileName.c_str());
+	
 	/* Start saving streams on all streamers: */
 	for(size_t i=0;i<streamers.size();++i)
 		{
@@ -660,12 +678,16 @@ void KinectViewer::saveStreamsOKCallback(GLMotif::FileSelectionDialog::OKCallbac
 		streamers[i]->setFrameSaver(frameSaver);
 		}
 	
+	/* Start recording sound: */
+	soundRecorder->start();
+	
 	/* Close the file selection dialog: */
 	cbData->fileSelectionDialog->close();
 	}
 
 KinectViewer::KinectViewer(int& argc,char**& argv,char**& appDefaults)
 	:Vrui::Application(argc,argv,appDefaults),
+	 soundRecorder(0),soundPlayer(0),
 	 mainMenu(0)
 	{
 	/* Enable background USB event handling: */
@@ -726,6 +748,20 @@ KinectViewer::KinectViewer(int& argc,char**& argv,char**& appDefaults)
 				/* Add a new streamer for the file source: */
 				streamers.push_back(new KinectStreamer(fileSource));
 				}
+			else if(strcasecmp(argv[i]+1,"s")==0)
+				{
+				++i;
+				
+				/* Open a sound player: */
+				try
+					{
+					soundPlayer=new Sound::SoundPlayer(argv[i]);
+					}
+				catch(std::runtime_error err)
+					{
+					std::cerr<<"Could not open sound file "<<argv[i]<<" due to exception "<<err.what()<<std::endl;
+					}
+				}
 			else if(strcasecmp(argv[i]+1,"p")==0)
 				{
 				i+=2;
@@ -758,6 +794,8 @@ KinectViewer::KinectViewer(int& argc,char**& argv,char**& appDefaults)
 		std::cout<<"     Connects to the local Kinect camera of the given index (0: first camera on USB bus)"<<std::endl;
 		std::cout<<"  -f <stream file base name>"<<std::endl;
 		std::cout<<"     Opens a previously recorded pair of color and depth stream files for playback"<<std::endl;
+		std::cout<<"  -s <sound file name>"<<std::endl;
+		std::cout<<"     Opens a previously recorded sound file for playback"<<std::endl;
 		std::cout<<"  -p <host name of 3D video stream server> <port number of 3D video stream server>"<<std::endl;
 		std::cout<<"     Connects to a 3D video streaming server identified by host name and port number"<<std::endl;
 		}
@@ -776,6 +814,9 @@ KinectViewer::KinectViewer(int& argc,char**& argv,char**& appDefaults)
 	for(std::vector<KinectStreamer*>::iterator sIt=streamers.begin();sIt!=streamers.end();++sIt)
 		(*sIt)->startStreaming();
 	
+	if(soundPlayer!=0)
+		soundPlayer->start();
+	
 	/* Create the main menu: */
 	mainMenu=createMainMenu();
 	Vrui::setMainMenu(mainMenu);
@@ -787,6 +828,12 @@ KinectViewer::KinectViewer(int& argc,char**& argv,char**& appDefaults)
 KinectViewer::~KinectViewer(void)
 	{
 	delete mainMenu;
+	
+	/* Delete the sound recorder if it is still active: */
+	delete soundRecorder;
+	
+	/* Delete the sound player: */
+	delete soundPlayer;
 	
 	/* Delete all streamers: */
 	for(std::vector<KinectStreamer*>::iterator sIt=streamers.begin();sIt!=streamers.end();++sIt)
