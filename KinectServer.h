@@ -1,7 +1,7 @@
 /***********************************************************************
 KinectServer - Server to stream 3D video data from one or more Kinect
 cameras to remote clients for tele-immersion.
-Copyright (c) 2010-2011 Oliver Kreylos
+Copyright (c) 2010-2012 Oliver Kreylos
 
 This file is part of the Kinect 3D Video Capture Project (Kinect).
 

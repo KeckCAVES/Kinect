@@ -24,7 +24,10 @@
 # matches the default Vrui installation; if Vrui's installation
 # directory was changed during Vrui's installation, the directory below
 # must be adapted.
-VRUI_MAKEDIR := $(HOME)/Vrui-2.4/share/make
+VRUI_MAKEDIR := $(HOME)/Vrui-2.6/share/make
+ifdef DEBUG
+  VRUI_MAKEDIR := $(VRUI_MAKEDIR)/debug
+endif
 
 ########################################################################
 # Everything below here should not have to be changed
@@ -34,9 +37,9 @@ VRUI_MAKEDIR := $(HOME)/Vrui-2.4/share/make
 PACKAGEROOT := $(shell pwd)
 
 # Specify version of created dynamic shared libraries
-KINECT_VERSION = 2002
+KINECT_VERSION = 2004
 MAJORLIBVERSION = 2
-MINORLIBVERSION = 2
+MINORLIBVERSION = 4
 KINECT_NAME := Kinect-$(MAJORLIBVERSION).$(MINORLIBVERSION)
 
 # Check if Vrui's collaboration infrastructure is installed
@@ -354,10 +357,10 @@ $(call VISLETNAME,%): PACKAGES += MYVRUI MYKINECT
 $(call VISLETNAME,%): $(OBJDIR)/pic/Vislets/%.o
 	@mkdir -p $(VISLETDESTDIR)
 ifdef SHOWCOMMAND
-	$(CCOMP) $(PLUGINLINKFLAGS) -o $@ $^ $(LINKDIRFLAGS) $(LINKLIBFLAGS)
+	$(CCOMP) $(PLUGINLINKFLAGS) -o $@ $(filter %.o,$^) $(LINKDIRFLAGS) $(LINKLIBFLAGS)
 else
 	@echo Linking $@...
-	@$(CCOMP) $(PLUGINLINKFLAGS) -o $@ $^ $(LINKDIRFLAGS) $(LINKLIBFLAGS)
+	@$(CCOMP) $(PLUGINLINKFLAGS) -o $@ $(filter %.o,$^) $(LINKDIRFLAGS) $(LINKLIBFLAGS)
 endif
 
 #
@@ -390,10 +393,10 @@ $(call VISLETNAME,KinectPlayer): $(OBJDIR)/pic/Vislets/KinectPlayer.o
 $(call PLUGINNAME,%): $(OBJDIR)/pic/Plugins/%.o
 	@mkdir -p $(PLUGINDESTDIR)
 ifdef SHOWCOMMAND
-	$(CCOMP) $(PLUGINLINKFLAGS) -o $@ $^ $(LINKDIRFLAGS) $(LINKLIBFLAGS)
+	$(CCOMP) $(PLUGINLINKFLAGS) -o $@ $(filter %.o,$^) $(LINKDIRFLAGS) $(LINKLIBFLAGS)
 else
 	@echo Linking $@...
-	@$(CCOMP) $(PLUGINLINKFLAGS) -o $@ $^ $(LINKDIRFLAGS) $(LINKLIBFLAGS)
+	@$(CCOMP) $(PLUGINLINKFLAGS) -o $@ $(filter %.o,$^) $(LINKDIRFLAGS) $(LINKLIBFLAGS)
 endif
 
 #
@@ -468,13 +471,13 @@ endif
 # Install all configuration files in ETCINSTALLDIR:
 	@echo Installing configuration files...
 	@install -d $(ETCINSTALLDIR)
-	@install -m u=rw,go=r etc/KinectServer.cfg $(ETCINSTALLDIR)
 	@install -d $(ETCINSTALLDIR)/$(KINECTCONFIGDIREXT)
-# Install the package and configuration files in SHAREINSTALLDIR/make:
+	@install -m u=rw,go=r etc/KinectServer.cfg $(ETCINSTALLDIR)/$(KINECTCONFIGDIREXT)
+# Install the package and configuration files in MAKEINSTALLDIR:
 	@echo Installing makefile fragments...
-	@install -d $(SHAREINSTALLDIR)/make
-	@install -m u=rw,go=r BuildRoot/Packages.Kinect $(SHAREINSTALLDIR)/make
-	@install -m u=rw,go=r $(MAKECONFIGFILE) $(SHAREINSTALLDIR)/make
+	@install -d $(MAKEINSTALLDIR)
+	@install -m u=rw,go=r BuildRoot/Packages.Kinect $(MAKEINSTALLDIR)
+	@install -m u=rw,go=r $(MAKECONFIGFILE) $(MAKEINSTALLDIR)
 
 uninstall:
 	@echo Removing header files...
@@ -491,7 +494,7 @@ endif
 	@echo Removing executables...
 	@rm -f $(EXECUTABLES:$(EXEDIR)/%=$(EXECUTABLEINSTALLDIR)/%)
 	@echo Removing configuration files...
-	@rm -f $(ETCINSTALLDIR)/KinectServer.cfg
+	@rm -rf $(ETCINSTALLDIR)/$(KINECTCONFIGDIREXT)
 	@echo Removing makefile fragments...
-	@rm -f $(SHAREINSTALLDIR)/make/Packages.Kinect
-	@rm -f $(SHAREINSTALLDIR)/make/Configuration.Kinect
+	@rm -f $(MAKEINSTALLDIR)/Packages.Kinect
+	@rm -f $(MAKEINSTALLDIR)/Configuration.Kinect

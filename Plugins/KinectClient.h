@@ -54,6 +54,7 @@ class KinectClient:public Collaboration::ProtocolClient,private KinectProtocol
 		OGTransform clientTransform; // Transformation from remote client's navigational space into local client's navigational space
 		
 		/* Private methods: */
+		void connect(void); // Method to connect the client to a remote Kinect server
 		void* initializationThreadMethod(void); // Thread method to establish a connection to the remote client's local Kinect server in the background
 		
 		/* Constructors and destructors: */

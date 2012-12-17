@@ -47,18 +47,26 @@ Software Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA
 Methods of class KinectClient::RemoteClientState:
 ************************************************/
 
-void* KinectClient::RemoteClientState::initializationThreadMethod(void)
+void KinectClient::RemoteClientState::connect(void)
 	{
-	Threads::Thread::setCancelState(Threads::Thread::CANCEL_ENABLE);
-	// Threads::Thread::setCancelType(Threads::Thread::CANCEL_ASYNCHRONOUS);
-	
 	unsigned int newNumRenderers=0;
 	Kinect::Renderer** newRenderers=0;
 	try
 		{
 		/* Connect to the remote Kinect server: */
 		#ifdef VERBOSE
-		std::cout<<"KinectClient: Connecting to remote Kinect server on host "<<kinectServerHostName<<", port "<<kinectServerPortId<<std::endl;
+		const Threads::Thread::ID& threadId=Threads::Thread::getThreadObject()->getId();
+		std::cout<<"Node "<<Vrui::getNodeIndex()<<": "<<"KinectClient: Connecting to remote Kinect server on host "<<kinectServerHostName<<", port "<<kinectServerPortId;
+		std::cout<<" from thread ";
+		if(threadId.getNumParts()==0)
+			std::cout<<"root";
+		else
+			{
+			std::cout<<threadId.getPart(0);
+			for(unsigned int i=1;i<threadId.getNumParts();++i)
+				std::cout<<'.'<<threadId.getPart(i);
+			}
+		std::cout<<std::endl;
 		#endif
 		Kinect::MultiplexedFrameSource* source=Kinect::MultiplexedFrameSource::create(Cluster::openTCPPipe(Vrui::getClusterMultiplexer(),kinectServerHostName.c_str(),kinectServerPortId));
 		
@@ -74,6 +82,10 @@ void* KinectClient::RemoteClientState::initializationThreadMethod(void)
 		for(unsigned int i=0;i<newNumRenderers;++i)
 			newRenderers[i]->startStreaming(Misc::createFunctionCall(clientPlugin,&KinectClient::updateCallback));
 		
+		#ifdef VERBOSE
+		std::cout<<"Node "<<Vrui::getNodeIndex()<<": "<<"KinectClient: Connection established"<<std::endl;
+		#endif
+		
 		/* Success; now hand the Kinect client to the rest of the plugin: */
 		renderers=newRenderers;
 		numRenderers=newNumRenderers;
@@ -81,14 +93,14 @@ void* KinectClient::RemoteClientState::initializationThreadMethod(void)
 		}
 	catch(std::runtime_error err)
 		{
-		std::cerr<<"KinectClient: Could not connect to remote Kinect server on host "<<kinectServerHostName<<", port "<<kinectServerPortId<<" due to exception "<<err.what()<<std::endl;
+		std::cerr<<"Node "<<Vrui::getNodeIndex()<<": "<<"KinectClient: Could not connect to remote Kinect server on host "<<kinectServerHostName<<", port "<<kinectServerPortId<<" due to exception "<<err.what()<<std::endl;
 		for(unsigned int i=0;i<newNumRenderers;++i)
 			delete newRenderers[i];
 		delete[] newRenderers;
 		}
 	catch(...)
 		{
-		std::cerr<<"KinectClient: Could not connect to remote Kinect server on host "<<kinectServerHostName<<", port "<<kinectServerPortId<<" due to spurious exception"<<std::endl;
+		std::cerr<<"Node "<<Vrui::getNodeIndex()<<": "<<"KinectClient: Connection to remote Kinect server on host "<<kinectServerHostName<<", port "<<kinectServerPortId<<" cancelled"<<std::endl;
 		for(unsigned int i=0;i<newNumRenderers;++i)
 			delete newRenderers[i];
 		delete[] newRenderers;
@@ -96,6 +108,15 @@ void* KinectClient::RemoteClientState::initializationThreadMethod(void)
 		/* Re-throw the exception: */
 		throw;
 		}
+	}
+
+void* KinectClient::RemoteClientState::initializationThreadMethod(void)
+	{
+	Threads::Thread::setCancelState(Threads::Thread::CANCEL_ENABLE);
+	// Threads::Thread::setCancelType(Threads::Thread::CANCEL_ASYNCHRONOUS);
+	
+	/* Connect to the remote Kinect server: */
+	connect();
 	
 	return 0;
 	}
@@ -115,37 +136,8 @@ KinectClient::RemoteClientState::RemoteClientState(KinectClient* sClientPlugin,s
 		
 		#else
 		
-		try
-			{
-			/* Connect to the remote Kinect server: */
-			#ifdef VERBOSE
-			std::cout<<"KinectClient: Connecting to remote Kinect server on host "<<kinectServerHostName<<", port "<<kinectServerPortId<<std::endl;
-			#endif
-			Kinect::MultiplexedFrameSource* source=Kinect::MultiplexedFrameSource::create(Cluster::openTCPPipe(Vrui::getClusterMultiplexer(),kinectServerHostName.c_str(),kinectServerPortId));
-
-			/* Create one renderer object for each 3D video stream sent by the server: */
-			numRenderers=source->getNumStreams();
-			renderers=new Kinect::Renderer*[numRenderers];
-			for(unsigned int i=0;i<numRenderers;++i)
-				renderers[i]=0;
-			for(unsigned int i=0;i<numRenderers;++i)
-				renderers[i]=new Kinect::Renderer(source->getStream(i));
-			
-			/* Start streaming on all renderers: */
-			for(unsigned int i=0;i<numRenderers;++i)
-				renderers[i]->startStreaming(Misc::createFunctionCall(clientPlugin,&KinectClient::updateCallback));
-			
-			clientReady=true;
-			}
-		catch(std::runtime_error err)
-			{
-			std::cerr<<"KinectClient: Could not connect to remote Kinect server on host "<<kinectServerHostName<<", port "<<kinectServerPortId<<" due to exception "<<err.what()<<std::endl;
-			for(unsigned int i=0;i<numRenderers;++i)
-				delete renderers[i];
-			delete[] renderers;
-			numRenderers=0;
-			renderers=0;
-			}
+		/* Connect to the remote Kinect server: */
+		connect();
 		
 		#endif
 		}
@@ -165,6 +157,10 @@ KinectClient::RemoteClientState::~RemoteClientState(void)
 		}
 	
 	/* Disconnect from the remote Kinect server: */
+	#ifdef VERBOSE
+	if(numRenderers>0)
+		std::cout<<"Node "<<Vrui::getNodeIndex()<<": "<<"KinectClient: Disconnecting from remote Kinect server"<<std::endl;
+	#endif
 	for(unsigned int i=0;i<numRenderers;++i)
 		delete renderers[i];
 	delete[] renderers;
@@ -207,16 +203,16 @@ void KinectClient::initialize(Collaboration::CollaborationClient* sClient,Misc::
 	
 	#ifdef VERBOSE
 	if(haveServer)
-		std::cout<<"KinectClient: Local Kinect server on host "<<kinectServerHostName<<", port "<<kinectServerPortId<<std::endl;
+		std::cout<<"Node "<<Vrui::getNodeIndex()<<": "<<"KinectClient: Local Kinect server on host "<<kinectServerHostName<<", port "<<kinectServerPortId<<std::endl;
 	else
-		std::cout<<"KinectClient: Do not have local Kinect server"<<std::endl;
+		std::cout<<"Node "<<Vrui::getNodeIndex()<<": "<<"KinectClient: Do not have local Kinect server"<<std::endl;
 	#endif
 	}
 
 void KinectClient::sendConnectRequest(Comm::NetPipe& pipe)
 	{
 	#ifdef VERBOSE
-	std::cout<<"KinectClient: Sending connect request to server"<<std::endl;
+	std::cout<<"Node "<<Vrui::getNodeIndex()<<": "<<"KinectClient: Sending connect request to server"<<std::endl;
 	#endif
 	
 	/* Send the length of the following message: */
