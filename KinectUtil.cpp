@@ -1,7 +1,7 @@
 /***********************************************************************
 KinectUtil - Utility program to detect, list, and configure Kinect
 devices.
-Copyright (c) 2011 Oliver Kreylos
+Copyright (c) 2011-2013 Oliver Kreylos
 
 This file is part of the Kinect 3D Video Capture Project (Kinect).
 
@@ -123,6 +123,27 @@ bool reset(unsigned int index)
 	return true;
 	}
 
+bool setLed(unsigned int index,unsigned int ledState)
+	{
+	/* Get the list of all USB devices: */
+	USB::DeviceList deviceList(usbContext);
+	
+	/* Get the index-th Kinect motor device: */
+	USB::Device motor=deviceList.getDevice(0x045e,0x02b0,index);
+	if(!motor.isValid())
+		return false;
+	
+	/* Open and prepare the motor device: */
+	motor.open();
+	motor.setConfiguration(1);
+	motor.claimInterface(0);
+	
+	/* Write an LED control message: */
+	motor.writeControl(0x40,0x06,ledState,0x0000,0,0);
+	
+	return true;
+	}
+
 int main(int argc,char* argv[])
 	{
 	/* Initialize the USB context: */
@@ -133,7 +154,7 @@ int main(int argc,char* argv[])
 	if(argc<2)
 		{
 		std::cout<<"Missing command. Usage:"<<std::endl;
-		std::cout<<"KinectUtil ( list | ( reset [ all | <index> ] ) )"<<std::endl;
+		std::cout<<"KinectUtil ( list | ( reset [ all | <index> ] ) | ( setLED [ <index> ] <LED state 0...7>) )"<<std::endl;
 		return 1;
 		}
 	if(strcasecmp(argv[1],"list")==0)
@@ -159,6 +180,29 @@ int main(int argc,char* argv[])
 				std::cerr<<"Kinect "<<index<<" does not exist."<<std::endl;
 				return 1;
 				}
+			}
+		}
+	else if(strcasecmp(argv[1],"setLED")==0)
+		{
+		/* Set the LED state of the indicated Kinect device: */
+		unsigned int index=0;
+		unsigned int ledState=0;
+		if(argc>3)
+			{
+			index=atoi(argv[2]);
+			ledState=atoi(argv[3]);
+			}
+		else if(argc==3)
+			ledState=atoi(argv[2]);
+		else
+			{
+			std::cerr<<"No LED state provided"<<std::endl;
+			return 1;
+			}
+		if(!setLed(index,ledState))
+			{
+			std::cerr<<"Kinect "<<index<<" does not exist."<<std::endl;
+			return 1;
 			}
 		}
 	

@@ -1,7 +1,7 @@
 /***********************************************************************
 MultiplexedFrameSource - Class to stream several pairs of color and
 depth frames from a single source file or pipe.
-Copyright (c) 2010-2012 Oliver Kreylos
+Copyright (c) 2010-2013 Oliver Kreylos
 
 This file is part of the Kinect 3D Video Capture Project (Kinect).
 
@@ -32,8 +32,11 @@ Software Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA
 #include <Geometry/ProjectiveTransformation.h>
 #include <Kinect/FrameBuffer.h>
 #include <Kinect/FrameSource.h>
-#include <Kinect/ColorFrameReader.h>
-#include <Kinect/DepthFrameReader.h>
+
+/* Forward declarations: */
+namespace Kinect {
+class FrameReader;
+}
 
 namespace Kinect {
 
@@ -50,7 +53,7 @@ class MultiplexedFrameSource
 		MultiplexedFrameSource* owner; // Pointer to object owning this stream
 		unsigned int index; // Index of this stream in owner's stream array
 		unsigned int streamFormatVersions[2]; // Format version numbers of the color and depth streams, respectively
-		FrameBuffer depthCorrection; // Buffer with per-pixel depth correction coefficients
+		DepthCorrection* depthCorrection; // Stream's depth correction object
 		IntrinsicParameters ips; // Stream's intrinsic camera parameters
 		ExtrinsicParameters eps; // Stream's extrinsic camera parameters
 		Threads::Spinlock streamingMutex; // Mutex protecing the stream's streaming state
@@ -63,10 +66,9 @@ class MultiplexedFrameSource
 		virtual ~Stream(void); // Destroys the stream
 		
 		/* Methods from FrameSource: */
-		virtual bool hasDepthCorrectionCoefficients(void) const;
-		virtual FrameBuffer getDepthCorrectionCoefficients(void) const;
-		virtual IntrinsicParameters getIntrinsicParameters(void) const;
-		virtual ExtrinsicParameters getExtrinsicParameters(void) const;
+		virtual DepthCorrection* getDepthCorrectionParameters(void);
+		virtual IntrinsicParameters getIntrinsicParameters(void);
+		virtual ExtrinsicParameters getExtrinsicParameters(void);
 		virtual const unsigned int* getActualFrameSize(int sensor) const;
 		virtual void startStreaming(StreamingCallback* newColorStreamingCallback,StreamingCallback* newDepthStreamingCallback);
 		virtual void stopStreaming(void);
@@ -78,8 +80,8 @@ class MultiplexedFrameSource
 	private:
 	Comm::PipePtr pipe; // The multiplexed source stream
 	unsigned int numStreams; // Number of streams in the multiplexer
-	ColorFrameReader** colorFrameReaders; // Array of color stream readers for the component streams
-	DepthFrameReader** depthFrameReaders; // Array of depth stream readers for the component streams
+	FrameReader** colorFrameReaders; // Array of color stream readers for the component streams
+	FrameReader** depthFrameReaders; // Array of depth stream readers for the component streams
 	FrameBuffer* frames; // Array of color and depth frames in the current metaframe
 	Threads::Mutex streamMutex; // Mutex serializing access to the stream array
 	unsigned int numStreamsAlive; // Number of streams that are still receiving frames

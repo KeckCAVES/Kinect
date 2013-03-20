@@ -108,7 +108,7 @@ class KinectViewer:public Vrui::Application
 		~KinectStreamer(void); // Destroys the streamer
 		
 		/* Methods: */
-		const Kinect::FrameSource& getFrameSource(void) const // Returns a reference to the streamer's frame source
+		Kinect::FrameSource& getFrameSource(void) // Returns a reference to the streamer's frame source
 			{
 			return *source;
 			}
@@ -367,7 +367,7 @@ void KinectViewer::KinectStreamer::showFromCameraCallback(Misc::CallbackData* cb
 void KinectViewer::KinectStreamer::filterDepthFramesCallback(GLMotif::ToggleButton::ValueChangedCallbackData* cbData)
 	{
 	/* Set the projector's depth frame filtering flag: */
-	projector->setFilterDepthFrames(cbData->set);
+	projector->setFilterDepthFrames(cbData->set,false);
 	}
 
 void KinectViewer::KinectStreamer::triangleDepthRangeCallback(GLMotif::TextFieldSlider::ValueChangedCallbackData* cbData)

@@ -1,7 +1,7 @@
 /***********************************************************************
 Camera - Wrapper class to represent the color and depth camera interface
 aspects of the Kinect sensor.
-Copyright (c) 2010-2012 Oliver Kreylos
+Copyright (c) 2010-2013 Oliver Kreylos
 
 This file is part of the Kinect 3D Video Capture Project (Kinect).
 
@@ -28,6 +28,7 @@ Software Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA
 #define KINECT_CAMERA_DUMP_HEADERS 0
 
 #include <string>
+#include <Misc/SizedTypes.h>
 #include <Misc/Timer.h>
 #include <Threads/MutexCond.h>
 #include <Threads/Thread.h>
@@ -68,6 +69,55 @@ class Camera:public FrameSource
 		FR_30_HZ // 30 Hz, only possible for 640x480 pixel frames
 		};
 	typedef Misc::FunctionCall<Camera&> BackgroundCaptureCallback; // Function call type for completion of background capture callback
+	
+	struct CalibrationParameters // Structure to hold factory calibration parameters read from Kinect camera's non-volatile RAM
+		{
+		/* Elements: */
+		public:
+		/* First parameter subsection: registration parameters */
+		Misc::SInt32 dxCenter;
+		Misc::SInt32 ax,bx,cx,dx;
+		Misc::SInt32 dxStart;
+		Misc::SInt32 ay,by,cy,dy;
+		Misc::SInt32 dyStart;
+		Misc::SInt32 dxBetaStart,dyBetaStart;
+		Misc::SInt32 rolloutBlank,rolloutSize;
+		Misc::SInt32 dxBetaInc,dyBetaInc;
+		Misc::SInt32 dxdxStart,dxdyStart,dydxStart,dydyStart;
+		Misc::SInt32 dxdxdxStart,dydxdxStart,dxdxdyStart,dydxdyStart;
+		Misc::SInt32 backComp1;
+		Misc::SInt32 dydydxStart;
+		Misc::SInt32 backComp2;
+		Misc::SInt32 dydydyStart;
+		
+		/* Second parameter subsection: padding parameters */
+		Misc::UInt16 startLines;
+		Misc::UInt16 endLines;
+		Misc::UInt16 croppingLines;
+		
+		/* Third parameter subsection: constant shift */
+		Misc::UInt16 constantShift;
+		
+		/* Fourth parameter subsection: zero-plane parameters */
+		Misc::Float32 dcmosEmitterDist;
+		Misc::Float32 dcmosRcmosDist;
+		Misc::Float32 referenceDistance;
+		Misc::Float32 referencePixelSize;
+		
+		/* Methods: */
+		void read(int subsection,IO::File& file); // Reads calibration parameter subsection from file
+		void read(IO::File& file); // Reads all calibration parameters from file
+		void write(IO::File& file) const; // Writes all calibration parameters to file
+		};
+	
+	struct CameraParameters // Structure containing the imaging parameters of the color camera
+		{
+		/* Elements: */
+		public:
+		unsigned short exposure; // Camera exposure time, 654==33ms, 0==500ms
+		unsigned short sharpening; // Bits 0-2 are sharpening factor from 0% to 200%; bit 3 enables automatic sharpening reduction
+		unsigned short operatingMode; // Bit field defining the camera's operating mode
+		};
 	
 	private:
 	struct StreamingState // Structure containing necessary state to stream color or depth frames from the respective camera
@@ -139,9 +189,12 @@ class Camera:public FrameSource
 	/* Private methods: */
 	size_t sendMessage(unsigned short messageType,const unsigned short* messageData,size_t messageSize,void* replyBuffer,size_t replyBufferSize); // Sends a general message to the camera device; returns reply size in bytes
 	bool sendCommand(unsigned short command,unsigned short value); // Sends a command message to the camera device; returns true if command was processed properly
+	unsigned short readRegister(unsigned short address); // Reads a camera register and returns its value
+	void writeRegister(unsigned short address,unsigned short value); // Sets a camera register to the given value
 	void* colorDecodingThreadMethod(void); // The color decoding thread method
 	void* depthDecodingThreadMethod(void); // The depth decoding thread method
 	void* compressedDepthDecodingThreadMethod(void); // The depth decoding thread method for RLE/differential-compressed frames
+	void initialize(void); // Initializes the Kinect camera; called from constructors
 	
 	/* Constructors and destructors: */
 	public:
@@ -150,15 +203,15 @@ class Camera:public FrameSource
 	virtual ~Camera(void); // Destroys the camera
 	
 	/* Methods from FrameSource: */
-	virtual bool hasDepthCorrectionCoefficients(void) const;
-	virtual FrameBuffer getDepthCorrectionCoefficients(void) const;
-	virtual IntrinsicParameters getIntrinsicParameters(void) const;
-	virtual ExtrinsicParameters getExtrinsicParameters(void) const;
+	virtual DepthCorrection* getDepthCorrectionParameters(void);
+	virtual IntrinsicParameters getIntrinsicParameters(void);
+	virtual ExtrinsicParameters getExtrinsicParameters(void);
 	virtual const unsigned int* getActualFrameSize(int sensor) const;
 	virtual void startStreaming(StreamingCallback* newColorStreamingCallback,StreamingCallback* newDepthStreamingCallback);
 	virtual void stopStreaming(void);
 	
 	/* New methods: */
+	void getCalibrationParameters(CalibrationParameters& calib); // Queries factory calibration parameters from Kinect's non-volatile RAM
 	const std::string& getSerialNumber(void) const // Returns the camera's serial number
 		{
 		return serialNumber;
@@ -193,6 +246,10 @@ class Camera:public FrameSource
 		{
 		return backgroundRemovalFuzz;
 		}
+	
+	/* Control methods for the color camera: */
+	unsigned int getSharpening(void); // Returns the color camera's sharpening value
+	void setSharpening(unsigned int newSharpening); // Sets the color camera's sharpening value
 	};
 
 }

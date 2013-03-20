@@ -1,6 +1,7 @@
 /***********************************************************************
-ColorFrameWriter - Class to write compressed color frames to a sink.
-Copyright (c) 2010-2013 Oliver Kreylos
+LossyDepthFrameWriter - Class to write lossily compressed depth frames
+to a sink.
+Copyright (c) 2013 Oliver Kreylos
 
 This file is part of the Kinect 3D Video Capture Project (Kinect).
 
@@ -20,8 +21,8 @@ Software Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA
 02111-1307 USA
 ***********************************************************************/
 
-#ifndef KINECT_COLORFRAMEWRITER_INCLUDED
-#define KINECT_COLORFRAMEWRITER_INCLUDED
+#ifndef KINECT_LOSSYDEPTHFRAMEWRITER_INCLUDED
+#define KINECT_LOSSYDEPTHFRAMEWRITER_INCLUDED
 
 #include <stddef.h>
 #include <Video/Config.h>
@@ -35,31 +36,25 @@ Software Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA
 namespace IO {
 class File;
 }
-namespace Video {
-#if VIDEO_CONFIG_HAVE_THEORA
-class ImageExtractor;
-#endif
-}
 
 namespace Kinect {
 
-class ColorFrameWriter:public FrameWriter
+class LossyDepthFrameWriter:public FrameWriter
 	{
 	/* Elements: */
 	private:
-	IO::File& sink; // Data sink for compressed color frames
+	IO::File& sink; // Data sink for compressed depth frames
 	#if VIDEO_CONFIG_HAVE_THEORA
 	Video::TheoraEncoder theoraEncoder; // Theora encoder object
-	Video::ImageExtractor* imageExtractor; // Extractor to convert RGB images to Y'CbCr 4:2:0 images
 	Video::TheoraFrame theoraFrame; // Frame buffer for frames in Y'CbCr 4:2:0 pixel format
 	#endif
 	
 	/* Constructors and destructors: */
 	public:
-	ColorFrameWriter(IO::File& sSink,const unsigned int sSize[2]); // Creates a color frame writer for the given sink and frame size
-	virtual ~ColorFrameWriter(void);
+	LossyDepthFrameWriter(IO::File& sSink,const unsigned int sSize[2]); // Creates a depth frame writer for the given sink and frame size
+	virtual ~LossyDepthFrameWriter(void);
 	
-	/* Methods from frameWriter: */
+	/* Methods from FrameWriter: */
 	virtual size_t writeFrame(const FrameBuffer& frame);
 	};
 

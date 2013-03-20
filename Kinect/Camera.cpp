@@ -1,7 +1,7 @@
 /***********************************************************************
 Camera - Wrapper class to represent the color and depth camera interface
 aspects of the Kinect sensor.
-Copyright (c) 2010-2012 Oliver Kreylos
+Copyright (c) 2010-2013 Oliver Kreylos
 
 This file is part of the Kinect 3D Video Capture Project (Kinect).
 
@@ -35,6 +35,7 @@ Software Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA
 #include <USB/DeviceList.h>
 #include <IO/File.h>
 #include <IO/OpenFile.h>
+#include <IO/FixedMemoryFile.h>
 #include <Geometry/OrthogonalTransformation.h>
 #include <Geometry/ProjectiveTransformation.h>
 #include <Geometry/GeometryValueCoders.h>
@@ -44,6 +45,115 @@ Software Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA
 #define KINECT_CAMERA_STREAMER_USE_CAMERA_TIMESTAMP 0
 
 namespace Kinect {
+
+/**********************************************
+Methods of class Camera::CalibrationParameters:
+**********************************************/
+
+void Camera::CalibrationParameters::read(int subsection,IO::File& file)
+	{
+	switch(subsection)
+		{
+		case 0:
+			dxCenter=file.read<Misc::SInt32>();
+			ax=file.read<Misc::SInt32>();
+			bx=file.read<Misc::SInt32>();
+			cx=file.read<Misc::SInt32>();
+			dx=file.read<Misc::SInt32>();
+			dxStart=file.read<Misc::SInt32>();
+			ay=file.read<Misc::SInt32>();
+			by=file.read<Misc::SInt32>();
+			cy=file.read<Misc::SInt32>();
+			dy=file.read<Misc::SInt32>();
+			dyStart=file.read<Misc::SInt32>();
+			dxBetaStart=file.read<Misc::SInt32>();
+			dyBetaStart=file.read<Misc::SInt32>();
+			rolloutBlank=file.read<Misc::SInt32>();
+			rolloutSize=file.read<Misc::SInt32>();
+			dxBetaInc=file.read<Misc::SInt32>();
+			dyBetaInc=file.read<Misc::SInt32>();
+			dxdxStart=file.read<Misc::SInt32>();
+			dxdyStart=file.read<Misc::SInt32>();
+			dydxStart=file.read<Misc::SInt32>();
+			dydyStart=file.read<Misc::SInt32>();
+			dxdxdxStart=file.read<Misc::SInt32>();
+			dydxdxStart=file.read<Misc::SInt32>();
+			dxdxdyStart=file.read<Misc::SInt32>();
+			dydxdyStart=file.read<Misc::SInt32>();
+			backComp1=file.read<Misc::SInt32>();
+			dydydxStart=file.read<Misc::SInt32>();
+			backComp2=file.read<Misc::SInt32>();
+			dydydyStart=file.read<Misc::SInt32>();
+			break;
+		
+		case 1:
+			startLines=file.read<Misc::UInt16>();
+			endLines=file.read<Misc::UInt16>();
+			croppingLines=file.read<Misc::UInt16>();
+			break;
+		
+		case 2:
+			constantShift=file.read<Misc::UInt16>();
+			break;
+		
+		case 3:
+			dcmosEmitterDist=file.read<Misc::Float32>();
+			dcmosRcmosDist=file.read<Misc::Float32>();
+			referenceDistance=file.read<Misc::Float32>();
+			referencePixelSize=file.read<Misc::Float32>();
+			break;
+		}
+	}
+
+void Camera::CalibrationParameters::read(IO::File& file)
+	{
+	for(int i=0;i<4;++i)
+		read(i,file);
+	}
+
+void Camera::CalibrationParameters::write(IO::File& file) const
+	{
+	file.write<Misc::SInt32>(dxCenter);
+	file.write<Misc::SInt32>(ax);
+	file.write<Misc::SInt32>(bx);
+	file.write<Misc::SInt32>(cx);
+	file.write<Misc::SInt32>(dx);
+	file.write<Misc::SInt32>(dxStart);
+	file.write<Misc::SInt32>(ay);
+	file.write<Misc::SInt32>(by);
+	file.write<Misc::SInt32>(cy);
+	file.write<Misc::SInt32>(dy);
+	file.write<Misc::SInt32>(dyStart);
+	file.write<Misc::SInt32>(dxBetaStart);
+	file.write<Misc::SInt32>(dyBetaStart);
+	file.write<Misc::SInt32>(rolloutBlank);
+	file.write<Misc::SInt32>(rolloutSize);
+	file.write<Misc::SInt32>(dxBetaInc);
+	file.write<Misc::SInt32>(dyBetaInc);
+	file.write<Misc::SInt32>(dxdxStart);
+	file.write<Misc::SInt32>(dxdyStart);
+	file.write<Misc::SInt32>(dydxStart);
+	file.write<Misc::SInt32>(dydyStart);
+	file.write<Misc::SInt32>(dxdxdxStart);
+	file.write<Misc::SInt32>(dydxdxStart);
+	file.write<Misc::SInt32>(dxdxdyStart);
+	file.write<Misc::SInt32>(dydxdyStart);
+	file.write<Misc::SInt32>(backComp1);
+	file.write<Misc::SInt32>(dydydxStart);
+	file.write<Misc::SInt32>(backComp2);
+	file.write<Misc::SInt32>(dydydyStart);
+	
+	file.write<Misc::UInt16>(startLines);
+	file.write<Misc::UInt16>(endLines);
+	file.write<Misc::UInt16>(croppingLines);
+	
+	file.write<Misc::UInt16>(constantShift);
+	
+	file.write<Misc::Float32>(dcmosEmitterDist);
+	file.write<Misc::Float32>(dcmosRcmosDist);
+	file.write<Misc::Float32>(referenceDistance);
+	file.write<Misc::Float32>(referencePixelSize);
+	}
 
 /***************************************
 Methods of class Camera::StreamingState:
@@ -221,6 +331,8 @@ size_t Camera::sendMessage(unsigned short messageType,const unsigned short* mess
 	{
 	if(messageSize>252)
 		Misc::throwStdErr("Kinect::Camera::sendMessage: Message too long");
+	if(replyBufferSize>=512)
+		Misc::throwStdErr("Kinect::Camera::sendMessage: Expected response too long");
 	
 	/* Fill a message buffer: */
 	unsigned short messageBuffer[256];
@@ -231,25 +343,28 @@ size_t Camera::sendMessage(unsigned short messageType,const unsigned short* mess
 	++messageSequenceNumber;
 	
 	/* Copy the message data: */
-	for(size_t i=0;i<messageSize;++i)
-		messageBuffer[4+i]=messageData[i];
+	memcpy(messageBuffer+4,messageData,messageSize*sizeof(unsigned short));
 	
 	/* Send the message to the device: */
 	device.writeControl(0x40,0x00,0x0000,0x0000,reinterpret_cast<unsigned char*>(messageBuffer),(4+messageSize)*sizeof(unsigned short));
 	
 	/* Receive the reply message: */
-	size_t replySize=0;
-	while(replySize==0)
+	size_t replySize;
+	do
 		{
 		/* Wait for a reply: */
 		usleep(1000);
-		replySize=device.readControl(0x40,0x00,0x0000,0x0000,static_cast<unsigned char*>(replyBuffer),replyBufferSize);
+		/* Receive the reply in our own message buffer to work around a problem with libusb reporting wrong reply sizes on USB 3.0: */
+		replySize=device.readControl(0x40,0x00,0x0000,0x0000,reinterpret_cast<unsigned char*>(messageBuffer),sizeof(messageBuffer));
 		}
+	while(replySize==0||replySize==sizeof(messageBuffer)); // The second test is to work around a problem with USB 3.0
 	
 	/* Check the reply's magic number, command, and sequence number: */
-	unsigned short* rb=static_cast<unsigned short*>(replyBuffer);
-	if(rb[0]!=0x4252U||rb[2]!=messageBuffer[2]||rb[3]!=messageBuffer[3])
+	if(replySize<4*sizeof(unsigned short)||messageBuffer[0]!=0x4252U||messageBuffer[2]!=messageType||messageBuffer[3]!=messageSequenceNumber-1)
 		Misc::throwStdErr("Kinect::Camera::sendMessage: Protocol error while sending message %u",(unsigned int)messageType);
+	
+	/* Copy the message reply to the provided buffer: */
+	memcpy(replyBuffer,messageBuffer,replySize);
 	
 	return replySize;
 	}
@@ -267,6 +382,39 @@ bool Camera::sendCommand(unsigned short command,unsigned short value)
 	return replySize==5*sizeof(unsigned short)&&replyBuffer[1]==1&&replyBuffer[4]==0x0000U;
 	}
 
+unsigned short Camera::readRegister(unsigned short address)
+	{
+	/* Prepare a command message: */
+	unsigned short commandBuffer[3];
+	commandBuffer[0]=1U; // 1 address only
+	commandBuffer[1]=address&0x7fffU; // Clear highest bit to indicate read access
+	commandBuffer[2]=0x0000U; // Dummy value
+	unsigned short replyBuffer[3];
+	size_t replySize=sendMessage(0x0095U,commandBuffer,3,replyBuffer,sizeof(replyBuffer));
+	
+	/* Check for success message: */
+	if(replySize!=3*sizeof(unsigned short)||replyBuffer[0]!=0x0000U)
+		Misc::throwStdErr("Kinect::Camera::readRegister: Protocol error");
+	
+	/* Return the read register value: */
+	return replyBuffer[2];
+	}
+
+void Camera::writeRegister(unsigned short address,unsigned short value)
+	{
+	/* Prepare a command message: */
+	unsigned short commandBuffer[3];
+	commandBuffer[0]=1U; // 1 address only
+	commandBuffer[1]=address|0x8000U; // Set highest bit to indicate write access
+	commandBuffer[2]=value;
+	unsigned short replyBuffer[3];
+	size_t replySize=sendMessage(0x0095U,commandBuffer,3,replyBuffer,sizeof(replyBuffer));
+	
+	/* Check for success message: */
+	if(replySize!=3*sizeof(unsigned short)||replyBuffer[0]!=0x0000U)
+		Misc::throwStdErr("Kinect::Camera::writeRegister: Protocol error");
+	}
+
 namespace {
 
 /***********************************
@@ -275,7 +423,7 @@ Helper functions for Bayer decoding:
 
 inline unsigned char avg(unsigned char v1,unsigned char v2)
 	{
-	return (unsigned char)(((unsigned int)(v1)+(unsigned int)(v2)+1U)/2U);
+	return (unsigned char)(((unsigned int)(v1)+(unsigned int)(v2)+1U)>>1);
 	}
 
 inline unsigned char avg(unsigned char v1,unsigned char v2,unsigned char v3)
@@ -285,7 +433,7 @@ inline unsigned char avg(unsigned char v1,unsigned char v2,unsigned char v3)
 
 inline unsigned char avg(unsigned char v1,unsigned char v2,unsigned char v3,unsigned char v4)
 	{
-	return (unsigned char)(((unsigned int)(v1)+(unsigned int)(v2)+(unsigned int)(v3)+(unsigned int)(v4)+2U)/4U);
+	return (unsigned char)(((unsigned int)(v1)+(unsigned int)(v2)+(unsigned int)(v3)+(unsigned int)(v4)+2U)>>2);
 	}
 
 }
@@ -321,7 +469,7 @@ void* Camera::colorDecodingThreadMethod(void)
 		int stride=width;
 		const unsigned char* rRowPtr=framePtr;
 		unsigned char* cRowPtr=static_cast<unsigned char*>(decodedFrame.getBuffer());
-		cRowPtr+=(height-1)*stride*3; // Flip the depth image vertically
+		cRowPtr+=(height-1)*stride*3; // Flip the color image vertically
 		
 		/* Convert the first row: */
 		const unsigned char* rPtr=rRowPtr;
@@ -547,6 +695,37 @@ void* Camera::depthDecodingThreadMethod(void)
 			/* Check if this was the last captured background frame, and whether to call a callback function: */
 			if(numBackgroundFrames==0&&backgroundCaptureCallback!=0)
 				{
+				/* Open the background frame: */
+				unsigned short* tempFrame=new unsigned short[height*width];
+				
+				/* Open the background frame in the y direction: */
+				for(int x=0;x<width;++x)
+					{
+					unsigned short* bgPtr=backgroundFrame+x;
+					unsigned short* tPtr=tempFrame+x;
+					*tPtr=bgPtr[0]<=bgPtr[width]?bgPtr[0]:bgPtr[width];
+					bgPtr+=width;
+					tPtr+=width;
+					for(int y=1;y<height-1;++y,bgPtr+=width,tPtr+=width)
+						*tPtr=bgPtr[-width]<=bgPtr[0]?(bgPtr[-width]<=bgPtr[width]?bgPtr[-width]:bgPtr[width]):(bgPtr[0]<=bgPtr[width]?bgPtr[0]:bgPtr[width]);
+					*tPtr=bgPtr[-width]<=bgPtr[0]?bgPtr[-width]:bgPtr[0];
+					}
+				
+				/* Open the temporary frame in the x direction: */
+				for(int y=0;y<height;++y)
+					{
+					unsigned short* tPtr=tempFrame+y*width;
+					unsigned short* bgPtr=backgroundFrame+y*width;
+					*bgPtr=tPtr[0]<=tPtr[1]?tPtr[0]:tPtr[1];
+					++bgPtr;
+					++tPtr;
+					for(int x=1;x<width-1;++x,++bgPtr,++tPtr)
+						*bgPtr=tPtr[-1]<=tPtr[0]?(tPtr[-1]<=tPtr[1]?tPtr[-1]:tPtr[1]):(tPtr[0]<=tPtr[1]?tPtr[0]:tPtr[1]);
+					*bgPtr=tPtr[-1]<=tPtr[0]?tPtr[-1]:tPtr[0];
+					}
+				
+				delete[] tempFrame;
+				
 				/* Call the callback: */
 				(*backgroundCaptureCallback)(*this);
 				
@@ -777,17 +956,7 @@ void* Camera::compressedDepthDecodingThreadMethod(void)
 	return 0;
 	}
 
-Camera::Camera(libusb_device* sDevice)
-	:device(sDevice),
-	 messageSequenceNumber(0x2000U),
-	 frameTimerOffset(0.0),
-	 compressDepthFrames(true),smoothDepthFrames(true),
-	 numBackgroundFrames(0),backgroundFrame(0),
-	 backgroundCaptureCallback(0),
-	 removeBackground(false),backgroundRemovalFuzz(5)
-	 #if KINECT_CAMERA_DUMP_HEADERS
-	 ,headerFile(0)
-	 #endif
+void Camera::initialize(void)
 	{
 	/* Get the device's serial number: */
 	serialNumber=device.getSerialNumber();
@@ -800,6 +969,22 @@ Camera::Camera(libusb_device* sDevice)
 	
 	streamers[0]=0;
 	streamers[1]=0;
+	}
+
+Camera::Camera(libusb_device* sDevice)
+	:device(sDevice),
+	 messageSequenceNumber(0x2000U),
+	 frameTimerOffset(0.0),
+	 compressDepthFrames(true),smoothDepthFrames(true),
+	 numBackgroundFrames(0),backgroundFrame(0),
+	 backgroundCaptureCallback(0),
+	 removeBackground(false),backgroundRemovalFuzz(5)
+	 #if KINECT_CAMERA_DUMP_HEADERS
+	 ,headerFile(0)
+	 #endif
+	{
+	/* Initialize the camera: */
+	initialize();
 	}
 
 Camera::Camera(USB::Context& usbContext,size_t index)
@@ -819,17 +1004,8 @@ Camera::Camera(USB::Context& usbContext,size_t index)
 	if(!device.isValid())
 		Misc::throwStdErr("Kinect::Camera::Camera: Less than %d Kinect camera devices detected",int(index));
 	
-	/* Get the device's serial number: */
-	serialNumber=device.getSerialNumber();
-	
-	/* Initialize the camera and streamer states: */
-	frameSizes[0]=FS_640_480;
-	frameSizes[1]=FS_640_480;
-	frameRates[0]=FR_30_HZ;
-	frameRates[1]=FR_30_HZ;
-	
-	streamers[0]=0;
-	streamers[1]=0;
+	/* Initialize the camera: */
+	initialize();
 	}
 
 Camera::~Camera(void)
@@ -845,23 +1021,9 @@ Camera::~Camera(void)
 	// device.reset(); // This seems to confuse the device
 	}
 
-bool Camera::hasDepthCorrectionCoefficients(void) const
+FrameSource::DepthCorrection* Camera::getDepthCorrectionParameters(void)
 	{
-	/* Assemble the name of the depth correction coefficient file: */
-	std::string depthCorrectionFileName=KINECT_CONFIG_DIR;
-	depthCorrectionFileName.push_back('/');
-	depthCorrectionFileName.append(KINECT_CAMERA_DEPTHCORRECTIONFILENAMEPREFIX);
-	depthCorrectionFileName.push_back('-');
-	depthCorrectionFileName.append(serialNumber);
-	depthCorrectionFileName.append(".dat");
-	
-	/* Check if a file of the given name exists and is readable: */
-	return Misc::getPathType(depthCorrectionFileName.c_str())==Misc::PATHTYPE_FILE;
-	}
-
-FrameBuffer Camera::getDepthCorrectionCoefficients(void) const
-	{
-	/* Assemble the name of the depth correction coefficient file: */
+	/* Assemble the name of the depth correction parameters file: */
 	std::string depthCorrectionFileName=KINECT_CONFIG_DIR;
 	depthCorrectionFileName.push_back('/');
 	depthCorrectionFileName.append(KINECT_CAMERA_DEPTHCORRECTIONFILENAMEPREFIX);
@@ -876,23 +1038,17 @@ FrameBuffer Camera::getDepthCorrectionCoefficients(void) const
 		IO::FilePtr depthCorrectionFile(IO::openFile(depthCorrectionFileName.c_str()));
 		depthCorrectionFile->setEndianness(Misc::LittleEndian);
 		
-		/* Get the source's frame size and create a result frame buffer: */
-		const unsigned int* frameSize=getActualFrameSize(DEPTH);
-		FrameBuffer result(frameSize[0],frameSize[1],frameSize[1]*frameSize[0]*sizeof(PixelDepthCorrection));
-		
-		/* Read the per-pixel depth correction coefficients: */
-		depthCorrectionFile->read<float>(static_cast<float*>(result.getBuffer()),frameSize[1]*frameSize[0]*2);
-		
-		return result;
+		/* Read and return a depth correction object: */
+		return new DepthCorrection(*depthCorrectionFile);
 		}
 	else
 		{
-		/* Return a default depth correction map: */
-		return FrameSource::getDepthCorrectionCoefficients();
+		/* Return a default depth correction object: */
+		return FrameSource::getDepthCorrectionParameters();
 		}
 	}
 
-FrameSource::IntrinsicParameters Camera::getIntrinsicParameters(void) const
+FrameSource::IntrinsicParameters Camera::getIntrinsicParameters(void)
 	{
 	/* Assemble the name of the intrinsic parameter file: */
 	std::string intrinsicParameterFileName=KINECT_CONFIG_DIR;
@@ -921,51 +1077,36 @@ FrameSource::IntrinsicParameters Camera::getIntrinsicParameters(void) const
 		}
 	catch(std::runtime_error)
 		{
-		/* Ignore the error and return a default set of intrinsic parameters: */
-		static const double depthMatrixLow[16]=
-			{
-			0.00170716,4.6553e-06,0.0,-0.55119,
-			0.0,0.00169947,0.0,-0.400165,
-			0.0,0.0,0.0,-1.0,
-			0.0,0.0,-2.83107e-05,0.0309361
-			};
-		static const double colorMatrixLow[16]=
-			{
-			-0.00053252,-1.28643e-06,-3.65353e-05,0.0185572,
-			2.43579e-06,-0.000698419,-1.44376e-05,-0.00317694,
-			0.0,0.0,0.0,-1.0,
-			-7.52282e-06,7.87079e-06,-2.83107e-05,-0.351479
-			};
-		static const double depthMatrixHigh[16]=
-			{
-			0.00178571,0.0,0.0,-0.571429,
-			0.0,0.00178571,0.0,-0.428571,
-			0.0,0.0,0.0,-1.0,
-			0.0,0.0,-2.90698e-05,0.031686
-			};
-		static const double colorMatrixHigh[16]=
-			{
-			-0.000145995,4.98278e-06,-1.74364e-05,0.0108088,
-			3.23855e-07,-0.000177436,-1.4614e-05,0.00267981,
-			0.0,0.0,0.0,-1.0,
-			-8.76519e-07,5.95408e-06,-2.90698e-05,-0.0821512
-			};
-		if(frameSizes[COLOR]==FS_1280_1024)
-			{
-			result.depthProjection=IntrinsicParameters::PTransform::fromRowMajor(depthMatrixHigh);
-			result.colorProjection=IntrinsicParameters::PTransform::fromRowMajor(colorMatrixHigh);
-			}
-		else
-			{
-			result.depthProjection=IntrinsicParameters::PTransform::fromRowMajor(depthMatrixLow);
-			result.colorProjection=IntrinsicParameters::PTransform::fromRowMajor(colorMatrixLow);
-			}
+		/* Extract intrinsic parameters from the Kinect's factory calibration data: */
+		CalibrationParameters calib;
+		getCalibrationParameters(calib);
+		
+		/* Calculate the depth-to-distance conversion formula: */
+		double numerator=(4.0*double(calib.dcmosEmitterDist)*double(calib.referenceDistance))/double(calib.referencePixelSize);
+		double denominator=4.0*double(calib.dcmosEmitterDist)/double(calib.referencePixelSize)+4.0*double(calib.constantShift)+1.5;
+		
+		/* Calculate the unprojection scale factor: */
+		double scale=2.0*double(calib.referencePixelSize)/double(calib.referenceDistance);
+		
+		/* Construct the depth pixel unprojection matrix: */
+		IntrinsicParameters::PTransform::Matrix& depthMatrix=result.depthProjection.getMatrix();
+		depthMatrix=IntrinsicParameters::PTransform::Matrix::zero;
+		depthMatrix(0,0)=scale;
+		depthMatrix(0,3)=-scale*double(getActualFrameSize(DEPTH)[0])*0.5;
+		depthMatrix(1,1)=scale;
+		depthMatrix(1,3)=-scale*double(getActualFrameSize(DEPTH)[1])*0.5;
+		depthMatrix(2,3)=-1.0;
+		depthMatrix(3,2)=-1.0/numerator;
+		depthMatrix(3,3)=denominator/numerator;
+		
+		/* Construct the color projection matrix from the depth pixel transformation polynomial: */
+		result.colorProjection=IntrinsicParameters::PTransform::identity;
 		}
 	
 	return result;
 	}
 
-FrameSource::ExtrinsicParameters Camera::getExtrinsicParameters(void) const
+FrameSource::ExtrinsicParameters Camera::getExtrinsicParameters(void)
 	{
 	/* Assemble the name of the extrinsic parameter file: */
 	std::string extrinsicParameterFileName=KINECT_CONFIG_DIR;
@@ -1107,7 +1248,7 @@ void Camera::startStreaming(FrameSource::StreamingCallback* newColorStreamingCal
 	if(smoothDepthFrames)
 		sequenceOk=sequenceOk&&sendCommand(0x0016U,0x0001U); // Enable depth smoothing
 	else
-		sequenceOk=sequenceOk&&sendCommand(0x0016U,0x0000U); // Enable depth smoothing
+		sequenceOk=sequenceOk&&sendCommand(0x0016U,0x0000U); // Disable depth smoothing
 	sequenceOk=sequenceOk&&sendCommand(0x0018U,0x0000U); // Unknown semantics
 	sequenceOk=sequenceOk&&sendCommand(0x0002U,0x0000U); // Unknown semantics
 	sequenceOk=sequenceOk&&sendCommand(0x0105U,0x0000U); // Disable IR pattern checking
@@ -1152,6 +1293,64 @@ void Camera::stopStreaming(void)
 	#if KINECT_CAMERA_DUMP_HEADERS
 	headerFile=0;
 	#endif
+	}
+
+void Camera::getCalibrationParameters(Camera::CalibrationParameters& calib)
+	{
+	/* Temporarily open the device: */
+	bool tempOpen=!device.isOpen();
+	if(tempOpen)
+		device.open();
+	
+	/* Set up the common command buffer: */
+	unsigned short cmdBuffer[5];
+	cmdBuffer[1]=0x0000U; // Calibration parameter format
+	switch(frameSizes[COLOR])
+		{
+		case FS_640_480:
+			cmdBuffer[2]=1U; // "Medium" resolution
+			break;
+		
+		case FS_1280_1024:
+			cmdBuffer[2]=2U; // "High" resolution
+			break;
+		}
+	switch(frameRates[COLOR])
+		{
+		case FR_15_HZ:
+			cmdBuffer[3]=15U;
+			break;
+		
+		case FR_30_HZ:
+			cmdBuffer[3]=30U;
+			break;
+		}
+	cmdBuffer[4]=0x0000U; // Offset into calibration parameter area
+	
+	/* Request the calibration parameters in four subsets: */
+	static const unsigned short subsetOpcodes[4]={0x0040U,0x0041U,0x0000U,0x0000U};
+	static const size_t subsetReplySizes[4]={126,16,12,330};
+	for(int subset=0;subset<4;++subset)
+		{
+		/* Request the subset of calibration parameters: */
+		cmdBuffer[0]=subsetOpcodes[subset];
+		
+		/* Send the message and receive the reply: */
+		IO::FixedMemoryFile replyBuffer(subsetReplySizes[subset]);
+		if(sendMessage(subset<3?0x0016U:0x0004U,cmdBuffer,subset<3?5:1,replyBuffer.getMemory(),subsetReplySizes[subset])!=subsetReplySizes[subset])
+			Misc::throwStdErr("Kinect::Camera::getCalibrationParameters: Protocol error while requesting parameter subset");
+
+		/* Extract the subset of calibration parameters: */
+		replyBuffer.skip<unsigned short>(4); // Skip the reply header
+		replyBuffer.skip<unsigned short>(1); // Skip the parameter set size
+		if(subset==3)
+			replyBuffer.skip<unsigned short>(46); // Skip some unknown parameters
+		calib.read(subset,replyBuffer);
+		}
+	
+	/* Close the device again if it was temporarily opened: */
+	if(tempOpen)
+		device.open();
 	}
 
 void Camera::setFrameSize(int camera,Camera::FrameSize newFrameSize)
@@ -1336,6 +1535,18 @@ void Camera::setRemoveBackground(bool newRemoveBackground)
 void Camera::setBackgroundRemovalFuzz(int newBackgroundRemovalFuzz)
 	{
 	backgroundRemovalFuzz=(short int)(newBackgroundRemovalFuzz);
+	}
+
+unsigned int Camera::getSharpening(void)
+	{
+	/* Return the sharpening register value: */
+	return readRegister(0x0105U);
+	}
+
+void Camera::setSharpening(unsigned int newSharpening)
+	{
+	/* Limit and set the sharpening value: */
+	writeRegister(0x0105U,newSharpening&0x0007U);
 	}
 
 }

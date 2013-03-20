@@ -1,7 +1,7 @@
 /***********************************************************************
 RawKinectViewer - Simple application to view color and depth images
 captured from a Kinect device.
-Copyright (c) 2010-2012 Oliver Kreylos
+Copyright (c) 2010-2013 Oliver Kreylos
 
 This file is part of the Kinect 3D Video Capture Project (Kinect).
 
@@ -24,6 +24,7 @@ Software Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA
 #ifndef RAWKINECTVIEWER_INCLUDED
 #define RAWKINECTVIEWER_INCLUDED
 
+#include <Misc/FunctionCalls.h>
 #include <Threads/TripleBuffer.h>
 #include <USB/Context.h>
 #include <GL/gl.h>
@@ -33,10 +34,12 @@ Software Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA
 #include <Vrui/LocatorTool.h>
 #include <Vrui/Application.h>
 #include <Kinect/FrameBuffer.h>
+#include <Kinect/FrameSource.h>
 
 /* Forward declarations: */
 namespace GLMotif {
 class PopupMenu;
+class PopupWindow;
 }
 namespace Kinect {
 class Camera;
@@ -46,6 +49,9 @@ class RawKinectViewer:public Vrui::Application,public GLObject
 	{
 	/* Embedded classes: */
 	private:
+	typedef Kinect::FrameSource::DepthCorrection::PixelCorrection PixelCorrection; // Type for per-pixel depth correction factors
+	typedef Misc::FunctionCall<int> AverageFrameReadyCallback; // Type for callbacks when an average depth frame has been captured; int argument is a dummy
+	
 	struct DataItem:public GLObject::DataItem
 		{
 		/* Elements: */
@@ -68,6 +74,7 @@ class RawKinectViewer:public Vrui::Application,public GLObject
 	friend class DepthCorrectionTool;
 	friend class GridTool;
 	friend class PlaneTool;
+	friend class CalibrationCheckTool;
 	
 	/* Elements: */
 	USB::Context usbContext; // USB device context
@@ -76,26 +83,29 @@ class RawKinectViewer:public Vrui::Application,public GLObject
 	Threads::TripleBuffer<Kinect::FrameBuffer> colorFrames; // Triple buffer of color frames received from the camera
 	unsigned int colorFrameVersion; // Version number of current color frame
 	const unsigned int* depthFrameSize; // Size of depth frames in pixels
-	bool hasDepthCorrection; // Flag whether the camera has per-pixel depth correction coefficients
-	Kinect::FrameBuffer depthCorrection; // Buffer containing per-pixel depth correction coefficients
+	PixelCorrection* depthCorrection; // Buffer containing per-pixel depth correction coefficients
 	float depthValueRange[2]; // Range of depth values mapped to the depth color map
 	Threads::TripleBuffer<Kinect::FrameBuffer> depthFrames; // Triple buffer of depth frames received from the camera
 	unsigned int depthFrameVersion; // Version number of current depth frame
 	bool paused; // Flag whether the video stream display is paused
 	unsigned int averageNumFrames; // Number of depth frames to average
 	unsigned int averageFrameCounter; // Number of depth frames still to accumulate
+	std::vector<AverageFrameReadyCallback*> averageFrameReadyCallbacks; // Functions called when a new average depth frame has been captured
 	float* averageFrameDepth; // Average depth values in depth frame
 	float* averageFrameForeground; // Ratio of foreground vs background in depth frame
+	bool averageFrameValid; // Flag whether the average depth frame buffer is currently valid
 	bool showAverageFrame; // Flag whether to show the averaged frame
 	unsigned int selectedPixel[2]; // Coordinates of the selected depth image pixel
 	unsigned short selectedPixelPulse[128]; // EKG of depth value of selected pixel
 	int selectedPixelCurrentIndex; // Index of most recent value in selected pixel's EKG
 	GLMotif::PopupMenu* mainMenu; // The program's main menu
+	GLMotif::PopupWindow* averageDepthFrameDialog; // A dialog window indicating that an average depth frame is being captured
 	
 	/* Private methods: */
 	Vrui::Point calcImagePoint(const Vrui::Ray& physicalRay) const; // Returns image-space point at which the given physical-space ray intersects the image plane
 	void colorStreamingCallback(const Kinect::FrameBuffer& frameBuffer); // Callback receiving color frames from the Kinect camera
 	void depthStreamingCallback(const Kinect::FrameBuffer& frameBuffer); // Callback receiving depth frames from the Kinect camera
+	void requestAverageFrame(AverageFrameReadyCallback* callback); // Requests collection of an average depth frame; given function will be called when it's ready
 	void locatorButtonPressCallback(Vrui::LocatorTool::ButtonPressCallbackData* cbData); // Callback when a locator tool's button is pressed
 	void resetNavigationCallback(Misc::CallbackData* cbData);
 	void captureBackgroundCallback(Misc::CallbackData* cbData);
@@ -106,6 +116,7 @@ class RawKinectViewer:public Vrui::Application,public GLObject
 	void saveColorFrameOKCallback(GLMotif::FileSelectionDialog::OKCallbackData* cbData);
 	void saveColorFrameCallback(Misc::CallbackData* cbData);
 	GLMotif::PopupMenu* createMainMenu(void); // Creates the program's main menu
+	GLMotif::PopupWindow* createAverageDepthFrameDialog(void); // Creates the depth frame averaging dialog
 	
 	/* Constructors and destructors: */
 	public:

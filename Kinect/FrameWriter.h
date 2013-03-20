@@ -1,6 +1,7 @@
 /***********************************************************************
-ColorFrameWriter - Class to write compressed color frames to a sink.
-Copyright (c) 2010-2013 Oliver Kreylos
+FrameWriter - Abstract base class to write color or depth frames to a
+sink.
+Copyright (c) 2013 Oliver Kreylos
 
 This file is part of the Kinect 3D Video Capture Project (Kinect).
 
@@ -20,47 +21,39 @@ Software Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA
 02111-1307 USA
 ***********************************************************************/
 
-#ifndef KINECT_COLORFRAMEWRITER_INCLUDED
-#define KINECT_COLORFRAMEWRITER_INCLUDED
+#ifndef KINECT_FRAMEWRITER_INCLUDED
+#define KINECT_FRAMEWRITER_INCLUDED
 
 #include <stddef.h>
-#include <Video/Config.h>
-#if VIDEO_CONFIG_HAVE_THEORA
-#include <Video/TheoraFrame.h>
-#include <Video/TheoraEncoder.h>
-#endif
-#include <Kinect/FrameWriter.h>
 
 /* Forward declarations: */
-namespace IO {
-class File;
-}
-namespace Video {
-#if VIDEO_CONFIG_HAVE_THEORA
-class ImageExtractor;
-#endif
+namespace Kinect {
+class FrameBuffer;
 }
 
 namespace Kinect {
 
-class ColorFrameWriter:public FrameWriter
+class FrameWriter
 	{
 	/* Elements: */
-	private:
-	IO::File& sink; // Data sink for compressed color frames
-	#if VIDEO_CONFIG_HAVE_THEORA
-	Video::TheoraEncoder theoraEncoder; // Theora encoder object
-	Video::ImageExtractor* imageExtractor; // Extractor to convert RGB images to Y'CbCr 4:2:0 images
-	Video::TheoraFrame theoraFrame; // Frame buffer for frames in Y'CbCr 4:2:0 pixel format
-	#endif
+	protected:
+	unsigned int size[2]; // Width and height of provided frames
 	
 	/* Constructors and destructors: */
 	public:
-	ColorFrameWriter(IO::File& sSink,const unsigned int sSize[2]); // Creates a color frame writer for the given sink and frame size
-	virtual ~ColorFrameWriter(void);
+	FrameWriter(const unsigned int sSize[2]); // Creates a frame writer for the given frame size
+	virtual ~FrameWriter(void);
 	
-	/* Methods from frameWriter: */
-	virtual size_t writeFrame(const FrameBuffer& frame);
+	/* Methods: */
+	const unsigned int* getSize(void) const // Returns the frame size as an array
+		{
+		return size;
+		}
+	unsigned int getSize(int dimension) const // Returns frame width or height
+		{
+		return size[dimension];
+		}
+	virtual size_t writeFrame(const FrameBuffer& frame) =0; // Writes the given color or depth frame; returns size of written data in bytes
 	};
 
 }

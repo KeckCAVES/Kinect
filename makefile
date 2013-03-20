@@ -1,6 +1,6 @@
 ########################################################################
 # Makefile for Kinect 3D Video Capture Project.
-# Copyright (c) 2010-2012 Oliver Kreylos
+# Copyright (c) 2010-2013 Oliver Kreylos
 #
 # This file is part of the WhyTools Build Environment.
 # 
@@ -24,7 +24,7 @@
 # matches the default Vrui installation; if Vrui's installation
 # directory was changed during Vrui's installation, the directory below
 # must be adapted.
-VRUI_MAKEDIR := $(HOME)/Vrui-2.6/share/make
+VRUI_MAKEDIR := $(HOME)/Vrui-2.7/share/make
 ifdef DEBUG
   VRUI_MAKEDIR := $(VRUI_MAKEDIR)/debug
 endif
@@ -37,9 +37,9 @@ endif
 PACKAGEROOT := $(shell pwd)
 
 # Specify version of created dynamic shared libraries
-KINECT_VERSION = 2004
+KINECT_VERSION = 2005
 MAJORLIBVERSION = 2
-MINORLIBVERSION = 4
+MINORLIBVERSION = 5
 KINECT_NAME := Kinect-$(MAJORLIBVERSION).$(MINORLIBVERSION)
 
 # Check if Vrui's collaboration infrastructure is installed
@@ -262,6 +262,7 @@ $(EXEDIR)/RawKinectViewer: $(OBJDIR)/PauseTool.o \
                            $(OBJDIR)/DepthCorrectionTool.o \
                            $(OBJDIR)/GridTool.o \
                            $(OBJDIR)/PlaneTool.o \
+                           $(OBJDIR)/CalibrationCheckTool.o \
                            $(OBJDIR)/RawKinectViewer.o
 .PHONY: RawKinectViewer
 RawKinectViewer: $(EXEDIR)/RawKinectViewer
@@ -441,6 +442,7 @@ ifdef INSTALLPREFIX
   EXECUTABLEINSTALLDIR := $(INSTALLPREFIX)/$(EXECUTABLEINSTALLDIR)
   ETCINSTALLDIR := $(INSTALLPREFIX)/$(ETCINSTALLDIR)
   SHAREINSTALLDIR := $(INSTALLPREFIX)/$(SHAREINSTALLDIR)
+  MAKEINSTALLDIR := $(INSTALLPREFIX)/$(MAKEINSTALLDIR)
 endif
 
 install: all

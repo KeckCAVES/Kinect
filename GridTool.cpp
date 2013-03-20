@@ -1,6 +1,6 @@
 /***********************************************************************
 GridTool - Calibration tool for RawKinectViewer.
-Copyright (c) 2010-2012 Oliver Kreylos
+Copyright (c) 2010-2013 Oliver Kreylos
 
 This file is part of the Kinect 3D Video Capture Project (Kinect).
 
@@ -184,52 +184,25 @@ void GridTool::createTiePoint(void)
 	const float* afdPtr=application->averageFrameDepth;
 	const float* affPtr=application->averageFrameForeground;
 	float foregroundCutoff=float(application->averageNumFrames)*0.5f;
-	if(application->hasDepthCorrection)
+	const RawKinectViewer::PixelCorrection* dcPtr=application->depthCorrection;
+	for(unsigned int y=0;y<application->depthFrameSize[1];++y)
 		{
-		const Kinect::FrameSource::PixelDepthCorrection* pdcPtr=static_cast<const Kinect::FrameSource::PixelDepthCorrection*>(application->depthCorrection.getBuffer());
-		for(unsigned int y=0;y<application->depthFrameSize[1];++y)
+		double dy=double(y)+0.5;
+		for(unsigned int x=0;x<application->depthFrameSize[0];++x,++afdPtr,++affPtr,++dcPtr)
 			{
-			double dy=double(y)+0.5;
-			for(unsigned int x=0;x<application->depthFrameSize[0];++x,++afdPtr,++affPtr,++pdcPtr)
+			double dx=double(x)-double(application->depthFrameSize[0])+0.5;
+			if(*affPtr>=foregroundCutoff)
 				{
-				double dx=double(x)-double(application->depthFrameSize[0])+0.5;
-				if(*affPtr>=foregroundCutoff)
-					{
-					/* Determine the pixel's grid position: */
-					Point gp=homs[0].inverseTransform(Point(dx,dy));
-					if(gp[0]>=0.0&&gp[0]<double(gridSize[0])&&gp[1]>=0.0&&gp[1]<double(gridSize[1]))
-						if((int(gp[0])+int(gp[1]))%2==0)
-							{
-							double gx=gp[0]-Math::floor(gp[0]);
-							double gy=gp[1]-Math::floor(gp[1]);
-							if(gx>=0.2&&gx<0.8&&gy>=0.2&&gy<0.8)
-								pca.accumulatePoint(Geometry::PCACalculator<3>::Point(dx,dy,((*afdPtr)/(*affPtr))*pdcPtr->scale+pdcPtr->offset));
-							}
-					}
-				}
-			}
-		}
-	else
-		{
-		for(unsigned int y=0;y<application->depthFrameSize[1];++y)
-			{
-			double dy=double(y)+0.5;
-			for(unsigned int x=0;x<application->depthFrameSize[0];++x,++afdPtr,++affPtr)
-				{
-				double dx=double(x)-double(application->depthFrameSize[0])+0.5;
-				if(*affPtr>=foregroundCutoff)
-					{
-					/* Determine the pixel's grid position: */
-					Point gp=homs[0].inverseTransform(Point(dx,dy));
-					if(gp[0]>=0.0&&gp[0]<double(gridSize[0])&&gp[1]>=0.0&&gp[1]<double(gridSize[1]))
-						if((int(gp[0])+int(gp[1]))%2==0)
-							{
-							double gx=gp[0]-Math::floor(gp[0]);
-							double gy=gp[1]-Math::floor(gp[1]);
-							if(gx>=0.2&&gx<0.8&&gy>=0.2&&gy<0.8)
-								pca.accumulatePoint(Geometry::PCACalculator<3>::Point(dx,dy,*afdPtr/(*affPtr)));
-							}
-					}
+				/* Determine the pixel's grid position: */
+				Point gp=homs[0].inverseTransform(Point(dx,dy));
+				if(gp[0]>=0.0&&gp[0]<double(gridSize[0])&&gp[1]>=0.0&&gp[1]<double(gridSize[1]))
+					if((int(gp[0])+int(gp[1]))%2==0)
+						{
+						double gx=gp[0]-Math::floor(gp[0]);
+						double gy=gp[1]-Math::floor(gp[1]);
+						if(gx>=0.2&&gx<0.8&&gy>=0.2&&gy<0.8)
+							pca.accumulatePoint(Geometry::PCACalculator<3>::Point(dx,dy,dcPtr->correct((*afdPtr)/(*affPtr))));
+						}
 				}
 			}
 		}

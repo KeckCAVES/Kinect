@@ -2,7 +2,7 @@
 Projector - Class to project a depth frame captured from a Kinect camera
 back into calibrated 3D camera space, and texture-map it with a matching
 color frame.
-Copyright (c) 2010-2012 Oliver Kreylos
+Copyright (c) 2010-2013 Oliver Kreylos
 
 This file is part of the Kinect 3D Video Capture Project (Kinect).
 
@@ -50,6 +50,7 @@ class Projector:public GLObject
 	public:
 	typedef Misc::FunctionCall<const MeshBuffer&> StreamingCallback; // Function call type for streaming callbacks
 	private:
+	typedef FrameSource::DepthCorrection::PixelCorrection PixelCorrection; // Type for per-pixel depth correction factors
 	typedef FrameSource::IntrinsicParameters::PTransform PTransform; // Type for projective transformations
 	typedef FrameSource::ExtrinsicParameters OGTransform; // Type for orthogonal transformations
 	
@@ -74,12 +75,12 @@ class Projector:public GLObject
 	PTransform depthProjection; // Projection transformation from depth image space into 3D camera space
 	PTransform colorProjection; // Projection transformation from color image space into 3D camera space
 	OGTransform projectorTransform; // Transformation from 3D camera space into 3D world space
-	bool hasDepthCorrection; // Flag if the frame source has per-pixel depth correction parameters
-	Kinect::FrameBuffer depthCorrection; // Buffer of per-pixel depth correction coefficients
+	PixelCorrection* depthCorrection; // Buffer of per-pixel depth correction parameters
 	Threads::MutexCond inDepthFrameCond; // Condition variable to signal arrival of a new depth frame
 	unsigned int inDepthFrameVersion; // Version number of most-recently arrived raw depth frame
 	FrameBuffer inDepthFrame; // Most-recently arrived raw depth frame
 	bool filterDepthFrames; // Flag if temporal depth frame filtering is enabled
+	bool lowpassDepthFrames; // Flag it spatial depth frame filtering is enabled
 	GLfloat* filteredDepthFrame; // Temporally filtered depth frame, same version number as current depth frame
 	GLfloat* spatialFilterBuffer; // Intermediate buffer to filter depth frames spatially
 	int quadCaseVertexOffsets[16][6]; // Offsets of triangle vertices to be used for each quad corner validity case
@@ -97,7 +98,7 @@ class Projector:public GLObject
 	/* Constructors and destructors: */
 	public:
 	Projector(void); // Creates a facade projector with uninitialized camera parameters
-	Projector(const FrameSource& frameSource); // Creates a facade projector for the given frame source
+	Projector(FrameSource& frameSource); // Creates a facade projector for the given frame source
 	~Projector(void);
 	
 	/* Methods from GLObject: */
@@ -105,9 +106,9 @@ class Projector:public GLObject
 	
 	/* New methods: */
 	void setDepthFrameSize(const unsigned int newDepthFrameSize[2]); // Sets the size of all future incoming depth frames
+	void setDepthCorrection(const FrameSource::DepthCorrection* dc); // Enables per-pixel depth correction using the given depth correction parameters
 	void setIntrinsicParameters(const FrameSource::IntrinsicParameters& ips); // Sets the projectors intrinsic camera parameters
 	void setExtrinsicParameters(const FrameSource::ExtrinsicParameters& eps); // Sets the projectors extrinsic camera parameters
-	void setDepthCorrection(const FrameBuffer& newDepthCorrection); // Enables per-pixel depth correction using the given buffer of coefficients
 	const OGTransform& getProjectorTransform(void) const // Returns the transformation from camera to world space
 		{
 		return projectorTransform;
@@ -116,7 +117,7 @@ class Projector:public GLObject
 		{
 		return filterDepthFrames;
 		}
-	void setFilterDepthFrames(bool newFilterDepthFrames); // Enables or disables depth frame filtering
+	void setFilterDepthFrames(bool newFilterDepthFrames,bool newLowpassDepthFrames); // Enables or disables temporal and spatial depth frame filtering
 	unsigned short getTriangleDepthRange(void) const // Returns the maximum depth range for generated triangles
 		{
 		return triangleDepthRange;

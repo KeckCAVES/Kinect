@@ -1,7 +1,7 @@
 /***********************************************************************
 FileFrameSource - Class to stream depth and color frames from a pair of
 time-stamped depth and color stream files.
-Copyright (c) 2010-2012 Oliver Kreylos
+Copyright (c) 2010-2013 Oliver Kreylos
 
 This file is part of the Kinect 3D Video Capture Project (Kinect).
 
@@ -25,12 +25,15 @@ Software Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA
 
 #include <Misc/Time.h>
 #include <Misc/FunctionCalls.h>
+#include <Misc/ThrowStdErr.h>
 #include <IO/OpenFile.h>
 #include <Math/Constants.h>
 #include <Geometry/GeometryMarshallers.h>
+#include <Video/Config.h>
 #include <Kinect/FrameBuffer.h>
 #include <Kinect/ColorFrameReader.h>
 #include <Kinect/DepthFrameReader.h>
+#include <Kinect/LossyDepthFrameReader.h>
 
 namespace Kinect {
 
@@ -45,14 +48,28 @@ void FileFrameSource::initialize(void)
 	fileFormatVersions[1]=depthFrameFile->read<unsigned int>();
 	
 	/* Check if there are per-pixel depth correction coefficients: */
-	if(fileFormatVersions[1]>=2&&depthFrameFile->read<char>()!=0)
+	if(fileFormatVersions[1]>=4)
 		{
-		/* Read the depth correction buffer: */
-		int size[2];
-		depthFrameFile->read<int>(size,2);
-		depthCorrection=FrameBuffer(size[0],size[1],size[1]*size[0]*2*sizeof(float));
-		depthFrameFile->read<float>(static_cast<float*>(depthCorrection.getBuffer()),size[1]*size[0]*2);
+		/* Read new B-spline based depth correction parameters: */
+		depthCorrection=new DepthCorrection(*depthFrameFile);
 		}
+	else
+		{
+		if(fileFormatVersions[1]>=2&&depthFrameFile->read<char>()!=0)
+			{
+			/* Skip the depth correction buffer: */
+			int size[2];
+			depthFrameFile->read<int>(size,2);
+			depthFrameFile->skip<float>(size[1]*size[0]*2);
+			}
+		
+		/* Create a dummy depth correction object: */
+		int numSegments[2]={1,1};
+		depthCorrection=new DepthCorrection(0,numSegments);
+		}
+	
+	/* Check if the depth stream uses lossy compression: */
+	bool depthIsLossy=fileFormatVersions[1]>=3&&depthFrameFile->read<unsigned char>()!=0;
 	
 	/* Read the color and depth projections from their respective files: */
 	intrinsicParameters.colorProjection=Misc::Marshaller<FrameSource::IntrinsicParameters::PTransform>::read(*colorFrameFile);
@@ -63,7 +80,17 @@ void FileFrameSource::initialize(void)
 	
 	/* Create the color and depth frame readers: */
 	colorFrameReader=new ColorFrameReader(*colorFrameFile);
-	depthFrameReader=new DepthFrameReader(*depthFrameFile);
+	if(depthIsLossy)
+		{
+		#if VIDEO_CONFIG_HAVE_THEORA
+		depthFrameReader=new LossyDepthFrameReader(*depthFrameFile);
+		#else
+		delete colorFrameReader;
+		Misc::throwStdErr("Kinect::FileFrameSource::FileFrameSource: Lossy depth compression not supported due to lack of Theora library");
+		#endif
+		}
+	else
+		depthFrameReader=new DepthFrameReader(*depthFrameFile);
 	
 	/* Get the depth reader's frame size: */
 	for(int i=0;i<2;++i)
@@ -197,6 +224,7 @@ FileFrameSource::FileFrameSource(const char* colorFrameFileName,const char* dept
 	:colorFrameFile(IO::openFile(colorFrameFileName)),
 	 depthFrameFile(IO::openFile(depthFrameFileName)),
 	 colorFrameReader(0),depthFrameReader(0),
+	 depthCorrection(0),
 	 colorStreamingCallback(0),depthStreamingCallback(0),
 	 numBackgroundFrames(0),backgroundFrame(0),removeBackground(false)
 	{
@@ -212,6 +240,7 @@ FileFrameSource::FileFrameSource(IO::FilePtr sColorFrameFile,IO::FilePtr sDepthF
 	:colorFrameFile(sColorFrameFile),
 	 depthFrameFile(sDepthFrameFile),
 	 colorFrameReader(0),depthFrameReader(0),
+	 depthCorrection(0),
 	 colorStreamingCallback(0),depthStreamingCallback(0),
 	 numBackgroundFrames(0),backgroundFrame(0),removeBackground(false)
 	{
@@ -232,6 +261,9 @@ FileFrameSource::~FileFrameSource(void)
 	delete colorStreamingCallback;
 	delete depthStreamingCallback;
 	
+	/* Delete the depth correction object: */
+	delete depthCorrection;
+	
 	/* Delete the frame readers: */
 	delete colorFrameReader;
 	delete depthFrameReader;
@@ -240,33 +272,18 @@ FileFrameSource::~FileFrameSource(void)
 	delete[] backgroundFrame;
 	}
 
-bool FileFrameSource::hasDepthCorrectionCoefficients(void) const
+FrameSource::DepthCorrection* FileFrameSource::getDepthCorrectionParameters(void)
 	{
-	/* Check if the depth correction buffer has valid data: */
-	return depthCorrection.getBuffer()!=0;
+	/* Clone and return the depth correction object: */
+	return new DepthCorrection(*depthCorrection);
 	}
 
-FrameBuffer FileFrameSource::getDepthCorrectionCoefficients(void) const
-	{
-	/* Check if the depth correction buffer has valid data: */
-	if(depthCorrection.getBuffer()!=0)
-		{
-		/* Return the depth correction buffer: */
-		return depthCorrection;
-		}
-	else
-		{
-		/* Return an identity depth correction: */
-		return FrameSource::getDepthCorrectionCoefficients();
-		}
-	}
-
-FrameSource::IntrinsicParameters FileFrameSource::getIntrinsicParameters(void) const
+FrameSource::IntrinsicParameters FileFrameSource::getIntrinsicParameters(void)
 	{
 	return intrinsicParameters;
 	}
 
-FrameSource::ExtrinsicParameters FileFrameSource::getExtrinsicParameters(void) const
+FrameSource::ExtrinsicParameters FileFrameSource::getExtrinsicParameters(void)
 	{
 	return extrinsicParameters;
 	}

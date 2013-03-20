@@ -1,6 +1,7 @@
 /***********************************************************************
-ColorFrameReader - Class to read compressed color frames from a source.
-Copyright (c) 2010-2013 Oliver Kreylos
+LossyDepthFrameReader - Class to read lossily compressed depth frames
+from a source.
+Copyright (c) 2013 Oliver Kreylos
 
 This file is part of the Kinect 3D Video Capture Project (Kinect).
 
@@ -20,7 +21,7 @@ Software Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA
 02111-1307 USA
 ***********************************************************************/
 
-#include <Kinect/ColorFrameReader.h>
+#include <Kinect/LossyDepthFrameReader.h>
 
 #include <Misc/SizedTypes.h>
 #include <IO/File.h>
@@ -37,11 +38,11 @@ Software Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA
 
 namespace Kinect {
 
-/*********************************
-Methods of class ColorFrameReader:
-*********************************/
+/**************************************
+Methods of class LossyDepthFrameReader:
+**************************************/
 
-ColorFrameReader::ColorFrameReader(IO::File& sSource)
+LossyDepthFrameReader::LossyDepthFrameReader(IO::File& sSource)
 	:source(sSource),
 	 sourceHasTheora(false)
 	{
@@ -83,14 +84,14 @@ ColorFrameReader::ColorFrameReader(IO::File& sSource)
 		}
 	}
 
-ColorFrameReader::~ColorFrameReader(void)
+LossyDepthFrameReader::~LossyDepthFrameReader(void)
 	{
 	}
 
-FrameBuffer ColorFrameReader::readNextFrame(void)
+FrameBuffer LossyDepthFrameReader::readNextFrame(void)
 	{
 	/* Create the result frame: */
-	FrameBuffer result(size[0],size[1],size[1]*size[0]*3*sizeof(unsigned char));
+	FrameBuffer result(size[0],size[1],size[1]*size[0]*sizeof(unsigned short));
 	
 	/* Return a dummy frame if the file is over: */
 	if(source.eof())
@@ -119,45 +120,35 @@ FrameBuffer ColorFrameReader::readNextFrame(void)
 		Video::TheoraFrame theoraFrame;
 		theoraDecoder.decodeFrame(theoraFrame);
 		
-		/* Convert the decompressed frame from Y'CbCr 4:2:0 to RGB: */
-		unsigned char* resultRowPtr=static_cast<unsigned char*>(result.getBuffer())+(size[1]-1)*size[0]*3;
+		/* Convert the decompressed frame from Y'CbCr 4:2:0 to 11-bit depth: */
+		unsigned short* resultRowPtr=static_cast<unsigned short*>(result.getBuffer());
 		const unsigned char* ypRowPtr=static_cast<const unsigned char*>(theoraFrame.planes[0].data)+theoraFrame.offsets[0];
 		const unsigned char* cbRowPtr=static_cast<const unsigned char*>(theoraFrame.planes[1].data)+theoraFrame.offsets[1];
 		const unsigned char* crRowPtr=static_cast<const unsigned char*>(theoraFrame.planes[2].data)+theoraFrame.offsets[2];
 		for(unsigned int y=0;y<size[1];y+=2)
 			{
-			unsigned char* resultPtr=resultRowPtr;
+			unsigned short* resultPtr=resultRowPtr;
 			const unsigned char* ypPtr=ypRowPtr;
 			const unsigned char* cbPtr=cbRowPtr;
 			const unsigned char* crPtr=crRowPtr;
 			for(unsigned int x=0;x<size[0];x+=2)
 				{
-				/* Convert the four pixels in the 2x2 block from Y'CbCr to RGB: */
-				unsigned char ypcbcr[3];
-				ypcbcr[0]=ypPtr[0];
-				ypcbcr[1]=*cbPtr;
-				ypcbcr[2]=*crPtr;
-				Video::ypcbcrToRgb(ypcbcr,resultPtr);
+				/* Assemble the block's 4 11-bit depth values from the 4 8-bit yp values and the 8-bit cb and cr values: */
+				resultPtr[0]=((((unsigned short)(ypPtr[0]))<<3)&0x7f8U)|(((unsigned short)(*cbPtr))>>4);
+				resultPtr[1]=((((unsigned short)(ypPtr[1]))<<3)&0x7f8U)|(((unsigned short)(*cbPtr))&0x0fU);
+				resultPtr[size[0]]=((((unsigned short)(ypPtr[theoraFrame.planes[0].stride]))<<3)&0x7f8U)|(((unsigned short)(*cbPtr))>>4);
+				resultPtr[size[0]+1]=((((unsigned short)(ypPtr[theoraFrame.planes[0].stride+1]))<<3)&0x7f8U)|(((unsigned short)(*cbPtr))&0x0fU);
 				
-				ypcbcr[0]=ypPtr[1];
-				Video::ypcbcrToRgb(ypcbcr,resultPtr+3);
-				
-				ypcbcr[0]=ypPtr[theoraFrame.planes[0].stride];
-				Video::ypcbcrToRgb(ypcbcr,resultPtr-size[0]*3);
-				
-				ypcbcr[0]=ypPtr[theoraFrame.planes[0].stride+1];
-				Video::ypcbcrToRgb(ypcbcr,resultPtr-size[0]*3+3);
-				
-				/* Go to the next pixel: */
-				resultPtr+=2*3;
+				/* Go to the next pixel block: */
+				resultPtr+=2;
 				ypPtr+=2;
 				++cbPtr;
 				++crPtr;
 				}
 			
-			/* Go to the next row: */
-			resultRowPtr-=2*size[0]*3;
-			ypRowPtr+=2*theoraFrame.planes[0].stride;
+			/* Go to the next pixel block row: */
+			resultRowPtr+=size[0]*2;
+			ypRowPtr+=theoraFrame.planes[0].stride*2;
 			cbRowPtr+=theoraFrame.planes[1].stride;
 			crRowPtr+=theoraFrame.planes[2].stride;
 			}
@@ -178,29 +169,21 @@ FrameBuffer ColorFrameReader::readNextFrame(void)
 		size_t packetSize=source.read<unsigned int>();
 		source.skip<Misc::UInt8>(packetSize);
 		
-		/* Initialize the frame to 50% grey (why not?): */
-		unsigned char* resultPtr=static_cast<unsigned char*>(result.getBuffer());
+		/* Initialize the frame to all invalid pixels: */
+		unsigned short* resultPtr=static_cast<unsigned short*>(result.getBuffer());
 		for(unsigned int y=0;y<size[1];++y)
-			for(unsigned int x=0;x<size[0];++x,resultPtr+=3)
-				{
-				resultPtr[0]=(unsigned char)(128);
-				resultPtr[1]=(unsigned char)(128);
-				resultPtr[2]=(unsigned char)(128);
-				}
+			for(unsigned int x=0;x<size[0];++x,++resultPtr)
+				*resultPtr=0x07ffU;
 		
 		#endif
 		}
 	else
 		{
-		/* Initialize the frame to 50% grey (why not?): */
-		unsigned char* resultPtr=static_cast<unsigned char*>(result.getBuffer());
+		/* Initialize the frame to all invalid pixels: */
+		unsigned short* resultPtr=static_cast<unsigned short*>(result.getBuffer());
 		for(unsigned int y=0;y<size[1];++y)
-			for(unsigned int x=0;x<size[0];++x,resultPtr+=3)
-				{
-				resultPtr[0]=(unsigned char)(128);
-				resultPtr[1]=(unsigned char)(128);
-				resultPtr[2]=(unsigned char)(128);
-				}
+			for(unsigned int x=0;x<size[0];++x,++resultPtr)
+				*resultPtr=0x07ffU;
 		}
 	
 	return result;

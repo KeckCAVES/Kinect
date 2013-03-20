@@ -1,6 +1,6 @@
 /***********************************************************************
 DepthFrameWriter - Class to write compressed depth frames to a sink.
-Copyright (c) 2010-2011 Oliver Kreylos
+Copyright (c) 2010-2013 Oliver Kreylos
 
 This file is part of the Kinect 3D Video Capture Project (Kinect).
 
@@ -25,23 +25,20 @@ Software Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA
 
 #include <stddef.h>
 #include <Kinect/HilbertCurve.h>
+#include <Kinect/FrameWriter.h>
 
 /* Forward declarations: */
 namespace IO {
 class File;
 }
-namespace Kinect {
-class FrameBuffer;
-}
 
 namespace Kinect {
 
-class DepthFrameWriter
+class DepthFrameWriter:public FrameWriter
 	{
 	/* Elements: */
 	private:
 	IO::File& sink; // Data sink for the compressed depth frame stream
-	unsigned int size[2]; // Width and height of depth frames
 	HilbertCurve hilbertCurve; // Object to traverse depth frames in Hilbert curve order
 	static const unsigned int pixelDeltaNumCodes=32; // Number of codes for pixel deltas
 	static const unsigned int pixelDeltaCodes[pixelDeltaNumCodes][2]; // Huffman code array for pixel deltas
@@ -73,10 +70,10 @@ class DepthFrameWriter
 	/* Constructors and destructors: */
 	public:
 	DepthFrameWriter(IO::File& sSink,const unsigned int sSize[2]); // Creates a depth frame writer for the given sink and frame size
-	~DepthFrameWriter(void);
+	virtual ~DepthFrameWriter(void);
 	
-	/* Methods: */
-	size_t writeFrame(const FrameBuffer& frame); // Compresses and writes the given depth frame; returns compressed frame size in bytes
+	/* Methods from FrameWriter: */
+	virtual size_t writeFrame(const FrameBuffer& frame);
 	};
 
 }

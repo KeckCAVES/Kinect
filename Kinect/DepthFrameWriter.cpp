@@ -1,6 +1,6 @@
 /***********************************************************************
 DepthFrameWriter - Class to write compressed depth frames to a sink.
-Copyright (c) 2010-2011 Oliver Kreylos
+Copyright (c) 2010-2013 Oliver Kreylos
 
 This file is part of the Kinect 3D Video Capture Project (Kinect).
 
@@ -172,13 +172,10 @@ void DepthFrameWriter::flush(void)
 	}
 
 DepthFrameWriter::DepthFrameWriter(IO::File& sSink,const unsigned int sSize[2])
-	:sink(sSink),
+	:FrameWriter(sSize),
+	 sink(sSink),
 	 currentBits(0x0U),currentBitsLeft(32)
 	{
-	/* Copy the frame size: */
-	for(int i=0;i<2;++i)
-		size[i]=sSize[i];
-	
 	/* Create the Hilbert curve offset array: */
 	hilbertCurve.init(size);
 	

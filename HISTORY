@@ -80,3 +80,16 @@ Kinect-2.4:
 - Bumped Vrui version requirement to Vrui-2.6-001.
 - Added ability to record and play back synchronized audio in
   KinectViewer.
+
+Kinect-2.5:
+- Fixed installation path for make configuration file if INSTALLPREFIX
+  is specified. Pointed out by Braden Pellett.
+- Added initial support for lossy depth stream compression when writing
+  3D video to files or sending over a network. The current compression
+  method, using an unmodified Theora codec and bit-stuffing 11-bit raw
+  depth values into an 8-bit YpCbCr 4:2:0 frame, does not work.
+- Hopeful fix to get Kinect working on USB 3.0 bus.
+- Replaced previous per-pixel depth correction method with method based
+  on bivariate uniform non-rational B-splines.
+  - Depth correction can now be used in remote collaboration systems,
+    for improved alignment.

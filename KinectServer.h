@@ -1,7 +1,7 @@
 /***********************************************************************
 KinectServer - Server to stream 3D video data from one or more Kinect
 cameras to remote clients for tele-immersion.
-Copyright (c) 2010-2012 Oliver Kreylos
+Copyright (c) 2010-2013 Oliver Kreylos
 
 This file is part of the Kinect 3D Video Capture Project (Kinect).
 
@@ -34,8 +34,6 @@ Software Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA
 #include <Geometry/ProjectiveTransformation.h>
 #include <Kinect/FrameBuffer.h>
 #include <Kinect/Camera.h>
-#include <Kinect/DepthFrameWriter.h>
-#include <Kinect/ColorFrameWriter.h>
 
 /* Forward declarations: */
 class libusb_device;
@@ -47,6 +45,9 @@ class USBContext;
 }
 namespace Comm {
 class TCPPipe;
+}
+namespace Kinect {
+class FrameWriter;
 }
 
 class KinectServer
@@ -75,18 +76,20 @@ class KinectServer
 		/* Elements: */
 		public:
 		Kinect::Camera camera; // Camera generating the depth and color streams
-		
+		Kinect::FrameSource::DepthCorrection* depthCorrection; // Camera's depth correction parameters
+		Kinect::FrameSource::IntrinsicParameters ips; // Camera's intrinsic parameters
+		Kinect::FrameSource::ExtrinsicParameters eps; // Camera's extrinsic parameters
 		IO::VariableMemoryFile colorFile; // In-memory file to receive compressed color frame data
-		Kinect::ColorFrameWriter colorCompressor; // Compressor for color frames
+		Kinect::FrameWriter* colorCompressor; // Compressor for color frames
 		IO::VariableMemoryFile::BufferChain colorHeaders; // Write buffer containing the color compressor's header data
 		unsigned int colorFrameIndex; // Sequential frame index for color frames
 		Threads::TripleBuffer<CompressedFrame> colorFrames; // Triple buffer of compressed color frames
 		Threads::MutexCond& newColorFrameCond; // Condition variable to signal a new depth frame
 		bool hasSentColorFrame; // Flag whether the camera has sent a color frame as part of the current meta-frame
 		
-		Kinect::FrameBuffer depthCorrection; // Buffer containing per-pixel depth correction coefficients
 		IO::VariableMemoryFile depthFile; // In-memory file to receive compressed depth frame data
-		Kinect::DepthFrameWriter depthCompressor; // Compressor for depth frames
+		bool lossyDepthCompression; // Flag whether this camera streams lossy-compressed depth frames
+		Kinect::FrameWriter* depthCompressor; // Compressor for depth frames
 		IO::VariableMemoryFile::BufferChain depthHeaders; // Write buffer containing the depth compressor's header data
 		unsigned int depthFrameIndex; // Sequential frame index for depth frames
 		Threads::TripleBuffer<CompressedFrame> depthFrames; // Triple buffer of compressed depth frames
@@ -98,7 +101,7 @@ class KinectServer
 		void depthStreamingCallback(const Kinect::FrameBuffer& frame);
 		
 		/* Constructors and destructors: */
-		CameraState(libusb_device* sDevice,Threads::MutexCond& sNewColorFrameCond,Threads::MutexCond& sNewDepthFrameCond); // Creates a capture and compression state for the given Kinect camera device
+		CameraState(libusb_device* sDevice,bool sLossyDepthCompression,Threads::MutexCond& sNewColorFrameCond,Threads::MutexCond& sNewDepthFrameCond); // Creates a capture and compression state for the given Kinect camera device
 		~CameraState(void);
 		
 		/* Methods: */

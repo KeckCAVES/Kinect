@@ -1,6 +1,6 @@
 /***********************************************************************
 DepthCorrectionTool - Calibration tool for RawKinectViewer.
-Copyright (c) 2012 Oliver Kreylos
+Copyright (c) 2012-2013 Oliver Kreylos
 
 This file is part of the Kinect 3D Video Capture Project (Kinect).
 
@@ -54,7 +54,12 @@ class DepthCorrectionTool:public Vrui::Tool,public Vrui::Application::Tool<RawKi
 	/* Elements: */
 	static DepthCorrectionToolFactory* factory; // Pointer to the factory object for this class
 	
+	int degree; // Degree of B-splines approximating the depth correction offsets
+	int numSegments[2]; // Number of B-spline segments (horizontal and vertical) approximating the depth correction offsets
 	std::vector<DepthFrame> depthFrames; // List of extracted depth frames
+	
+	/* Private methods: */
+	void averageDepthFrameReady(int); // Callback called when an average depth frame has been collected
 	
 	/* Constructors and destructors: */
 	public:
