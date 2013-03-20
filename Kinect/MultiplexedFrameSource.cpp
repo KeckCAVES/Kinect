@@ -1,7 +1,7 @@
 /***********************************************************************
 MultiplexedFrameSource - Class to stream several pairs of color and
 depth frames from a single source file or pipe.
-Copyright (c) 2010-2012 Oliver Kreylos
+Copyright (c) 2010-2013 Oliver Kreylos
 
 This file is part of the Kinect 3D Video Capture Project (Kinect).
 
@@ -27,6 +27,9 @@ Software Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA
 #include <Misc/FunctionCalls.h>
 #include <Cluster/ClusterPipe.h>
 #include <Geometry/GeometryMarshallers.h>
+#include <Kinect/ColorFrameReader.h>
+#include <Kinect/DepthFrameReader.h>
+#include <Kinect/LossyDepthFrameReader.h>
 
 namespace Kinect {
 
@@ -36,8 +39,8 @@ Methods of class MultiplexedFrameSource::Stream:
 
 MultiplexedFrameSource::Stream::Stream(MultiplexedFrameSource* sOwner,unsigned int sIndex,IO::File& source)
 	:owner(sOwner),index(sIndex),
-	 colorStreamingCallback(0),
-	 depthStreamingCallback(0)
+	 depthCorrection(0),
+	 streaming(false),colorStreamingCallback(0),depthStreamingCallback(0)
 	{
 	/* Register this source with the stream multiplexer: */
 	{
@@ -49,19 +52,46 @@ MultiplexedFrameSource::Stream::Stream(MultiplexedFrameSource* sOwner,unsigned i
 	source.read<unsigned int>(streamFormatVersions,2);
 	
 	/* Check if the depth stream has per-pixel depth correction coefficients: */
-	if(streamFormatVersions[1]>=2&&source.read<char>()!=0)
+	if(streamFormatVersions[1]>=4)
 		{
-		/* Read the depth correction buffer: */
-		int size[2];
-		source.read<int>(size,2);
-		depthCorrection=FrameBuffer(size[0],size[1],size[1]*size[0]*2*sizeof(float));
-		source.read<float>(static_cast<float*>(depthCorrection.getBuffer()),size[1]*size[0]*2);
+		/* Read new B-spline based depth correction parameters: */
+		depthCorrection=new DepthCorrection(source);
 		}
+	else
+		{
+		if(streamFormatVersions[1]>=2&&source.read<char>()!=0)
+			{
+			/* Skip the depth correction buffer: */
+			int size[2];
+			source.read<int>(size,2);
+			source.skip<float>(size[1]*size[0]*2);
+			}
+		
+		/* Create a dummy depth correction object: */
+		int numSegments[2]={1,1};
+		depthCorrection=new DepthCorrection(0,numSegments);
+		}
+	
+	/* Check if the depth stream uses lossy compression: */
+	bool depthIsLossy=streamFormatVersions[1]>=3&&source.read<unsigned char>()!=0;
 	
 	/* Read the intrinsic and extrinsic camera parameters from the source: */
 	ips.colorProjection=Misc::Marshaller<IntrinsicParameters::PTransform>::read(source);
 	ips.depthProjection=Misc::Marshaller<IntrinsicParameters::PTransform>::read(source);
 	eps=Misc::Marshaller<ExtrinsicParameters>::read(source);
+	
+	/* Create the frame readers: */
+	owner->colorFrameReaders[index]=new ColorFrameReader(source);
+	if(depthIsLossy)
+		{
+		#if VIDEO_CONFIG_HAVE_THEORA
+		owner->depthFrameReaders[index]=new LossyDepthFrameReader(source);
+		#else
+		Misc::throwStdErr("Kinect::MultiplexedFrameSource::Stream::Stream: Lossy depth compression not supported due to lack of Theora library");
+		#endif
+		}
+	else
+		owner->depthFrameReaders[index]=new DepthFrameReader(source);
 	}
 
 MultiplexedFrameSource::Stream::~Stream(void)
@@ -75,6 +105,9 @@ MultiplexedFrameSource::Stream::~Stream(void)
 	delete depthStreamingCallback;
 	}
 	
+	/* Delete the depth correction object: */
+	delete depthCorrection;
+	
 	/* Remove this stream from the owner's stream array: */
 	bool lastOneOut;
 	{
@@ -84,38 +117,23 @@ MultiplexedFrameSource::Stream::~Stream(void)
 	lastOneOut=owner->numStreamsAlive==0;
 	}
 	
-	/* Destroy theowner if this was the last stream to die: */
+	/* Destroy the owner if this was the last stream to die: */
 	if(lastOneOut)
 		delete owner;
 	}
 
-bool MultiplexedFrameSource::Stream::hasDepthCorrectionCoefficients(void) const
+FrameSource::DepthCorrection* MultiplexedFrameSource::Stream::getDepthCorrectionParameters(void)
 	{
-	/* Check if the depth correction buffer has valid data: */
-	return depthCorrection.getBuffer()!=0;
+	/* Clone and return the depth correction object: */
+	return new DepthCorrection(*depthCorrection);
 	}
 
-FrameBuffer MultiplexedFrameSource::Stream::getDepthCorrectionCoefficients(void) const
-	{
-	/* Check if the depth correction buffer has valid data: */
-	if(depthCorrection.getBuffer()!=0)
-		{
-		/* Return the depth correction buffer: */
-		return depthCorrection;
-		}
-	else
-		{
-		/* Return an identity depth correction: */
-		return FrameSource::getDepthCorrectionCoefficients();
-		}
-	}
-
-FrameSource::IntrinsicParameters MultiplexedFrameSource::Stream::getIntrinsicParameters(void) const
+FrameSource::IntrinsicParameters MultiplexedFrameSource::Stream::getIntrinsicParameters(void)
 	{
 	return ips;
 	}
 
-FrameSource::ExtrinsicParameters MultiplexedFrameSource::Stream::getExtrinsicParameters(void) const
+FrameSource::ExtrinsicParameters MultiplexedFrameSource::Stream::getExtrinsicParameters(void)
 	{
 	return eps;
 	}
@@ -264,8 +282,8 @@ MultiplexedFrameSource::MultiplexedFrameSource(Comm::PipePtr sPipe)
 	
 	/* Initialize all streams: */
 	numStreams=pipe->read<unsigned int>();
-	colorFrameReaders=new ColorFrameReader*[numStreams];
-	depthFrameReaders=new DepthFrameReader*[numStreams];
+	colorFrameReaders=new FrameReader*[numStreams];
+	depthFrameReaders=new FrameReader*[numStreams];
 	streams=new Stream*[numStreams];
 	for(unsigned int i=0;i<numStreams;++i)
 		{
@@ -278,8 +296,6 @@ MultiplexedFrameSource::MultiplexedFrameSource(Comm::PipePtr sPipe)
 		{
 		try
 			{
-			colorFrameReaders[i]=new ColorFrameReader(*pipe);
-			depthFrameReaders[i]=new DepthFrameReader(*pipe);
 			streams[i]=new Stream(this,i,*pipe);
 			}
 		catch(std::runtime_error err)

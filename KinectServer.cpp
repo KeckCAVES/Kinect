@@ -1,7 +1,7 @@
 /***********************************************************************
 KinectServer - Server to stream 3D video data from one or more Kinect
 cameras to remote clients for tele-immersion.
-Copyright (c) 2010-2012 Oliver Kreylos
+Copyright (c) 2010-2013 Oliver Kreylos
 
 This file is part of the Kinect 3D Video Capture Project (Kinect).
 
@@ -34,6 +34,10 @@ Software Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA
 #include <IO/File.h>
 #include <Comm/TCPPipe.h>
 #include <Geometry/GeometryMarshallers.h>
+#include <Video/Config.h>
+#include <Kinect/ColorFrameWriter.h>
+#include <Kinect/DepthFrameWriter.h>
+#include <Kinect/LossyDepthFrameWriter.h>
 
 /******************************************
 Methods of class KinectServer::CameraState:
@@ -42,7 +46,7 @@ Methods of class KinectServer::CameraState:
 void KinectServer::CameraState::colorStreamingCallback(const Kinect::FrameBuffer& frame)
 	{
 	/* Pass the frame to the color compressor: */
-	colorCompressor.writeFrame(frame);
+	colorCompressor->writeFrame(frame);
 	
 	/* Store the compressed frame data in the color frame triple buffer: */
 	CompressedFrame& compressedFrame=colorFrames.startNewValue();
@@ -57,7 +61,7 @@ void KinectServer::CameraState::colorStreamingCallback(const Kinect::FrameBuffer
 void KinectServer::CameraState::depthStreamingCallback(const Kinect::FrameBuffer& frame)
 	{
 	/* Pass the frame to the depth compressor: */
-	depthCompressor.writeFrame(frame);
+	depthCompressor->writeFrame(frame);
 	
 	/* Store the compressed frame data in the depth frame triple buffer: */
 	CompressedFrame& compressedFrame=depthFrames.startNewValue();
@@ -69,21 +73,33 @@ void KinectServer::CameraState::depthStreamingCallback(const Kinect::FrameBuffer
 	++depthFrameIndex;
 	}
 
-KinectServer::CameraState::CameraState(libusb_device* sDevice,Threads::MutexCond& sNewColorFrameCond,Threads::MutexCond& sNewDepthFrameCond)
+KinectServer::CameraState::CameraState(libusb_device* sDevice,bool sLossyDepthCompression,Threads::MutexCond& sNewColorFrameCond,Threads::MutexCond& sNewDepthFrameCond)
 	:camera(sDevice),
-	 colorFile(16384),colorCompressor(colorFile,camera.getActualFrameSize(Kinect::FrameSource::COLOR)),
+	 depthCorrection(0),
+	 colorFile(16384),colorCompressor(0),
 	 colorFrameIndex(0),newColorFrameCond(sNewColorFrameCond),hasSentColorFrame(false),
-	 depthFile(16384),depthCompressor(depthFile,camera.getActualFrameSize(Kinect::FrameSource::DEPTH)),
+	 depthFile(16384),lossyDepthCompression(sLossyDepthCompression),depthCompressor(0),
 	 depthFrameIndex(0),newDepthFrameCond(sNewDepthFrameCond),hasSentDepthFrame(false)
 	{
-	/* Check if the camera has per-pixel depth correction coefficients: */
-	if(camera.hasDepthCorrectionCoefficients())
-		{
-		/* Get the per-pixel depth correction coefficients: */
-		depthCorrection=camera.getDepthCorrectionCoefficients();
-		}
+	/* Retrieve the camera's depth correction parameters: */
+	depthCorrection=camera.getDepthCorrectionParameters();
 	
-	/* Extract the depth and color compressors' stream header data: */
+	/* Retrieve the camera's intrinsic and extrinsic parameters: */
+	ips=camera.getIntrinsicParameters();
+	eps=camera.getExtrinsicParameters();
+	
+	/* Create the color and depth frame compressors: */
+	colorCompressor=new Kinect::ColorFrameWriter(colorFile,camera.getActualFrameSize(Kinect::FrameSource::COLOR));
+	#if VIDEO_CONFIG_HAVE_THEORA
+	if(lossyDepthCompression)
+		depthCompressor=new Kinect::LossyDepthFrameWriter(depthFile,camera.getActualFrameSize(Kinect::FrameSource::DEPTH));
+	else
+		depthCompressor=new Kinect::DepthFrameWriter(depthFile,camera.getActualFrameSize(Kinect::FrameSource::DEPTH));
+	#else
+	depthCompressor=new Kinect::DepthFrameWriter(depthFile,camera.getActualFrameSize(Kinect::FrameSource::DEPTH));
+	#endif
+	
+	/* Extract the color and depth compressors' stream header data: */
 	colorFile.storeBuffers(colorHeaders);
 	depthFile.storeBuffers(depthHeaders);
 	}
@@ -92,6 +108,13 @@ KinectServer::CameraState::~CameraState(void)
 	{
 	/* Stop streaming: */
 	camera.stopStreaming();
+	
+	/* Destroy the color and depth compressors: */
+	delete colorCompressor;
+	delete depthCompressor;
+	
+	/* Destroy the depth correction parameters: */
+	delete depthCorrection;
 	}
 
 void KinectServer::CameraState::startStreaming(void)
@@ -102,33 +125,28 @@ void KinectServer::CameraState::startStreaming(void)
 
 void KinectServer::CameraState::writeHeaders(IO::File& sink) const
 	{
-	/* Write the color and depth compression headers: */
-	colorHeaders.writeToSink(sink);
-	depthHeaders.writeToSink(sink);
-	
 	/* Write the stream format versions: */
 	sink.write<unsigned int>(1);
-	sink.write<unsigned int>(2);
+	sink.write<unsigned int>(4);
 	
-	/* Check if the camera has per-pixel depth correction: */
-	if(depthCorrection.getBuffer()!=0)
-		{
-		/* Write the per-pixel depth correction parameters: */
-		sink.write<char>(1);
-		sink.write<int>(depthCorrection.getSize(),2);
-		sink.write<float>(static_cast<const float*>(depthCorrection.getBuffer()),depthCorrection.getSize(1)*depthCorrection.getSize(0)*2);
-		}
-	else
-		sink.write<char>(0);
+	/* Write the camera's depth correction parameters: */
+	depthCorrection->write(sink);
 	
-	/* Get the camera's intrinsic and extrinsic parameters: */
-	Kinect::FrameSource::IntrinsicParameters ips=camera.getIntrinsicParameters();
-	Kinect::FrameSource::ExtrinsicParameters eps=camera.getExtrinsicParameters();
+	/* Check whether the depth stream uses lossy compression: */
+	#if VIDEO_CONFIG_HAVE_THEORA
+	sink.write<unsigned char>(lossyDepthCompression?1:0);
+	#else
+	sink.write<unsigned char>(0);
+	#endif
 	
-	/* Write the camera parameters to the sink: */
+	/* Write the camera's intrinsic and extrinsic parameters to the sink: */
 	Misc::Marshaller<Kinect::FrameSource::IntrinsicParameters::PTransform>::write(ips.colorProjection,sink);
 	Misc::Marshaller<Kinect::FrameSource::IntrinsicParameters::PTransform>::write(ips.depthProjection,sink);
 	Misc::Marshaller<Kinect::FrameSource::ExtrinsicParameters>::write(eps,sink);
+	
+	/* Write the color and depth compression headers: */
+	colorHeaders.writeToSink(sink);
+	depthHeaders.writeToSink(sink);
 	}
 
 /*****************************
@@ -412,7 +430,7 @@ KinectServer::KinectServer(USB::Context& usbContext,Misc::ConfigurationFileSecti
 			#ifdef VERBOSE
 			std::cout<<"KinectServer: Creating streamer for camera with serial number "<<serialNumber<<std::endl;
 			#endif
-			cameraStates[numFoundCameras]=new CameraState(usbDevices.getDevice(0x045eU,0x02aeU,j),newFrameCond,newFrameCond);
+			cameraStates[numFoundCameras]=new CameraState(usbDevices.getDevice(0x045eU,0x02aeU,j),cameraSection.retrieveValue<bool>("./lossyDepthCompression",false),newFrameCond,newFrameCond);
 			
 			/* Check if camera is to remove background: */
 			if(cameraSection.retrieveValue<bool>("./removeBackground",true))

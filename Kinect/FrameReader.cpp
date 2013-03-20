@@ -1,6 +1,7 @@
 /***********************************************************************
-ColorFrameReader - Class to read compressed color frames from a source.
-Copyright (c) 2010-2013 Oliver Kreylos
+FrameReader - Abstract base class to read color or depth frames from a
+source.
+Copyright (c) 2013 Oliver Kreylos
 
 This file is part of the Kinect 3D Video Capture Project (Kinect).
 
@@ -20,41 +21,16 @@ Software Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA
 02111-1307 USA
 ***********************************************************************/
 
-#ifndef KINECT_COLORFRAMEREADER_INCLUDED
-#define KINECT_COLORFRAMEREADER_INCLUDED
-
-#include <Video/Config.h>
-#if VIDEO_CONFIG_HAVE_THEORA
-#include <Video/TheoraDecoder.h>
-#endif
 #include <Kinect/FrameReader.h>
-
-/* Forward declarations: */
-namespace IO {
-class File;
-}
 
 namespace Kinect {
 
-class ColorFrameReader:public FrameReader
+/****************************
+Methods of class FrameReader:
+****************************/
+
+FrameReader::~FrameReader(void)
 	{
-	/* Elements: */
-	private:
-	IO::File& source; // Data source for compressed color frames
-	bool sourceHasTheora; // Flag whether the source actually contains color frames
-	#if VIDEO_CONFIG_HAVE_THEORA
-	Video::TheoraDecoder theoraDecoder; // Object to decode the Theora-encoded color frame stream
-	#endif
-	
-	/* Constructors and destructors: */
-	public:
-	ColorFrameReader(IO::File& sSource); // Creates a color frame reader for the given source
-	virtual ~ColorFrameReader(void);
-	
-	/* Methods from FrameReader: */
-	virtual FrameBuffer readNextFrame(void);
-	};
+	}
 
 }
-
-#endif

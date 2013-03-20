@@ -1,6 +1,7 @@
 /***********************************************************************
-ColorFrameWriter - Class to write compressed color frames to a sink.
-Copyright (c) 2010-2013 Oliver Kreylos
+LossyDepthFrameWriter - Class to write lossily compressed depth frames
+to a sink.
+Copyright (c) 2013 Oliver Kreylos
 
 This file is part of the Kinect 3D Video Capture Project (Kinect).
 
@@ -20,7 +21,7 @@ Software Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA
 02111-1307 USA
 ***********************************************************************/
 
-#include <Kinect/ColorFrameWriter.h>
+#include <Kinect/LossyDepthFrameWriter.h>
 
 #include <Misc/ThrowStdErr.h>
 #include <IO/File.h>
@@ -28,7 +29,6 @@ Software Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA
 #include <Video/Config.h>
 #if VIDEO_CONFIG_HAVE_THEORA
 #include <Video/FrameBuffer.h>
-#include <Video/ImageExtractorRGB8.h>
 #include <Video/OggPage.h>
 #include <Video/TheoraInfo.h>
 #include <Video/TheoraComment.h>
@@ -37,17 +37,13 @@ Software Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA
 
 namespace Kinect {
 
-/*********************************
-Methods of class ColorFrameWriter:
-*********************************/
+/**************************************
+Methods of class LossyDepthFrameWriter:
+**************************************/
 
-ColorFrameWriter::ColorFrameWriter(IO::File& sSink,const unsigned int sSize[2])
+LossyDepthFrameWriter::LossyDepthFrameWriter(IO::File& sSink,const unsigned int sSize[2])
 	:FrameWriter(sSize),
 	 sink(sSink)
-	 #if VIDEO_CONFIG_HAVE_THEORA
-	 ,
-	 imageExtractor(0)
-	 #endif
 	{
 	/* Write the frame size to the sink: */
 	sink.write(size,2);
@@ -68,18 +64,17 @@ ColorFrameWriter::ColorFrameWriter(IO::File& sSink,const unsigned int sSize[2])
 	theoraInfo.aspect_denominator=1;
 	theoraEncoder.init(theoraInfo);
 	if(!theoraEncoder.isValid())
-		Misc::throwStdErr("ColorFrameWriter::ColorFrameWriter: Error initializing Theora encoder");
+		Misc::throwStdErr("LossyDepthFrameWriter::LossyDepthFrameWriter: Error initializing Theora encoder");
 	
 	/* Set the encoder to maximum speed: */
 	theoraEncoder.setSpeedLevel(theoraEncoder.getMaxSpeedLevel());
 	
-	/* Create the frame converter structures: */
-	imageExtractor=new Video::ImageExtractorRGB8(size);
+	/* Create the frame converter structure: */
 	theoraFrame.init420(theoraInfo);
 	
 	/* Set up a comment structure: */
 	Video::TheoraComment comments;
-	comments.setVendorString("Kinect color stream");
+	comments.setVendorString("Kinect lossy depth stream");
 	
 	/* Write the Theora stream headers into a temporary buffer to calculate their size before writing them to the sink: */
 	IO::VariableMemoryFile theoraHeaders;
@@ -97,14 +92,11 @@ ColorFrameWriter::ColorFrameWriter(IO::File& sSink,const unsigned int sSize[2])
 	#endif
 	}
 
-ColorFrameWriter::~ColorFrameWriter(void)
+LossyDepthFrameWriter::~LossyDepthFrameWriter(void)
 	{
-	#if VIDEO_CONFIG_HAVE_THEORA
-	delete imageExtractor;
-	#endif
 	}
 
-size_t ColorFrameWriter::writeFrame(const FrameBuffer& frame)
+size_t LossyDepthFrameWriter::writeFrame(const FrameBuffer& frame)
 	{
 	size_t result=0;
 	
@@ -114,10 +106,40 @@ size_t ColorFrameWriter::writeFrame(const FrameBuffer& frame)
 	
 	#if VIDEO_CONFIG_HAVE_THEORA
 	
-	/* Convert the new raw RGB frame to Y'CbCr 4:2:0: */
-	Video::FrameBuffer tempFrame;
-	tempFrame.start=const_cast<unsigned char*>(static_cast<const unsigned char*>(frame.getBuffer())); // It's OK
-	imageExtractor->extractYpCbCr420(&tempFrame,theoraFrame.planes[0].data,theoraFrame.planes[0].stride,theoraFrame.planes[1].data,theoraFrame.planes[1].stride,theoraFrame.planes[2].data,theoraFrame.planes[2].stride);
+	/* Convert the new raw depth frame to Y'CbCr 4:2:0 by processing pixels in 2x2 blocks: */
+	const unsigned short* fRowPtr=static_cast<const unsigned short*>(frame.getBuffer());
+	unsigned char* ypRowPtr=theoraFrame.planes[0].data;
+	unsigned char* cbRowPtr=theoraFrame.planes[1].data;
+	unsigned char* crRowPtr=theoraFrame.planes[2].data;
+	for(unsigned int y=0;y<size[1];y+=2)
+		{
+		const unsigned short* fPtr=fRowPtr;
+		unsigned char* ypPtr=ypRowPtr;
+		unsigned char* cbPtr=cbRowPtr;
+		unsigned char* crPtr=crRowPtr;
+		for(unsigned int x=0;x<size[0];x+=2)
+			{
+			/* Distribute the block's 4 11-bit depth values among the 4 8-bit yp values and the 8-bit cb and cr values: */
+			ypPtr[0]=(unsigned char)((fPtr[0]>>3)&0xfeU);
+			ypPtr[1]=(unsigned char)((fPtr[1]>>3)&0xfeU);
+			ypPtr[theoraFrame.planes[0].stride]=(unsigned char)((fPtr[size[0]]>>3)&0xfeU);
+			ypPtr[theoraFrame.planes[0].stride+1]=(unsigned char)((fPtr[size[0]+1]>>3)&0xfeU);
+			*cbPtr=(unsigned char)((fPtr[0]<<4)|(fPtr[1]&0x0fU));
+			*crPtr=(unsigned char)((fPtr[size[0]]<<4)|(fPtr[size[0]+1]&0x0fU));
+			
+			/* Go to the next pixel block: */
+			fPtr+=2;
+			ypPtr+=2;
+			++cbPtr;
+			++crPtr;
+			}
+		
+		/* Go to the next pixel block row: */
+		fRowPtr+=size[0]*2;
+		ypRowPtr+=theoraFrame.planes[0].stride*2;
+		cbRowPtr+=theoraFrame.planes[1].stride;
+		crRowPtr+=theoraFrame.planes[2].stride;
+		}
 	
 	/* Feed the converted Y'CbCr 4:2:0 frame to the Theora encoder: */
 	theoraEncoder.encodeFrame(theoraFrame);

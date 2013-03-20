@@ -1,12 +1,12 @@
 ========================================================================
-README for Kinect 3D Video Capture Project version 2.4
-Copyright (c) 2010-2012 Oliver Kreylos
+README for Kinect 3D Video Capture Project version 2.5
+Copyright (c) 2010-2013 Oliver Kreylos
 ========================================================================
 
 Requirements
 ============
 
-This software requires the Vrui VR toolkit, version 2.6 build 001 or
+This software requires the Vrui VR toolkit, version 2.7 build 001 or
 newer. It also requires libusb version 1.0, and that Vrui was configured
 with support for libusb prior to its installation. This software can
 optionally create Kinect 3D video streaming plug-ins for Vrui's
@@ -36,8 +36,8 @@ instructions need to be changed.
 2. Change into the Kinect 3D Video Capture Project's base directory:
    > cd Kinect-<version>
 
-3. If the Vrui version installed in step 0 was not 2.6, or Vrui's
-   installation directory was changed from the default of ~/Vrui-2.6,
+3. If the Vrui version installed in step 0 was not 2.7, or Vrui's
+   installation directory was changed from the default of ~/Vrui-2.7,
    adapt the makefile using a text editor. Change the value of
    VRUI_MAKEDIR close to the beginning of the file as follows:
    VRUI_MAKEDIR := <Vrui install dir>/share/make
@@ -112,7 +112,14 @@ RawKinectViewer, but the default grid layout has 7x5 tiles of 3.5"x3.5"
 each. This leads to an overall target size of 24.5"x17.5", which is just
 the right size to cover the Kinect's full viewing range.
 
-This is the calibration procedure for a Kinect:
+The following is the intrinsic calibration procedure for a Kinect. There
+are two tutorial videos on YouTube:
+* http://www.youtube.com/watch?v=Qo05LVxdlfo explains steps 0 to 9 in
+  the following procedure.
+* http://www.youtube.com/watch?v=VQh4joyZwx8 explains step 10 in the
+  following procedure.
+
+These are the steps:
 
 0. Prepare calibration target
 
@@ -169,6 +176,9 @@ This is the calibration procedure for a Kinect:
     that measurements inside KinectViewer will be reported in
     centimeters.
 
+There is a complementary write-up of the calibration procedure at
+http://doc-ok.org/?p=289
+
 Recording 3D Movies
 ===================
 
@@ -193,8 +203,8 @@ Merging 3D Facades from Multiple Kinects
 
 To merge the 3D reconstructions of multiple Kinect cameras, first
 intrinsically calibrate each one using RawKinectViewer, as described
-above and shown in the video. Then extrinsically calibrate all Kinect
-devices with respect to an arbitrarily chosen world coordinate system:
+above and shown in the videos. Then extrinsically calibrate all Kinect
+devices with respect to an arbitrarily chosen world coordinate system.
 
 1. Place calibration target into field of view of all Kinect devices to
    be calibrated (use RawKinectViewer on each to check).
@@ -229,7 +239,9 @@ devices with respect to an arbitrarily chosen world coordinate system:
 
    4c. Paste the final best fitting transform displayed by AlignPoints
        (everything after the "Best transformation:" header) into a
-       ProjectorTransform-<serial number>.txt file.
+       ExtrinsicParameters-<serial number>.txt file in the Kinect
+       package's configuration directory (Kinect-<version> in the Vrui
+       installation's etc directory).
 
 5. Run KinectViewer on all Kinect devices. This will show all individual
    3D video streams matching more or less seamlessly, depending on how
@@ -263,3 +275,6 @@ size of 3" (a 5x4 grid has 4x3 interior corners):
 
 The resulting world space will use whatever units were used to define
 the target points; in the example above, world space will use inches.
+
+There is a complementary write-up of the calibration procedure at
+http://doc-ok.org/?p=295

@@ -1,7 +1,7 @@
 /***********************************************************************
 DepthFrameReader - Class to read compressed depth frames from a source,
 and pass decompressed time-stamped depth frames to a client.
-Copyright (c) 2010-2011 Oliver Kreylos
+Copyright (c) 2010-2013 Oliver Kreylos
 
 This file is part of the Kinect 3D Video Capture Project (Kinect).
 
@@ -26,18 +26,16 @@ Software Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA
 
 #include <stddef.h>
 #include <Kinect/HilbertCurve.h>
+#include <Kinect/FrameReader.h>
 
 /* Forward declarations: */
 namespace IO {
 class File;
 }
-namespace Kinect {
-class FrameBuffer;
-}
 
 namespace Kinect {
 
-class DepthFrameReader
+class DepthFrameReader:public FrameReader
 	{
 	/* Embedded classes: */
 	private:
@@ -52,7 +50,6 @@ class DepthFrameReader
 	/* Elements: */
 	private:
 	IO::File& source; // Data source for compressed depth frames
-	unsigned int size[2]; // Width and height of depth frames
 	HilbertCurve hilbertCurve; // Object to traverse depth frames in Hilbert curve order
 	unsigned int pixelDeltaNumLeaves; // Number of leaves in the pixel delta Huffman tree
 	HuffmanNode* pixelDeltaNodes; // Node array of the pixel delta Huffman tree
@@ -83,14 +80,10 @@ class DepthFrameReader
 	/* Constructors and destructors: */
 	public:
 	DepthFrameReader(IO::File& sSource); // Creates a depth frame reader associated with the given data source
-	~DepthFrameReader(void);
+	virtual ~DepthFrameReader(void);
 	
-	/* Methods: */
-	const unsigned int* getSize(void) const // Returns the frame size
-		{
-		return size;
-		}
-	FrameBuffer readNextFrame(void); // Reads, decompresses, and returns the next depth frame
+	/* Methods from FrameReader: */
+	virtual FrameBuffer readNextFrame(void);
 	};
 
 }

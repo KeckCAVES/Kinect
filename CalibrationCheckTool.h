@@ -1,6 +1,7 @@
 /***********************************************************************
-PlaneTool - Calibration tool for RawKinectViewer.
-Copyright (c) 2012-2013 Oliver Kreylos
+CalibrationCheckTool - Tool to check the calibration between depth and
+color camera inside RawKinectViewer.
+Copyright (c) 2013 Oliver Kreylos
 
 This file is part of the Kinect 3D Video Capture Project (Kinect).
 
@@ -20,10 +21,14 @@ Software Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA
 02111-1307 USA
 ***********************************************************************/
 
-#ifndef PLANETOOL_INCLUDED
-#define PLANETOOL_INCLUDED
+#ifndef CALIBRATIONCHECKTOOL_INCLUDED
+#define CALIBRATIONCHECKTOOL_INCLUDED
 
+#include <vector>
 #include <Geometry/Point.h>
+#include <Geometry/Vector.h>
+#include <Geometry/Plane.h>
+#include <Geometry/ProjectiveTransformation.h>
 #include <Vrui/Tool.h>
 #include <Vrui/GenericToolFactory.h>
 #include <Vrui/Application.h>
@@ -31,32 +36,36 @@ Software Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA
 /* Forward declarations: */
 class RawKinectViewer;
 
-class PlaneTool;
-typedef Vrui::GenericToolFactory<PlaneTool> PlaneToolFactory;
+class CalibrationCheckTool;
+typedef Vrui::GenericToolFactory<CalibrationCheckTool> CalibrationCheckToolFactory;
 
-class PlaneTool:public Vrui::Tool,public Vrui::Application::Tool<RawKinectViewer>
+class CalibrationCheckTool:public Vrui::Tool,public Vrui::Application::Tool<RawKinectViewer>
 	{
-	friend class Vrui::GenericToolFactory<PlaneTool>;
+	friend class Vrui::GenericToolFactory<CalibrationCheckTool>;
 	
 	/* Embedded classes: */
 	private:
-	typedef Geometry::Point<double,2> Point;
+	typedef Geometry::Point<double,2> Point2; // Type for 2D points
 	
 	/* Elements: */
 	private:
-	static PlaneToolFactory* factory; // Pointer to the factory object for this class
+	static CalibrationCheckToolFactory* factory; // Pointer to the factory object for this class
 	
-	bool dragging; // Flag whether the tool is currently dragging a rectangle
-	Point p0; // The rectangle's initial corner
-	Point p1; // The rectangle's dragged corner
+	double dtcOffset,dtcScale; // Offset and scale factors for the depth to displacement function
+	Point2* depthToColor; // Tabulation of the non-linear depth to color image mapping function
+	int rowOffset; // Row index offset from depth to color frame
+	bool haveDepthPoint; // Flag if the last selected depth image point is valid
+	Point2 depthPoint; // Last selected depth-image point
+	Point2 colorPoint; // Color-image point to which the last selected depth point is matched
 	
 	/* Constructors and destructors: */
 	public:
-	static PlaneToolFactory* initClass(Vrui::ToolManager& toolManager);
-	PlaneTool(const Vrui::ToolFactory* factory,const Vrui::ToolInputAssignment& inputAssignment);
-	virtual ~PlaneTool(void);
+	static CalibrationCheckToolFactory* initClass(Vrui::ToolManager& toolManager);
+	CalibrationCheckTool(const Vrui::ToolFactory* factory,const Vrui::ToolInputAssignment& inputAssignment);
+	virtual ~CalibrationCheckTool(void);
 	
 	/* Methods from class Vrui::Tool: */
+	virtual void initialize(void);
 	virtual const Vrui::ToolFactory* getFactory(void) const;
 	virtual void buttonCallback(int buttonSlotIndex,Vrui::InputDevice::ButtonCallbackData* cbData);
 	virtual void frame(void);
