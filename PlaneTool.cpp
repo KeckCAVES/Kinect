@@ -1,6 +1,6 @@
 /***********************************************************************
 PlaneTool - Calibration tool for RawKinectViewer.
-Copyright (c) 2012 Oliver Kreylos
+Copyright (c) 2012-2013 Oliver Kreylos
 
 This file is part of the Kinect 3D Video Capture Project (Kinect).
 
@@ -114,36 +114,18 @@ void PlaneTool::buttonCallback(int buttonSlotIndex,Vrui::InputDevice::ButtonCall
 		const float* afdRow=application->averageFrameDepth+min[1]*application->depthFrameSize[0];
 		const float* affRow=application->averageFrameForeground+min[1]*application->depthFrameSize[0];
 		float foregroundCutoff=float(application->averageNumFrames)*0.5f;
-		if(application->hasDepthCorrection)
+		const RawKinectViewer::PixelCorrection* dcRow=application->depthCorrection+min[1]*application->depthFrameSize[0];
+		for(int y=min[1];y<max[1];++y,afdRow+=application->depthFrameSize[0],affRow+=application->depthFrameSize[0],dcRow+=application->depthFrameSize[0])
 			{
-			const Kinect::FrameSource::PixelDepthCorrection* pdcRow=static_cast<const Kinect::FrameSource::PixelDepthCorrection*>(application->depthCorrection.getBuffer())+min[1]*application->depthFrameSize[0];;
-			for(int y=min[1];y<max[1];++y,afdRow+=application->depthFrameSize[0],affRow+=application->depthFrameSize[0],pdcRow+=application->depthFrameSize[0])
+			double dy=double(y)+0.5;
+			const float* afdPtr=afdRow+min[0];
+			const float* affPtr=affRow+min[0];
+			const RawKinectViewer::PixelCorrection* dcPtr=dcRow+min[0];
+			for(int x=min[0];x<max[0];++x,++afdPtr,++affPtr,++dcPtr)
 				{
-				double dy=double(y)+0.5;
-				const float* afdPtr=afdRow+min[0];
-				const float* affPtr=affRow+min[0];
-				const Kinect::FrameSource::PixelDepthCorrection* pdcPtr=pdcRow+min[0];
-				for(int x=min[0];x<max[0];++x,++afdPtr,++affPtr,++pdcPtr)
-					{
-					double dx=double(x)+0.5;
-					if(*affPtr>=foregroundCutoff)
-						pca.accumulatePoint(PPoint(dx,dy,((*afdPtr)/(*affPtr))*pdcPtr->scale+pdcPtr->offset));
-					}
-				}
-			}
-		else
-			{
-			for(int y=min[1];y<max[1];++y,afdRow+=application->depthFrameSize[0],affRow+=application->depthFrameSize[0])
-				{
-				double dy=double(y)+0.5;
-				const float* afdPtr=afdRow+min[0];
-				const float* affPtr=affRow+min[0];
-				for(int x=min[0];x<max[0];++x,++afdPtr,++affPtr)
-					{
-					double dx=double(x)+0.5;
-					if(*affPtr>=foregroundCutoff)
-						pca.accumulatePoint(PPoint(dx,dy,(*afdPtr)/(*affPtr)));
-					}
+				double dx=double(x)+0.5;
+				if(*affPtr>=foregroundCutoff)
+					pca.accumulatePoint(PPoint(dx,dy,dcPtr->correct((*afdPtr)/(*affPtr))));
 				}
 			}
 		

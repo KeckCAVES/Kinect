@@ -1,7 +1,7 @@
 /***********************************************************************
 RawKinectViewer - Simple application to view color and depth images
 captured from a Kinect device.
-Copyright (c) 2010-2012 Oliver Kreylos
+Copyright (c) 2010-2013 Oliver Kreylos
 
 This file is part of the Kinect 3D Video Capture Project (Kinect).
 
@@ -51,6 +51,7 @@ Software Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA
 #include "DepthCorrectionTool.h"
 #include "GridTool.h"
 #include "PlaneTool.h"
+#include "CalibrationCheckTool.h"
 
 namespace {
 
@@ -196,6 +197,44 @@ void RawKinectViewer::depthStreamingCallback(const Kinect::FrameBuffer& frameBuf
 		}
 	}
 
+void RawKinectViewer::requestAverageFrame(RawKinectViewer::AverageFrameReadyCallback* callback)
+	{
+	/* Check if there already is an average frame: */
+	if(averageFrameValid)
+		{
+		/* Just call the callback immediately and forget about it: */
+		if(callback!=0)
+			{
+			(*callback)(0);
+			delete callback;
+			}
+		}
+	else
+		{
+		/* Check if there is already an average frame capture underway: */
+		if(averageFrameCounter==0)
+			{
+			/* Start averaging frames: */
+			float* afdPtr=averageFrameDepth;
+			float* affPtr=averageFrameForeground;
+			for(unsigned int y=0;y<depthFrameSize[1];++y)
+				for(unsigned int x=0;x<depthFrameSize[0];++x,++afdPtr,++affPtr)
+					{
+					*afdPtr=0.0f;
+					*affPtr=0.0f;
+					}
+			averageFrameCounter=averageNumFrames;
+			
+			/* Show a progress dialog: */
+			Vrui::popupPrimaryWidget(averageDepthFrameDialog);
+			}
+		
+		/* Add the callback to the callback list: */
+		if(callback!=0)
+			averageFrameReadyCallbacks.push_back(callback);
+		}
+	}
+
 void RawKinectViewer::locatorButtonPressCallback(Vrui::LocatorTool::ButtonPressCallbackData* cbData)
 	{
 	Vrui::Point pos=cbData->currentTransformation.getOrigin();
@@ -242,26 +281,16 @@ void RawKinectViewer::removeBackgroundCallback(GLMotif::ToggleButton::ValueChang
 
 void RawKinectViewer::averageFramesCallback(GLMotif::ToggleButton::ValueChangedCallbackData* cbData)
 	{
+	showAverageFrame=cbData->set;
 	if(cbData->set)
 		{
-		/* Start averaging frames: */
-		float* afdPtr=averageFrameDepth;
-		float* affPtr=averageFrameForeground;
-		for(unsigned int y=0;y<depthFrameSize[1];++y)
-			for(unsigned int x=0;x<depthFrameSize[0];++x,++afdPtr,++affPtr)
-				{
-				*afdPtr=0.0f;
-				*affPtr=0.0f;
-				}
-		averageFrameCounter=averageNumFrames;
-		
-		/* Turn off average frame; will automatically be re-enabled once capture is complete: */
-		showAverageFrame=false;
+		/* Request a new average frame: */
+		requestAverageFrame(0);
 		}
 	else
 		{
-		/* Don't show the average frame any longer: */
-		showAverageFrame=false;
+		/* Invalidate the current average frame: */
+		averageFrameValid=false;
 		}
 	}
 
@@ -277,10 +306,10 @@ void RawKinectViewer::saveAverageFrameOKCallback(GLMotif::FileSelectionDialog::O
 		float cutoff=float(averageNumFrames)*0.5f;
 		float* afdPtr=averageFrameDepth;
 		float* affPtr=averageFrameForeground;
-		const Kinect::FrameSource::PixelDepthCorrection* pdcPtr=static_cast<const Kinect::FrameSource::PixelDepthCorrection*>(depthCorrection.getBuffer());
+		const PixelCorrection* dcPtr=depthCorrection;
 		for(unsigned int y=0;y<depthFrameSize[1];++y)
-			for(unsigned int x=0;x<depthFrameSize[0];++x,++afdPtr,++affPtr,++pdcPtr)
-				frameFile->write<float>(*affPtr>=cutoff?((*afdPtr)/(*affPtr))*pdcPtr->scale+pdcPtr->offset:2047.0f);
+			for(unsigned int x=0;x<depthFrameSize[0];++x,++afdPtr,++affPtr,++dcPtr)
+				frameFile->write<float>(*affPtr>=cutoff?dcPtr->correct((*afdPtr)/(*affPtr)):2047.0f);
 		}
 	catch(std::runtime_error err)
 		{
@@ -294,6 +323,13 @@ void RawKinectViewer::saveAverageFrameOKCallback(GLMotif::FileSelectionDialog::O
 
 void RawKinectViewer::saveAverageFrameCallback(Misc::CallbackData* cbData)
 	{
+	if(!averageFrameValid)
+		{
+		/* Show an error message: */
+		Vrui::showErrorMessage("Save Average Depth Frame...","No valid average depth frame to save");
+		return;
+		}
+	
 	try
 		{
 		/* Create a uniquely-named depth image file in the current directory: */
@@ -404,14 +440,26 @@ GLMotif::PopupMenu* RawKinectViewer::createMainMenu(void)
 	return mainMenuPopup;
 	}
 
+GLMotif::PopupWindow* RawKinectViewer::createAverageDepthFrameDialog(void)
+	{
+	/* Create the average depth frame dialog window: */
+	GLMotif::PopupWindow* averageDepthFrameDialogPopup=new GLMotif::PopupWindow("AverageDepthFrameDialogPopup",Vrui::getWidgetManager(),"RawKinectViewer");
+	
+	new GLMotif::Label("AverageDepthFrameLabel",averageDepthFrameDialogPopup,"Capturing average depth frame...");
+	
+	return averageDepthFrameDialogPopup;
+	}
+
 RawKinectViewer::RawKinectViewer(int& argc,char**& argv,char**& appDefaults)
 	:Vrui::Application(argc,argv,appDefaults),
 	 camera(0),
 	 colorFrameSize(0),colorFrameVersion(0),
-	 depthFrameSize(0),hasDepthCorrection(false),depthFrameVersion(0),
+	 depthFrameSize(0),depthCorrection(0),depthFrameVersion(0),
 	 paused(false),
-	 averageNumFrames(150),averageFrameCounter(0),averageFrameDepth(0),averageFrameForeground(0),showAverageFrame(false),
-	 mainMenu(0)
+	 averageNumFrames(150),averageFrameCounter(0),
+	 averageFrameDepth(0),averageFrameForeground(0),
+	 averageFrameValid(false),showAverageFrame(false),
+	 mainMenu(0),averageDepthFrameDialog(0)
 	{
 	/*********************************************************************
 	Register the custom tool classes with the Vrui tool manager:
@@ -423,6 +471,7 @@ RawKinectViewer::RawKinectViewer(int& argc,char**& argv,char**& appDefaults)
 	DepthCorrectionTool::initClass(*Vrui::getToolManager());
 	GridTool::initClass(*Vrui::getToolManager());
 	PlaneTool::initClass(*Vrui::getToolManager());
+	CalibrationCheckTool::initClass(*Vrui::getToolManager());
 	
 	/* Parse the command line: */
 	bool printHelp=false;
@@ -504,9 +553,14 @@ RawKinectViewer::RawKinectViewer(int& argc,char**& argv,char**& appDefaults)
 	colorFrameSize=camera->getActualFrameSize(Kinect::FrameSource::COLOR);
 	depthFrameSize=camera->getActualFrameSize(Kinect::FrameSource::DEPTH);
 	
-	/* Get the camera's depth correction coefficients: */
-	hasDepthCorrection=camera->hasDepthCorrectionCoefficients();
-	depthCorrection=camera->getDepthCorrectionCoefficients(); // This will return an identity transformation if the camera doesn't have correction factors
+	/* Get the camera's depth correction parameters: */
+	Kinect::FrameSource::DepthCorrection* dc=camera->getDepthCorrectionParameters();
+	
+	/* Evaluate the camera's depth correction parameters into a per-pixel offset array: */
+	depthCorrection=dc->getPixelCorrection(depthFrameSize);
+	
+	/* Clean up: */
+	delete dc;
 	
 	/* Allocate the average depth frame buffer: */
 	averageFrameDepth=new float[depthFrameSize[0]*depthFrameSize[1]];
@@ -518,6 +572,8 @@ RawKinectViewer::RawKinectViewer(int& argc,char**& argv,char**& appDefaults)
 	/* Create the main menu: */
 	mainMenu=createMainMenu();
 	Vrui::setMainMenu(mainMenu);
+	
+	averageDepthFrameDialog=createAverageDepthFrameDialog();
 	
 	/* Start streaming: */
 	camera->startStreaming(Misc::createFunctionCall(this,&RawKinectViewer::colorStreamingCallback),Misc::createFunctionCall(this,&RawKinectViewer::depthStreamingCallback));
@@ -532,6 +588,7 @@ RawKinectViewer::RawKinectViewer(int& argc,char**& argv,char**& appDefaults)
 RawKinectViewer::~RawKinectViewer(void)
 	{
 	delete mainMenu;
+	delete averageDepthFrameDialog;
 	delete[] averageFrameDepth;
 	delete[] averageFrameForeground;
 	
@@ -595,8 +652,22 @@ void RawKinectViewer::frame(void)
 			--averageFrameCounter;
 			if(averageFrameCounter==0)
 				{
-				/* Show the averaged frame: */
-				showAverageFrame=true;
+				/* Mark the average frame buffer as valid: */
+				averageFrameValid=true;
+				
+				/* Call all registered callbacks: */
+				for(std::vector<AverageFrameReadyCallback*>::iterator afrcIt=averageFrameReadyCallbacks.begin();afrcIt!=averageFrameReadyCallbacks.end();++afrcIt)
+					{
+					(**afrcIt)(0);
+					delete *afrcIt;
+					}
+				averageFrameReadyCallbacks.clear();
+				
+				/* Hide the progress dialog: */
+				Vrui::popdownPrimaryWidget(averageDepthFrameDialog);
+				
+				/* Invalidate the average depth frame immediately if it wasn't requested directly by the user: */
+				averageFrameValid=showAverageFrame;
 				}
 			}
 		}
@@ -618,7 +689,7 @@ void RawKinectViewer::display(GLContextData& contextData) const
 	glBindTexture(GL_TEXTURE_2D,dataItem->depthTextureId);
 	
 	/* Check if the cached depth frame needs to be updated: */
-	if(showAverageFrame)
+	if(showAverageFrame&&averageFrameValid)
 		{
 		/* Convert the averaged depth image to RGB: */
 		unsigned int width=depthFrameSize[0];
@@ -627,14 +698,14 @@ void RawKinectViewer::display(GLContextData& contextData) const
 		const float* afdPtr=averageFrameDepth;
 		const float* affPtr=averageFrameForeground;
 		float foregroundCutoff=float(averageNumFrames)*0.5f;
-		const Kinect::FrameSource::PixelDepthCorrection* pdcPtr=static_cast<const Kinect::FrameSource::PixelDepthCorrection*>(depthCorrection.getBuffer());
+		const PixelCorrection* dcPtr=depthCorrection;
 		GLubyte* bfPtr=byteFrame;
 		for(unsigned int y=0;y<height;++y)
-			for(unsigned int x=0;x<width;++x,++afdPtr,++affPtr,++pdcPtr,bfPtr+=3)
+			for(unsigned int x=0;x<width;++x,++afdPtr,++affPtr,++dcPtr,bfPtr+=3)
 				{
 				if(*affPtr>=foregroundCutoff)
 					{
-					float d=((*afdPtr)/(*affPtr))*pdcPtr->scale+pdcPtr->offset;
+					float d=dcPtr->correct((*afdPtr)/(*affPtr));
 					mapDepth(d,depthValueRange,bfPtr);
 					}
 				else
@@ -667,14 +738,14 @@ void RawKinectViewer::display(GLContextData& contextData) const
 			/* Convert the depth image to unsigned byte: */
 			GLubyte* byteFrame=new GLubyte[height*width*3];
 			const GLushort* fPtr=framePtr;
-			const Kinect::FrameSource::PixelDepthCorrection* pdcPtr=static_cast<const Kinect::FrameSource::PixelDepthCorrection*>(depthCorrection.getBuffer());
+			const PixelCorrection* dcPtr=depthCorrection;
 			GLubyte* bfPtr=byteFrame;
 			for(unsigned int y=0;y<height;++y)
-				for(unsigned int x=0;x<width;++x,++fPtr,++pdcPtr,bfPtr+=3)
+				for(unsigned int x=0;x<width;++x,++fPtr,++dcPtr,bfPtr+=3)
 					{
 					if(*fPtr!=Kinect::FrameSource::invalidDepth)
 						{
-						float d=float(*fPtr)*pdcPtr->scale+pdcPtr->offset;
+						float d=dcPtr->correct(*fPtr);
 						mapDepth(d,depthValueRange,bfPtr);
 						}
 					else

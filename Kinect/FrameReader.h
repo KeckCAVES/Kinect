@@ -1,6 +1,7 @@
 /***********************************************************************
-ColorFrameReader - Class to read compressed color frames from a source.
-Copyright (c) 2010-2013 Oliver Kreylos
+FrameReader - Abstract base class to read color or depth frames from a
+source.
+Copyright (c) 2013 Oliver Kreylos
 
 This file is part of the Kinect 3D Video Capture Project (Kinect).
 
@@ -20,39 +21,36 @@ Software Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA
 02111-1307 USA
 ***********************************************************************/
 
-#ifndef KINECT_COLORFRAMEREADER_INCLUDED
-#define KINECT_COLORFRAMEREADER_INCLUDED
-
-#include <Video/Config.h>
-#if VIDEO_CONFIG_HAVE_THEORA
-#include <Video/TheoraDecoder.h>
-#endif
-#include <Kinect/FrameReader.h>
+#ifndef KINECT_FRAMEREADER_INCLUDED
+#define KINECT_FRAMEREADER_INCLUDED
 
 /* Forward declarations: */
-namespace IO {
-class File;
+namespace Kinect {
+class FrameBuffer;
 }
 
 namespace Kinect {
 
-class ColorFrameReader:public FrameReader
+class FrameReader
 	{
 	/* Elements: */
-	private:
-	IO::File& source; // Data source for compressed color frames
-	bool sourceHasTheora; // Flag whether the source actually contains color frames
-	#if VIDEO_CONFIG_HAVE_THEORA
-	Video::TheoraDecoder theoraDecoder; // Object to decode the Theora-encoded color frame stream
-	#endif
+	protected:
+	unsigned int size[2]; // Width and height of returned frames
 	
 	/* Constructors and destructors: */
 	public:
-	ColorFrameReader(IO::File& sSource); // Creates a color frame reader for the given source
-	virtual ~ColorFrameReader(void);
+	virtual ~FrameReader(void);
 	
-	/* Methods from FrameReader: */
-	virtual FrameBuffer readNextFrame(void);
+	/* Methods: */
+	const unsigned int* getSize(void) const // Returns the frame size as an array
+		{
+		return size;
+		}
+	unsigned int getSize(int dimension) const // Returns frame width or height
+		{
+		return size[dimension];
+		}
+	virtual FrameBuffer readNextFrame(void) =0; // Returns the next color or depth frame
 	};
 
 }

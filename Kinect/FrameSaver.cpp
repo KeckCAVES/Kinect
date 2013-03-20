@@ -2,7 +2,7 @@
 FrameSaver - Helper class to save raw color and video frames from a
 Kinect camera to a time-stamped file on disk for playback and further
 processing.
-Copyright (c) 2010-2012 Oliver Kreylos
+Copyright (c) 2010-2013 Oliver Kreylos
 
 This file is part of the Kinect 3D Video Capture Project (Kinect).
 
@@ -27,9 +27,17 @@ Software Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA
 #include <IO/File.h>
 #include <IO/OpenFile.h>
 #include <Geometry/GeometryMarshallers.h>
+#include <Video/Config.h>
 #include <Kinect/FrameSource.h>
 #include <Kinect/DepthFrameWriter.h>
+#include <Kinect/LossyDepthFrameWriter.h>
 #include <Kinect/ColorFrameWriter.h>
+
+#if VIDEO_CONFIG_HAVE_THEORA
+#define KINECT_FRAMESAVER_LOSSY 0 // Disabled until I figure out a codec that works
+#else
+#define KINECT_FRAMESAVER_LOSSY 0
+#endif
 
 namespace Kinect {
 
@@ -37,23 +45,28 @@ namespace Kinect {
 Methods of class FrameSaver:
 ***************************/
 
-void FrameSaver::initialize(const FrameSource& frameSource)
+void FrameSaver::initialize(FrameSource& frameSource)
 	{
 	/* Write the file formats' version numbers to the depth and color files: */
 	colorFrameFile->write<unsigned int>(1);
-	depthFrameFile->write<unsigned int>(2);
+	depthFrameFile->write<unsigned int>(4);
 	
-	/* Check if the frame source has depth correction coefficients: */
-	if(frameSource.hasDepthCorrectionCoefficients())
-		{
-		/* Write the frame source's depth correction coefficients to the depth file: */
-		depthFrameFile->write<unsigned char>(1);
-		FrameBuffer depthCorrection=frameSource.getDepthCorrectionCoefficients();
-		depthFrameFile->write<int>(depthCorrection.getSize(),2);
-		depthFrameFile->write<float>(static_cast<const float*>(depthCorrection.getBuffer()),depthCorrection.getSize(1)*depthCorrection.getSize(0)*2);
-		}
-	else
-		depthFrameFile->write<unsigned char>(0);
+	/* Write the frame source's depth correction parameters: */
+	FrameSource::DepthCorrection* dc=frameSource.getDepthCorrectionParameters();
+	dc->write(*depthFrameFile);
+	delete dc;
+	
+	#if KINECT_FRAMESAVER_LOSSY
+	
+	/* Signal whether the depth stream will contain losslessly compressed frames (lossy compression disabled for now): */
+	depthFrameFile->write<unsigned char>(1);
+	
+	#else
+	
+	/* Signal that the depth stream will contain losslessly compressed frames: */
+	depthFrameFile->write<unsigned char>(0);
+	
+	#endif
 	
 	/* Get the frame source's intrinsic calibration parameters: */
 	FrameSource::IntrinsicParameters ips=frameSource.getIntrinsicParameters();
@@ -70,7 +83,11 @@ void FrameSaver::initialize(const FrameSource& frameSource)
 	
 	/* Create the color and depth frame writers: */
 	colorFrameWriter=new ColorFrameWriter(*colorFrameFile,frameSource.getActualFrameSize(FrameSource::COLOR));
+	#if KINECT_FRAMESAVER_LOSSY
+	depthFrameWriter=new LossyDepthFrameWriter(*depthFrameFile,frameSource.getActualFrameSize(FrameSource::DEPTH));
+	#else
 	depthFrameWriter=new DepthFrameWriter(*depthFrameFile,frameSource.getActualFrameSize(FrameSource::DEPTH));
+	#endif
 	
 	/* Start the frame writing threads: */
 	colorFrameWritingThread.start(this,&FrameSaver::colorFrameWritingThreadMethod);
@@ -131,7 +148,7 @@ void* FrameSaver::depthFrameWritingThreadMethod(void)
 	return 0;
 	}
 
-FrameSaver::FrameSaver(const FrameSource& frameSource,const char* colorFrameFileName,const char* depthFrameFileName)
+FrameSaver::FrameSaver(FrameSource& frameSource,const char* colorFrameFileName,const char* depthFrameFileName)
 	:timeStampOffset(0.0),
 	 done(false),
 	 colorFrameFile(IO::openFile(colorFrameFileName,IO::File::WriteOnly)),
@@ -147,7 +164,7 @@ FrameSaver::FrameSaver(const FrameSource& frameSource,const char* colorFrameFile
 	initialize(frameSource);
 	}
 
-FrameSaver::FrameSaver(const FrameSource& frameSource,IO::FilePtr sColorFrameFile,IO::FilePtr sDepthFrameFile)
+FrameSaver::FrameSaver(FrameSource& frameSource,IO::FilePtr sColorFrameFile,IO::FilePtr sDepthFrameFile)
 	:timeStampOffset(0.0),
 	 done(false),
 	 colorFrameFile(sColorFrameFile),

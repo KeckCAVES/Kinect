@@ -1,7 +1,7 @@
 /***********************************************************************
 FileFrameSource - Class to stream depth and color frames from a pair of
 time-stamped depth and color stream files.
-Copyright (c) 2010-2012 Oliver Kreylos
+Copyright (c) 2010-2013 Oliver Kreylos
 
 This file is part of the Kinect 3D Video Capture Project (Kinect).
 
@@ -33,8 +33,7 @@ Software Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA
 
 /* Forward declarations: */
 namespace Kinect {
-class DepthFrameReader;
-class ColorFrameReader;
+class FrameReader;
 }
 
 namespace Kinect {
@@ -47,10 +46,10 @@ class FileFrameSource:public FrameSource
 	IO::FilePtr colorFrameFile; // File containing color frames
 	IO::FilePtr depthFrameFile; // File containing depth frames
 	unsigned int fileFormatVersions[2]; // Format version numbers of the color and depth files, respectively
-	ColorFrameReader* colorFrameReader; // Reader for color frames
-	DepthFrameReader* depthFrameReader; // Reader for depth frames
+	FrameReader* colorFrameReader; // Reader for color frames
+	FrameReader* depthFrameReader; // Reader for depth frames
 	unsigned int depthSize[2]; // Size of depth frames in pixels
-	FrameBuffer depthCorrection; // Buffer of depth correction coefficients
+	DepthCorrection* depthCorrection; // Depth correction parameters read from the depth file
 	IntrinsicParameters intrinsicParameters; // Intrinsic parameters read from the color and depth files
 	ExtrinsicParameters extrinsicParameters; // Extrinsic parameters read from the color and depth files
 	StreamingCallback* colorStreamingCallback; // Callback to be called when a new color frame has been loaded
@@ -71,10 +70,9 @@ class FileFrameSource:public FrameSource
 	~FileFrameSource(void);
 	
 	/* Methods from FrameSource: */
-	virtual bool hasDepthCorrectionCoefficients(void) const;
-	virtual FrameBuffer getDepthCorrectionCoefficients(void) const;
-	virtual IntrinsicParameters getIntrinsicParameters(void) const;
-	virtual ExtrinsicParameters getExtrinsicParameters(void) const;
+	virtual DepthCorrection* getDepthCorrectionParameters(void);
+	virtual IntrinsicParameters getIntrinsicParameters(void);
+	virtual ExtrinsicParameters getExtrinsicParameters(void);
 	virtual const unsigned int* getActualFrameSize(int sensor) const;
 	virtual void startStreaming(StreamingCallback* newColorStreamingCallback,StreamingCallback* newDepthStreamingCallback);
 	virtual void stopStreaming(void);
