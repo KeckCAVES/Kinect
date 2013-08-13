@@ -24,6 +24,7 @@ Software Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA
 #include "KinectServer.h"
 
 #include <iostream>
+#include <Misc/SizedTypes.h>
 #include <Misc/FunctionCalls.h>
 #include <Misc/Time.h>
 #include <Misc/StandardValueCoders.h>
@@ -126,17 +127,17 @@ void KinectServer::CameraState::startStreaming(void)
 void KinectServer::CameraState::writeHeaders(IO::File& sink) const
 	{
 	/* Write the stream format versions: */
-	sink.write<unsigned int>(1);
-	sink.write<unsigned int>(4);
+	sink.write<Misc::UInt32>(1);
+	sink.write<Misc::UInt32>(4);
 	
 	/* Write the camera's depth correction parameters: */
 	depthCorrection->write(sink);
 	
 	/* Check whether the depth stream uses lossy compression: */
 	#if VIDEO_CONFIG_HAVE_THEORA
-	sink.write<unsigned char>(lossyDepthCompression?1:0);
+	sink.write<Misc::UInt8>(lossyDepthCompression?1:0);
 	#else
-	sink.write<unsigned char>(0);
+	sink.write<Misc::UInt8>(0);
 	#endif
 	
 	/* Write the camera's intrinsic and extrinsic parameters to the sink: */
@@ -183,8 +184,8 @@ void* KinectServer::listeningThreadMethod(void)
 			#ifdef VERBOSE
 			std::cout<<"KinectServer: Sending stream headers to new client"<<std::endl<<std::flush;
 			#endif
-			newClientSocket->write<unsigned int>(0x12345678U);
-			newClientSocket->write<unsigned int>(numCameras);
+			newClientSocket->write<Misc::UInt32>(0x12345678U);
+			newClientSocket->write<Misc::UInt32>(numCameras);
 			for(unsigned i=0;i<numCameras;++i)
 				cameraStates[i]->writeHeaders(*newClientSocket);
 			newClientSocket->flush();
@@ -266,8 +267,8 @@ void* KinectServer::streamingThreadMethod(void)
 								#endif
 								
 								/* Write the meta frame index and frame identifier: */
-								clients[j]->write<unsigned int>(metaFrameIndex);
-								clients[j]->write<unsigned int>(i*2+0);
+								clients[j]->write<Misc::UInt32>(metaFrameIndex);
+								clients[j]->write<Misc::UInt32>(i*2+0);
 								
 								/* Write the compressed color frame: */
 								cameraStates[i]->colorFrames.getLockedValue().data.writeToSink(*clients[j]);
@@ -316,7 +317,7 @@ void* KinectServer::streamingThreadMethod(void)
 							if(clients[j]->waitForData(Misc::Time(0,0)))
 								{
 								/* Read the disconnect request: */
-								clients[j]->read<unsigned int>();
+								clients[j]->read<Misc::UInt32>();
 								
 								/* Disconnect the client: */
 								#ifdef VERBOSE
@@ -334,8 +335,8 @@ void* KinectServer::streamingThreadMethod(void)
 								#endif
 								
 								/* Write the meta frame index and frame identifier: */
-								clients[j]->write<unsigned int>(metaFrameIndex);
-								clients[j]->write<unsigned int>(i*2+1);
+								clients[j]->write<Misc::UInt32>(metaFrameIndex);
+								clients[j]->write<Misc::UInt32>(i*2+1);
 								
 								/* Write the compressed depth frame: */
 								cameraStates[i]->depthFrames.getLockedValue().data.writeToSink(*clients[j]);

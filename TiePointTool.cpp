@@ -32,18 +32,18 @@ Software Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA
 
 #include "RawKinectViewer.h"
 
-/*****************************************************
-Static elements of class BlobProperty<unsigned short>:
-*****************************************************/
+/**********************************************************************
+Static elements of class BlobProperty<Kinect::FrameSource::DepthPixel>:
+**********************************************************************/
 
-BlobProperty<unsigned short>::PTransform BlobProperty<unsigned short>::projection;
+BlobProperty<Kinect::FrameSource::DepthPixel>::PTransform BlobProperty<Kinect::FrameSource::DepthPixel>::projection;
 
 template <>
-class PixelComparer<unsigned short> // Pixel comparer for depth frames
+class PixelComparer<Kinect::FrameSource::DepthPixel> // Pixel comparer for depth frames
 	{
 	/* Embedded classes: */
 	public:
-	typedef unsigned short Pixel;
+	typedef Kinect::FrameSource::DepthPixel Pixel;
 	
 	/* Elements: */
 	private:
@@ -52,14 +52,14 @@ class PixelComparer<unsigned short> // Pixel comparer for depth frames
 	
 	/* Constructors and destructors: */
 	public:
-	PixelComparer(const Pixel& sPixelValue,unsigned short sThreshold)
+	PixelComparer(const Pixel& sPixelValue,unsigned int sThreshold)
 		{
 		if(sPixelValue>=sThreshold)
-			minPixelValue=sPixelValue-sThreshold;
+			minPixelValue=Pixel(sPixelValue-sThreshold);
 		else
 			minPixelValue=0U;
 		if(sPixelValue<=0xffffU-sThreshold)
-			maxPixelValue=sPixelValue+sThreshold;
+			maxPixelValue=Pixel(sPixelValue+sThreshold);
 		else
 			maxPixelValue=0xffffU;
 		}
@@ -85,16 +85,16 @@ class PixelComparer<GLColor<GLubyte,3> > // Pixel comparer for color frames
 	
 	/* Constructors and destructors: */
 	public:
-	PixelComparer(const Pixel& sPixelValue,unsigned short sThreshold)
+	PixelComparer(const Pixel& sPixelValue,unsigned int sThreshold)
 		{
 		for(int i=0;i<3;++i)
 			{
 			if(sPixelValue[i]>=sThreshold)
-				minPixelValue[i]=sPixelValue[i]-sThreshold;
+				minPixelValue[i]=GLubyte(sPixelValue[i]-sThreshold);
 			else
 				minPixelValue[i]=0U;
 			if(sPixelValue[i]<=0xffU-sThreshold)
-				maxPixelValue[i]=sPixelValue[i]+sThreshold;
+				maxPixelValue[i]=GLubyte(sPixelValue[i]+sThreshold);
 			else
 				maxPixelValue[i]=0xffU;
 			}
@@ -257,7 +257,7 @@ void TiePointTool::buttonCallback(int buttonSlotIndex,Vrui::InputDevice::ButtonC
 	if(buttonSlotIndex==1&&cbData->newButtonState&&haveDepthPoint&&haveColorPoint)
 		{
 		/* Append a tie point pair to the calibration file: */
-		BlobProperty<unsigned short>::Point p=depthPoint.blobProperty.getCentroid();
+		BlobProperty<DepthPixel>::Point p=depthPoint.blobProperty.getCentroid();
 		std::cout<<p[0]<<','<<p[1]<<','<<p[2]<<',';
 		std::cout<<colorPoint.x<<','<<colorPoint.y<<std::endl;
 		}

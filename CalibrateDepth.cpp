@@ -23,6 +23,7 @@ Software Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA
 #include <vector>
 #include <iostream>
 #include <iomanip>
+#include <Misc/SizedTypes.h>
 #include <IO/File.h>
 #include <IO/OpenFile.h>
 #include <Math/Matrix.h>
@@ -55,7 +56,7 @@ int main(int argc,char* argv[])
 		/* Read the depth file: */
 		std::cout<<"Reading "<<argv[i]<<"..."<<std::flush;
 		IO::FilePtr depthFile(IO::openFile(argv[i]));
-		unsigned int fs[2];
+		Misc::UInt32 fs[2];
 		depthFile->read(fs,2);
 		if(fs[0]==frameSize[0]&&fs[1]==frameSize[1])
 			{

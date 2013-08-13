@@ -241,7 +241,7 @@ void Projector::setFilterDepthFrames(bool newFilterDepthFrames,bool newLowpassDe
 	lowpassDepthFrames=newLowpassDepthFrames;
 	}
 
-void Projector::setTriangleDepthRange(unsigned short newTriangleDepthRange)
+void Projector::setTriangleDepthRange(FrameSource::DepthPixel newTriangleDepthRange)
 	{
 	/* Set the triangle depth range immediately; it won't kill the depth frame processing thread if changed in mid-process: */
 	triangleDepthRange=newTriangleDepthRange;
@@ -279,7 +279,7 @@ const MeshBuffer& Projector::processDepthFrame(const FrameBuffer& depthFrame)
 			{
 			/* Update the filtered frame buffer with the new raw frame and update the vertex array: */
 			GLfloat* fdfPtr=filteredDepthFrame;
-			const unsigned short* dfPtr=static_cast<const unsigned short*>(depthFrame.getBuffer());
+			const FrameSource::DepthPixel* dfPtr=static_cast<const FrameSource::DepthPixel*>(depthFrame.getBuffer());
 			const PixelCorrection* dcPtr=depthCorrection;
 			for(unsigned int y=0;y<depthSize[1];++y)
 				for(unsigned int x=0;x<depthSize[0];++x,++fdfPtr,++dfPtr,++dcPtr)
@@ -304,7 +304,7 @@ const MeshBuffer& Projector::processDepthFrame(const FrameBuffer& depthFrame)
 			/* Initialize the filtered frame buffer with the new raw frame and update the vertex array: */
 			filteredDepthFrame=new GLfloat[depthSize[1]*depthSize[0]];
 			GLfloat* fdfPtr=filteredDepthFrame;
-			const unsigned short* dfPtr=static_cast<const unsigned short*>(depthFrame.getBuffer());
+			const FrameSource::DepthPixel* dfPtr=static_cast<const FrameSource::DepthPixel*>(depthFrame.getBuffer());
 			const PixelCorrection* dcPtr=depthCorrection;
 			for(unsigned int y=0;y<depthSize[1];++y)
 				for(unsigned int x=0;x<depthSize[0];++x,++fdfPtr,++dfPtr,++dcPtr)
@@ -325,7 +325,7 @@ const MeshBuffer& Projector::processDepthFrame(const FrameBuffer& depthFrame)
 			int stride=depthSize[0];
 			for(unsigned int x=0;x<depthSize[0];++x)
 				{
-				// const unsigned short* sCol=static_cast<const unsigned short*>(depthFrame.getBuffer())+x;
+				// const FrameSource::DepthPixel* sCol=static_cast<const FrameSource::DepthPixel*>(depthFrame.getBuffer())+x;
 				GLfloat* sCol=filteredDepthFrame+x;
 				GLfloat* dCol=spatialFilterBuffer+x;
 				// unsigned int sum=0;
@@ -472,7 +472,7 @@ const MeshBuffer& Projector::processDepthFrame(const FrameBuffer& depthFrame)
 			}
 		
 		/* Update the vertex array: */
-		const unsigned short* dfPtr=static_cast<const unsigned short*>(depthFrame.getBuffer());
+		const FrameSource::DepthPixel* dfPtr=static_cast<const FrameSource::DepthPixel*>(depthFrame.getBuffer());
 		MeshBuffer::Vertex* vPtr=newMesh.getVertices();
 		const PixelCorrection* dcPtr=depthCorrection;
 		for(unsigned int y=0;y<depthSize[1];++y)
@@ -489,14 +489,14 @@ const MeshBuffer& Projector::processDepthFrame(const FrameBuffer& depthFrame)
 	*******************************************************************/
 	
 	/* Iterate through all quads and generate triangles: */
-	unsigned short tdr=triangleDepthRange; // Get the currently set triangle depth range
+	FrameSource::DepthPixel tdr=triangleDepthRange; // Get the currently set triangle depth range
 	newMesh.numTriangles=0;
 	MeshBuffer::Index* tiPtr=newMesh.getTriangleIndices();
-	const unsigned short* dfRowPtr=static_cast<const unsigned short*>(depthFrame.getBuffer());
+	const FrameSource::DepthPixel* dfRowPtr=static_cast<const FrameSource::DepthPixel*>(depthFrame.getBuffer());
 	GLuint rowIndex=0;
 	for(unsigned int y=1;y<depthSize[1];++y,dfRowPtr+=depthSize[0],rowIndex+=depthSize[0])
 		{
-		const unsigned short* dfPtr=dfRowPtr;
+		const FrameSource::DepthPixel* dfPtr=dfRowPtr;
 		GLuint index=rowIndex;
 		for(unsigned int x=1;x<depthSize[0];++x,++dfPtr,++index)
 			{
@@ -516,7 +516,7 @@ const MeshBuffer& Projector::processDepthFrame(const FrameBuffer& depthFrame)
 			for(unsigned int i=0;i<quadCaseNumTriangles[caseIndex];++i,cvo+=3)
 				{
 				/* Calculate the depth range of the candidate triangle: */
-				unsigned short minDepth,maxDepth;
+				FrameSource::DepthPixel minDepth,maxDepth;
 				minDepth=maxDepth=dfPtr[cvo[0]];
 				for(int j=1;j<3;++j)
 					{

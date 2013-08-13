@@ -1,7 +1,7 @@
 /***********************************************************************
 KinectPlayer - Vislet to play back 3D video previously captured from one
 or more Kinect devices.
-Copyright (c) 2011 Oliver Kreylos
+Copyright (c) 2011-2013 Oliver Kreylos
 
 This file is part of the Kinect 3D Video Capture Project (Kinect).
 
@@ -34,6 +34,7 @@ Software Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA
 #include <Sound/SoundPlayer.h>
 #include <Kinect/ColorFrameReader.h>
 #include <Kinect/DepthFrameReader.h>
+#include <Kinect/LossyDepthFrameReader.h>
 #include <Vrui/Vrui.h>
 #include <Vrui/VisletManager.h>
 #include <Vrui/OpenFile.h>
@@ -222,6 +223,32 @@ KinectPlayer::KinectStreamer::KinectStreamer(const KinectPlayerFactory::KinectCo
 	depthFile=Vrui::openFile(depthFileName.c_str());
 	depthFile->setEndianness(Misc::LittleEndian);
 	
+	/* Read the files' format version numbers: */
+	// unsigned int colorFormatVersion=colorFile->read<unsigned int>();
+	colorFile->skip<unsigned int>(1);
+	unsigned int depthFormatVersion=depthFile->read<unsigned int>();
+	
+	/* Check if there are per-pixel depth correction coefficients: */
+	Kinect::FrameSource::DepthCorrection* depthCorrection=0;
+	if(depthFormatVersion>=4)
+		{
+		/* Read new B-spline based depth correction parameters: */
+		depthCorrection=new Kinect::FrameSource::DepthCorrection(*depthFile);
+		}
+	else
+		{
+		if(depthFormatVersion>=2&&depthFile->read<char>()!=0)
+			{
+			/* Skip the depth correction buffer: */
+			int size[2];
+			depthFile->read<int>(size,2);
+			depthFile->skip<float>(size[1]*size[0]*2);
+			}
+		}
+	
+	/* Check if the depth stream uses lossy compression: */
+	bool depthIsLossy=depthFormatVersion>=3&&depthFile->read<unsigned char>()!=0;
+	
 	/* Read the color and depth projections from their respective files: */
 	Kinect::FrameSource::IntrinsicParameters ips;
 	ips.colorProjection=Misc::Marshaller<Kinect::FrameSource::IntrinsicParameters::PTransform>::read(*colorFile);
@@ -235,7 +262,26 @@ KinectPlayer::KinectStreamer::KinectStreamer(const KinectPlayerFactory::KinectCo
 	
 	/* Create the color and depth decompressors: */
 	colorDecompressor=new Kinect::ColorFrameReader(*colorFile);
-	depthDecompressor=new Kinect::DepthFrameReader(*depthFile);
+	if(depthIsLossy)
+		{
+		#if VIDEO_CONFIG_HAVE_THEORA
+		depthDecompressor=new Kinect::LossyDepthFrameReader(*depthFile);
+		#else
+		delete colorDecompressor;
+		Misc::throwStdErr("KinectPlayer: Lossy depth compression not supported due to lack of Theora library");
+		#endif
+		}
+	else
+		depthDecompressor=new Kinect::DepthFrameReader(*depthFile);
+	
+	/* Set the projector's depth frame size: */
+	projector.setDepthFrameSize(depthDecompressor->getSize());
+	
+	/* Set the projector's depth correction coefficients: */
+	projector.setDepthCorrection(depthCorrection);
+	
+	/* Clean up: */
+	delete depthCorrection;
 	
 	/* Start the color and depth decompression threads: */
 	colorDecompressorThread.start(this,&KinectPlayer::KinectStreamer::colorDecompressorThreadMethod);
@@ -292,7 +338,7 @@ void KinectPlayer::KinectStreamer::updateFrames(double currentTimeStamp)
 	if(currentColorFrame.timeStamp!=0.0)
 		projector.setColorFrame(currentColorFrame);
 	if(currentDepthFrame.timeStamp!=0.0)
-		projector.setDepthFrame(currentDepthFrame);
+		projector.processDepthFrame(currentDepthFrame);
 	projector.updateFrames();
 	}
 
@@ -314,7 +360,7 @@ Methods of class KinectPlayer:
 
 KinectPlayer::KinectPlayer(int numArguments,const char* const arguments[])
 	:soundPlayer(0),
-	 firstFrame(true)
+	 firstEnable(true)
 	{
 	for(std::vector<KinectPlayerFactory::KinectConfig>::const_iterator kcIt=factory->kinectConfigs.begin();kcIt!=factory->kinectConfigs.end();++kcIt)
 		{
@@ -345,17 +391,23 @@ Vrui::VisletFactory* KinectPlayer::getFactory(void) const
 	return factory;
 	}
 
-void KinectPlayer::frame(void)
+void KinectPlayer::enable(void)
 	{
-	if(firstFrame)
+	/* Call the base class method: */
+	Vislet::enable();
+	
+	if(firstEnable)
 		{
 		/* Start sound playback: */
 		if(soundPlayer!=0)
 			soundPlayer->start();
 		
-		firstFrame=false;
+		firstEnable=false;
 		}
-	
+	}
+
+void KinectPlayer::frame(void)
+	{
 	/* Block until all streamers have frames valid for the current time stamp: */
 	for(std::vector<KinectStreamer*>::iterator sIt=streamers.begin();sIt!=streamers.end();++sIt)
 		(*sIt)->updateFrames(Vrui::getApplicationTime());

@@ -1,7 +1,7 @@
 /***********************************************************************
 Renderer - Helper class to receive a 3D video stream from a frame
 source, and render it into an OpenGL context using a projector.
-Copyright (c) 2012 Oliver Kreylos
+Copyright (c) 2012-2013 Oliver Kreylos
 
 This file is part of the Kinect 3D Video Capture Project (Kinect).
 
@@ -88,14 +88,14 @@ Renderer::~Renderer(void)
 	delete streamingCallback;
 	}
 
-void Renderer::resetFrameTimer(void)
+void Renderer::resetFrameTimer(double newFrameTimerOffset)
 	{
 	/* Check if the frame source is a live Kinect camera: */
 	Camera* camera=dynamic_cast<Camera*>(source);
 	if(camera!=0)
 		{
 		/* Reset the camera's frame timer: */
-		camera->resetFrameTimer();
+		camera->resetFrameTimer(newFrameTimerOffset);
 		}
 	}
 

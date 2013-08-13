@@ -56,7 +56,7 @@ class FileFrameSource:public FrameSource
 	StreamingCallback* depthStreamingCallback; // Callback to be called when a new depth frame has been loaded
 	Threads::Thread playbackThread; // Thread playing back depth and color frames
 	unsigned int numBackgroundFrames; // Number of background frames left to capture
-	unsigned short* backgroundFrame; // Frame containing minimal depth values for a captured background
+	DepthPixel* backgroundFrame; // Frame containing minimal depth values for a captured background
 	bool removeBackground; // Flag whether to remove background information during frame processing
 	
 	/* Private methods: */

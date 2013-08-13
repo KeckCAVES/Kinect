@@ -1,7 +1,7 @@
 /***********************************************************************
 KinectRecorder - Vislet to capture and save 3D video from one or more
 Kinect devices.
-Copyright (c) 2011 Oliver Kreylos
+Copyright (c) 2011-2013 Oliver Kreylos
 
 This file is part of the Kinect 3D Video Capture Project (Kinect).
 
@@ -232,7 +232,7 @@ Methods of class KinectRecorder:
 
 KinectRecorder::KinectRecorder(int numArguments,const char* const arguments[])
 	:soundRecorder(0),
-	 firstFrame(true)
+	 firstEnable(true)
 	{
 	/* Check if this node has any connected Kinect devices: */
 	bool haveDevices=false;
@@ -296,9 +296,12 @@ Vrui::VisletFactory* KinectRecorder::getFactory(void) const
 	return factory;
 	}
 
-void KinectRecorder::frame(void)
+void KinectRecorder::enable(void)
 	{
-	if(firstFrame)
+	/* Call the base class method: */
+	Vislet::enable();
+	
+	if(firstEnable)
 		{
 		/* Start recording sound: */
 		if(soundRecorder!=0)
@@ -312,6 +315,6 @@ void KinectRecorder::frame(void)
 		for(std::vector<KinectStreamer*>::iterator sIt=streamers.begin();sIt!=streamers.end();++sIt)
 			(*sIt)->startStreaming();
 		
-		firstFrame=false;
+		firstEnable=false;
 		}
 	}

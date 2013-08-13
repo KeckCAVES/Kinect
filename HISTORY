@@ -93,3 +93,30 @@ Kinect-2.5:
   on bivariate uniform non-rational B-splines.
   - Depth correction can now be used in remote collaboration systems,
     for improved alignment.
+
+Kinect-2.6:
+- Added loadDefaultBackground method to Kinect::Camera.
+- Added plane-based depth color mapping to RawKinectViewer.
+- Added tool to define depth planes by selecting depth image points to
+  RawKinectViewer.
+- Added optional make targets installudevrule and uninstalludevrule, to
+  install/remove a udev rule file opening the Kinect's USB devices for
+  non-root users. This is currently a system-wide change, allowing any
+  logged in users, local or remote, to talk to (and capture video from)
+  all connected Kinect devices. This might be considered a security
+  risk; ideally, only the console-owning user should get access.
+- Added type definitions for depth and color pixels to
+  Kinect::FrameSource.
+- Replaced hard-coded pixel types with typedefs throughout package.
+- Changed to use explicitly sized types for I/O throughout package.
+
+Kinect-2.7:
+- Fixed pointer arithmetic regression bug in Kinect::ColorFrameReader.
+- Added -navigational flag to KinectViewer vislet to render 3D video in
+  navigational space.
+- Bumped Vrui version requirement to 3.0-001.
+- Replaced all Geometry::cross with operator^.
+- Added an optional time base offset to
+  Kinect::Renderer::resetFrameTimer.
+- Added stream saving and synchronized playback from stream files to
+  KinectViewer vislet.

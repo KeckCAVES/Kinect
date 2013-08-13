@@ -35,6 +35,7 @@ Software Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA
 #include <Video/TheoraPacket.h>
 #endif
 #include <Kinect/FrameBuffer.h>
+#include <Kinect/FrameSource.h>
 
 namespace Kinect {
 
@@ -47,10 +48,11 @@ LossyDepthFrameReader::LossyDepthFrameReader(IO::File& sSource)
 	 sourceHasTheora(false)
 	{
 	/* Read the frame size from the source: */
-	source.read<unsigned int>(size,2);
+	for(int i=0;i<2;++i)
+		size[i]=source.read<Misc::UInt32>();
 	
 	/* Read the stream header's size: */
-	size_t streamHeaderSize=source.read<unsigned int>();
+	size_t streamHeaderSize=source.read<Misc::UInt32>();
 	sourceHasTheora=streamHeaderSize>0;
 	
 	if(sourceHasTheora)
@@ -91,7 +93,7 @@ LossyDepthFrameReader::~LossyDepthFrameReader(void)
 FrameBuffer LossyDepthFrameReader::readNextFrame(void)
 	{
 	/* Create the result frame: */
-	FrameBuffer result(size[0],size[1],size[1]*size[0]*sizeof(unsigned short));
+	FrameBuffer result(size[0],size[1],size[1]*size[0]*sizeof(FrameSource::DepthPixel));
 	
 	/* Return a dummy frame if the file is over: */
 	if(source.eof())
@@ -101,7 +103,7 @@ FrameBuffer LossyDepthFrameReader::readNextFrame(void)
 		}
 	
 	/* Read the frame's time stamp from the source: */
-	result.timeStamp=source.read<double>();
+	result.timeStamp=source.read<Misc::Float64>();
 	
 	if(sourceHasTheora)
 		{
@@ -121,23 +123,23 @@ FrameBuffer LossyDepthFrameReader::readNextFrame(void)
 		theoraDecoder.decodeFrame(theoraFrame);
 		
 		/* Convert the decompressed frame from Y'CbCr 4:2:0 to 11-bit depth: */
-		unsigned short* resultRowPtr=static_cast<unsigned short*>(result.getBuffer());
+		FrameSource::DepthPixel* resultRowPtr=static_cast<FrameSource::DepthPixel*>(result.getBuffer());
 		const unsigned char* ypRowPtr=static_cast<const unsigned char*>(theoraFrame.planes[0].data)+theoraFrame.offsets[0];
 		const unsigned char* cbRowPtr=static_cast<const unsigned char*>(theoraFrame.planes[1].data)+theoraFrame.offsets[1];
 		const unsigned char* crRowPtr=static_cast<const unsigned char*>(theoraFrame.planes[2].data)+theoraFrame.offsets[2];
 		for(unsigned int y=0;y<size[1];y+=2)
 			{
-			unsigned short* resultPtr=resultRowPtr;
+			FrameSource::DepthPixel* resultPtr=resultRowPtr;
 			const unsigned char* ypPtr=ypRowPtr;
 			const unsigned char* cbPtr=cbRowPtr;
 			const unsigned char* crPtr=crRowPtr;
 			for(unsigned int x=0;x<size[0];x+=2)
 				{
 				/* Assemble the block's 4 11-bit depth values from the 4 8-bit yp values and the 8-bit cb and cr values: */
-				resultPtr[0]=((((unsigned short)(ypPtr[0]))<<3)&0x7f8U)|(((unsigned short)(*cbPtr))>>4);
-				resultPtr[1]=((((unsigned short)(ypPtr[1]))<<3)&0x7f8U)|(((unsigned short)(*cbPtr))&0x0fU);
-				resultPtr[size[0]]=((((unsigned short)(ypPtr[theoraFrame.planes[0].stride]))<<3)&0x7f8U)|(((unsigned short)(*cbPtr))>>4);
-				resultPtr[size[0]+1]=((((unsigned short)(ypPtr[theoraFrame.planes[0].stride+1]))<<3)&0x7f8U)|(((unsigned short)(*cbPtr))&0x0fU);
+				resultPtr[0]=((FrameSource::DepthPixel(ypPtr[0])<<3)&0x7f8U)|(FrameSource::DepthPixel(*cbPtr)>>4);
+				resultPtr[1]=((FrameSource::DepthPixel(ypPtr[1])<<3)&0x7f8U)|(FrameSource::DepthPixel(*cbPtr)&0x0fU);
+				resultPtr[size[0]]=((FrameSource::DepthPixel(ypPtr[theoraFrame.planes[0].stride])<<3)&0x7f8U)|(FrameSource::DepthPixel(*cbPtr)>>4);
+				resultPtr[size[0]+1]=((FrameSource::DepthPixel(ypPtr[theoraFrame.planes[0].stride+1])<<3)&0x7f8U)|(FrameSource::DepthPixel(*cbPtr)&0x0fU);
 				
 				/* Go to the next pixel block: */
 				resultPtr+=2;
@@ -170,20 +172,20 @@ FrameBuffer LossyDepthFrameReader::readNextFrame(void)
 		source.skip<Misc::UInt8>(packetSize);
 		
 		/* Initialize the frame to all invalid pixels: */
-		unsigned short* resultPtr=static_cast<unsigned short*>(result.getBuffer());
+		FrameSource::DepthPixel* resultPtr=static_cast<FrameSource::DepthPixel*>(result.getBuffer());
 		for(unsigned int y=0;y<size[1];++y)
 			for(unsigned int x=0;x<size[0];++x,++resultPtr)
-				*resultPtr=0x07ffU;
+				*resultPtr=FrameSource::invalidDepth;
 		
 		#endif
 		}
 	else
 		{
 		/* Initialize the frame to all invalid pixels: */
-		unsigned short* resultPtr=static_cast<unsigned short*>(result.getBuffer());
+		FrameSource::DepthPixel* resultPtr=static_cast<FrameSource::DepthPixel*>(result.getBuffer());
 		for(unsigned int y=0;y<size[1];++y)
 			for(unsigned int x=0;x<size[0];++x,++resultPtr)
-				*resultPtr=0x07ffU;
+				*resultPtr=FrameSource::invalidDepth;
 		}
 	
 	return result;

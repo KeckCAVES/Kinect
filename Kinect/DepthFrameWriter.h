@@ -24,6 +24,7 @@ Software Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA
 #define KINECT_DEPTHFRAMEWRITER_INCLUDED
 
 #include <stddef.h>
+#include <Misc/SizedTypes.h>
 #include <Kinect/HilbertCurve.h>
 #include <Kinect/FrameWriter.h>
 
@@ -41,18 +42,18 @@ class DepthFrameWriter:public FrameWriter
 	IO::File& sink; // Data sink for the compressed depth frame stream
 	HilbertCurve hilbertCurve; // Object to traverse depth frames in Hilbert curve order
 	static const unsigned int pixelDeltaNumCodes=32; // Number of codes for pixel deltas
-	static const unsigned int pixelDeltaCodes[pixelDeltaNumCodes][2]; // Huffman code array for pixel deltas
-	static const unsigned int pixelDeltaNodes[pixelDeltaNumCodes-1][2]; // Huffman decoding tree nodes for pixel deltas
+	static const Misc::UInt32 pixelDeltaCodes[pixelDeltaNumCodes][2]; // Huffman code array for pixel deltas
+	static const Misc::UInt32 pixelDeltaNodes[pixelDeltaNumCodes-1][2]; // Huffman decoding tree nodes for pixel deltas
 	static const unsigned int spanLengthNumCodes=256; // Number of codes for span lengths
-	static const unsigned int spanLengthCodes[spanLengthNumCodes][2]; // Huffman code array for span lengths
-	static const unsigned int spanLengthNodes[spanLengthNumCodes-1][2]; // Huffman decoding tree nodes for span lengths
-	unsigned int currentBits; // Buffer to push bits into the sink buffer
+	static const Misc::UInt32 spanLengthCodes[spanLengthNumCodes][2]; // Huffman code array for span lengths
+	static const Misc::UInt32 spanLengthNodes[spanLengthNumCodes-1][2]; // Huffman decoding tree nodes for span lengths
+	Misc::UInt32 currentBits; // Buffer to push bits into the sink buffer
 	unsigned int currentBitsLeft; // Number of available bits left in the bit buffer
 	size_t compressedSize; // Aggregated size of compressed frame during writing
 	
 	/* Private methods: */
-	void writeManyBits(unsigned int bits,unsigned int numBits); // Writes the given number of bits to the sink
-	void writeBits(unsigned int bits,unsigned int numBits) // Writes the given number of bits to the sink
+	void writeManyBits(Misc::UInt32 bits,unsigned int numBits); // Writes the given number of bits to the sink
+	void writeBits(Misc::UInt32 bits,unsigned int numBits) // Writes the given number of bits to the sink
 		{
 		if(numBits<=currentBitsLeft)
 			{

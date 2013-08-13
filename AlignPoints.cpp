@@ -28,11 +28,13 @@ Software Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA
 #include <Misc/File.h>
 #include <IO/ValueSource.h>
 #include <Math/Constants.h>
+#include <Math/Matrix.h>
 #define GEOMETRY_NONSTANDARD_TEMPLATES
 #include <Geometry/Point.h>
 #include <Geometry/AffineCombiner.h>
 #include <Geometry/Box.h>
 #include <Geometry/GeometryValueCoders.h>
+#include <Geometry/OutputOperators.h>
 #include <GL/gl.h>
 #include <GL/GLGeometryWrappers.h>
 #include <Vrui/Vrui.h>
@@ -95,6 +97,192 @@ findTransform(std::vector<typename TransformFitterParam::Point>& points0,
 		*pIt=bestTransform.transform(*pIt);
 	
 	return bestTransform;
+	}
+
+template <class TransformFitterParam>
+inline
+typename TransformFitterParam::Transform
+findTransform2(std::vector<typename TransformFitterParam::Point>& points0,
+               std::vector<typename TransformFitterParam::Point>& points1)
+	{
+	return TransformFitterParam::Transform::identity;
+	}
+
+template <>
+inline
+OGTransformFitter::Transform
+findTransform2<OGTransformFitter>(std::vector<OGTransformFitter::Point>& points0,
+                                  std::vector<OGTransformFitter::Point>& points1)
+	{
+	typedef OGTransformFitter::Point Point;
+	typedef OGTransformFitter::Transform Transform;
+	
+	#if 0
+	
+	/* Rotate the first point set: */
+	Transform t=Transform::rotate(Transform::Rotation::rotateAxis(Transform::Vector(1,0.5,0),Math::rad(22.0)));
+	for(std::vector<Point>::iterator pIt=points0.begin();pIt!=points0.end();++pIt)
+		*pIt=t.transform(*pIt);
+	
+	#endif
+	
+	size_t numPoints=points0.size();
+	if(numPoints>points1.size())
+		numPoints=points1.size();
+	
+	/* Calculate both point sets' centroids: */
+	Point::AffineCombiner cc0;
+	Point::AffineCombiner cc1;
+	for(size_t i=0;i<numPoints;++i)
+		{
+		cc0.addPoint(points0[i]);
+		cc1.addPoint(points1[i]);
+		}
+	Point c0=cc0.getPoint();
+	Point c1=cc1.getPoint();
+	std::cout<<"Centroids: "<<c0<<", "<<c1<<", result translation = "<<c1-c0<<std::endl;
+	
+	/* Calculate both point sets' inner products: */
+	double ip0=0.0;
+	double ip1=0.0;
+	for(size_t pi=0;pi<numPoints;++pi)
+		{
+		Point::Vector d0=points0[pi]-c0;
+		Point::Vector d1=points1[pi]-c1;
+		ip0+=Math::sqr(d0[0])+Math::sqr(d0[1])+Math::sqr(d0[2]);
+		ip1+=Math::sqr(d1[0])+Math::sqr(d1[1])+Math::sqr(d1[2]);
+		}
+	
+	/* Calculate the normalizing scaling factors: */
+	double scale0=Math::sqrt(ip0);
+	double scale1=Math::sqrt(ip1);
+	std::cout<<"Scales: "<<scale0<<", "<<scale1<<", result scale = "<<scale1/scale0<<std::endl;
+	
+	/* Move both point sets to their centroids and scale them to uniform size: */
+	Transform centroidTransform0=Transform::translateToOriginFrom(c0);
+	centroidTransform0.leftMultiply(Transform::scale(1.0/scale0));
+	Transform centroidTransform1=Transform::translateToOriginFrom(c1);
+	centroidTransform1.leftMultiply(Transform::scale(1.0/scale1));
+	std::vector<Point> cPoints0;
+	std::vector<Point> cPoints1;
+	for(size_t i=0;i<numPoints;++i)
+		{
+		cPoints0.push_back(centroidTransform0.transform(points0[i]));
+		cPoints1.push_back(centroidTransform1.transform(points1[i]));
+		}
+	
+	/* Calculate the inner product between the two point sets: */
+	double m[3][3];
+	for(int i=0;i<3;++i)
+		for(int j=0;j<3;++j)
+			m[i][j]=0.0;
+	for(size_t pi=0;pi<numPoints;++pi)
+		for(int i=0;i<3;++i)
+			for(int j=0;j<3;++j)
+				m[i][j]+=cPoints0[pi][i]*cPoints1[pi][j];
+	
+	/* Calculate the coefficients of the quaternion-based characteristic polynomial of the quaternion key matrix: */
+	double q4=1.0;
+	double q3=0.0;
+	double q2=0.0;
+	for(int i=0;i<3;++i)
+		for(int j=0;j<3;++j)
+			q2-=2.0*Math::sqr(m[i][j]);
+	double q1=8.0*(m[0][0]*m[1][2]*m[2][1]+m[1][1]*m[2][0]*m[0][2]+m[2][2]*m[0][1]*m[1][0])
+	         -8.0*(m[0][0]*m[1][1]*m[2][2]+m[1][2]*m[2][0]*m[0][1]+m[2][1]*m[1][0]*m[0][2]);
+	double qd0=Math::sqr(Math::sqr(m[0][1])+Math::sqr(m[0][2])-Math::sqr(m[1][0])-Math::sqr(m[2][0]));
+	double qd1=(-Math::sqr(m[0][0])+Math::sqr(m[1][1])+Math::sqr(m[2][2])+Math::sqr(m[1][2])+Math::sqr(m[2][1])-2.0*(m[1][1]*m[2][2]-m[1][2]*m[2][1]))
+	          *(-Math::sqr(m[0][0])+Math::sqr(m[1][1])+Math::sqr(m[2][2])+Math::sqr(m[1][2])+Math::sqr(m[2][1])+2.0*(m[1][1]*m[2][2]-m[1][2]*m[2][1]));
+	double qd2=(-(m[0][2]+m[2][0])*(m[1][2]-m[2][1])+(m[0][1]-m[1][0])*(m[0][0]-m[1][1]-m[2][2]))
+	          *(-(m[0][2]-m[2][0])*(m[1][2]+m[2][1])+(m[0][1]-m[1][0])*(m[0][0]-m[1][1]+m[2][2]));
+	double qd3=(-(m[0][2]+m[2][0])*(m[1][2]+m[2][1])-(m[0][1]+m[1][0])*(m[0][0]+m[1][1]-m[2][2]))
+	          *(-(m[0][2]-m[2][0])*(m[1][2]-m[2][1])-(m[0][1]+m[1][0])*(m[0][0]+m[1][1]+m[2][2]));
+	double qd4=((m[0][1]+m[1][0])*(m[1][2]+m[2][1])+(m[0][2]+m[2][0])*(m[0][0]-m[1][1]+m[2][2]))
+	          *(-(m[0][1]-m[1][0])*(m[1][2]-m[2][1])+(m[0][2]+m[2][0])*(m[0][0]+m[1][1]+m[2][2]));
+	double qd5=((m[0][1]+m[1][0])*(m[1][2]-m[2][1])+(m[0][2]-m[2][0])*(m[0][0]-m[1][1]-m[2][2]))
+	          *(-(m[0][1]-m[1][0])*(m[1][2]+m[2][1])+(m[0][2]-m[2][0])*(m[0][0]+m[1][1]-m[2][2]));
+	double q0=qd0+qd1+qd2+qd3+qd4+qd5;
+	
+	/* Calculate the optimal rotation: */
+	double lambda=Math::mid(ip0,ip1);
+	double lambda0;
+	do
+		{
+		lambda0=lambda;
+		double poly=(((q4*lambda+q3)*lambda+q2)*lambda+q1)*lambda+q0;
+		double dPoly=((4.0*q4*lambda+3.0*q3)*lambda+2.0*q2)*lambda+q1;
+		lambda-=poly/dPoly;
+		}
+	while(Math::abs(lambda-lambda0)<1.0e-8);
+	std::cout<<"Largest eigenvalue of key matrix: "<<lambda<<std::endl;
+	
+	/* Find the eigenvector corresponding to the largest eigenvalue: */
+	Math::Matrix k(4,4);
+	k(0,0)=m[0][0]+m[1][1]+m[2][2];
+	k(0,1)=m[1][2]-m[2][1];
+	k(0,2)=m[2][0]-m[0][2];
+	k(0,3)=m[0][1]-m[1][0];
+	k(1,0)=m[1][2]-m[2][1];
+	k(1,1)=m[0][0]-m[1][1]-m[2][2];
+	k(1,2)=m[0][1]+m[1][0];
+	k(1,3)=m[2][0]+m[0][2];
+	k(2,0)=m[2][0]-m[0][2];
+	k(2,1)=m[0][1]+m[1][0];
+	k(2,2)=-m[0][0]+m[1][1]-m[2][2];
+	k(2,3)=m[1][2]+m[2][1];
+	k(3,0)=m[0][1]-m[1][0];
+	k(3,1)=m[2][0]+m[0][2];
+	k(3,2)=m[1][2]+m[2][1];
+	k(3,3)=-m[0][0]-m[1][1]+m[2][2];
+	
+	#if 1
+	
+	/* Test the polynomial: */
+	for(double x=-2.0;x<=2.0;x+=1.0/16.0)
+		{
+		double p1=(((q4*x+q3)*x+q2)*x+q1)*x+q0;
+		
+		Math::Matrix kp(4,4);
+		for(int i=0;i<3;++i)
+			for(int j=0;j<4;++j)
+				kp(i,j)=i==j?x-k(i,j):-k(i,j);
+		double p2=kp.determinant();
+		std::cout<<x<<": "<<p1<<", "<<p2<<std::endl;
+		}
+	
+	
+	#endif
+	
+	std::pair<Math::Matrix,Math::Matrix> jacobi=k.jacobiIteration();
+	std::cout<<"Eigenvalues of key matrix: ";
+	for(int i=0;i<4;++i)
+		std::cout<<", "<<jacobi.second(i);
+	std::cout<<std::endl;
+	double maxE=jacobi.second(0);
+	int maxEIndex=0;
+	for(int i=1;i<4;++i)
+		if(maxE<jacobi.second(i))
+			{
+			maxE=jacobi.second(i);
+			maxEIndex=i;
+			}
+	std::cout<<"Largest eigenvector: "<<jacobi.first(0,maxEIndex)<<", "<<jacobi.first(1,maxEIndex)<<", "<<jacobi.first(2,maxEIndex)<<", "<<jacobi.first(3,maxEIndex)<<std::endl;
+	Transform::Rotation rotation=Transform::Rotation::fromQuaternion(jacobi.first(1,maxEIndex),jacobi.first(2,maxEIndex),jacobi.first(3,maxEIndex),jacobi.first(0,maxEIndex));
+	std::cout<<"Result rotation: "<<rotation<<std::endl;
+	
+	Transform result=Geometry::invert(centroidTransform1);
+	result*=Transform::rotate(rotation);
+	result*=centroidTransform0;
+	
+	/* Transform the first point set: */
+	for(std::vector<Point>::iterator pIt=points0.begin();pIt!=points0.end();++pIt)
+		*pIt=result.transform(*pIt);
+	double rmsd=0.0;
+	for(size_t i=0;i<numPoints;++i)
+		rmsd+=Geometry::sqrDist(points0[i],points1[i]);
+	std::cout<<"Best distance: "<<Math::sqrt(rmsd/double(numPoints))<<std::endl;
+	
+	return result;
 	}
 
 template <class PointParam,class TransformParam>
@@ -214,8 +402,11 @@ AlignPoints::AlignPoints(int& argc,char**& argv,char**& appDefaults)
 		
 		case 2: // Orthogonal transformation
 			{
-			OGTransform best=findTransform<OGTransformFitter>(points[0],points[1]);
-			finalTransform*=best;
+			//OGTransform best=findTransform<OGTransformFitter>(points[0],points[1]);
+			//finalTransform*=best;
+			
+			OGTransform best2=findTransform2<OGTransformFitter>(points[0],points[1]);
+			finalTransform*=best2;
 			break;
 			}
 		}

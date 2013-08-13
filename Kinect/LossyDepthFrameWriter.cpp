@@ -23,6 +23,7 @@ Software Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA
 
 #include <Kinect/LossyDepthFrameWriter.h>
 
+#include <Misc/SizedTypes.h>
 #include <Misc/ThrowStdErr.h>
 #include <IO/File.h>
 #include <IO/VariableMemoryFile.h>
@@ -34,6 +35,7 @@ Software Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA
 #include <Video/TheoraComment.h>
 #endif
 #include <Kinect/FrameBuffer.h>
+#include <Kinect/FrameSource.h>
 
 namespace Kinect {
 
@@ -46,7 +48,8 @@ LossyDepthFrameWriter::LossyDepthFrameWriter(IO::File& sSink,const unsigned int 
 	 sink(sSink)
 	{
 	/* Write the frame size to the sink: */
-	sink.write(size,2);
+	for(int i=0;i<2;++i)
+		sink.write<Misc::UInt32>(size[i]);
 	
 	#if VIDEO_CONFIG_HAVE_THEORA
 	
@@ -81,13 +84,13 @@ LossyDepthFrameWriter::LossyDepthFrameWriter(IO::File& sSink,const unsigned int 
 	theoraEncoder.writeHeaders(comments,theoraHeaders);
 	
 	/* Write the header size and header data to the sink: */
-	sink.write<unsigned int>((unsigned int)(theoraHeaders.getDataSize()));
+	sink.write<Misc::UInt32>(Misc::UInt32(theoraHeaders.getDataSize()));
 	theoraHeaders.writeToSink(sink);
 	
 	#else
 	
 	/* Write a dummy header sequence: */
-	sink.write<unsigned int>(0);
+	sink.write<Misc::UInt32>(0);
 	
 	#endif
 	}
@@ -101,19 +104,19 @@ size_t LossyDepthFrameWriter::writeFrame(const FrameBuffer& frame)
 	size_t result=0;
 	
 	/* Write the frame's time stamp to the sink: */
-	sink.write<double>(frame.timeStamp);
-	result+=sizeof(double);
+	sink.write<Misc::Float64>(frame.timeStamp);
+	result+=sizeof(Misc::Float64);
 	
 	#if VIDEO_CONFIG_HAVE_THEORA
 	
 	/* Convert the new raw depth frame to Y'CbCr 4:2:0 by processing pixels in 2x2 blocks: */
-	const unsigned short* fRowPtr=static_cast<const unsigned short*>(frame.getBuffer());
+	const FrameSource::DepthPixel* fRowPtr=static_cast<const FrameSource::DepthPixel*>(frame.getBuffer());
 	unsigned char* ypRowPtr=theoraFrame.planes[0].data;
 	unsigned char* cbRowPtr=theoraFrame.planes[1].data;
 	unsigned char* crRowPtr=theoraFrame.planes[2].data;
 	for(unsigned int y=0;y<size[1];y+=2)
 		{
-		const unsigned short* fPtr=fRowPtr;
+		const FrameSource::DepthPixel* fPtr=fRowPtr;
 		unsigned char* ypPtr=ypRowPtr;
 		unsigned char* cbPtr=cbRowPtr;
 		unsigned char* crPtr=crRowPtr;

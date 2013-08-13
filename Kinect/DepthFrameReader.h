@@ -25,6 +25,7 @@ Software Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA
 #define KINECT_DEPTHFRAMEREADER_INCLUDED
 
 #include <stddef.h>
+#include <Misc/SizedTypes.h>
 #include <Kinect/HilbertCurve.h>
 #include <Kinect/FrameReader.h>
 
@@ -55,20 +56,20 @@ class DepthFrameReader:public FrameReader
 	HuffmanNode* pixelDeltaNodes; // Node array of the pixel delta Huffman tree
 	unsigned int spanLengthNumLeaves; // Number of leaves in the span length Huffman tree
 	HuffmanNode* spanLengthNodes; // Node array of the span length Huffman tree
-	unsigned int currentBits; // Buffer to extract bits from the source buffer
-	unsigned int currentBitMask; // Mask to extract the next bit from the bit buffer
+	Misc::UInt32 currentBits; // Buffer to extract bits from the source buffer
+	Misc::UInt32 currentBitMask; // Mask to extract the next bit from the bit buffer
 	
 	/* Private methods: */
 	void readHuffmanTree(unsigned int& numLeaves,HuffmanNode*& nodes); // Reads a Huffman decoding tree from the source
 	void fillBitBuffer(void); // Fills the bit buffer from the source
-	unsigned int getBit(void) // Reads a single bit from the source and returns its state
+	Misc::UInt32 getBit(void) // Reads a single bit from the source and returns its state
 		{
 		/* Fill the bit buffer if it is empty: */
 		if(currentBitMask==0x0U)
 			fillBitBuffer();
 		
 		/* Extract one bit from the bit buffer: */
-		unsigned int result=0x0U;
+		Misc::UInt32 result=0x0U;
 		if(currentBits&currentBitMask)
 			result=0x1U;
 		currentBitMask>>=1;
