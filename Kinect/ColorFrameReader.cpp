@@ -34,6 +34,7 @@ Software Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA
 #include <Video/TheoraPacket.h>
 #endif
 #include <Kinect/FrameBuffer.h>
+#include <Kinect/FrameSource.h>
 
 namespace Kinect {
 
@@ -46,10 +47,11 @@ ColorFrameReader::ColorFrameReader(IO::File& sSource)
 	 sourceHasTheora(false)
 	{
 	/* Read the frame size from the source: */
-	source.read<unsigned int>(size,2);
+	for(int i=0;i<2;++i)
+		size[i]=source.read<Misc::UInt32>();
 	
 	/* Read the stream header's size: */
-	size_t streamHeaderSize=source.read<unsigned int>();
+	size_t streamHeaderSize=source.read<Misc::UInt32>();
 	sourceHasTheora=streamHeaderSize>0;
 	
 	if(sourceHasTheora)
@@ -90,7 +92,7 @@ ColorFrameReader::~ColorFrameReader(void)
 FrameBuffer ColorFrameReader::readNextFrame(void)
 	{
 	/* Create the result frame: */
-	FrameBuffer result(size[0],size[1],size[1]*size[0]*3*sizeof(unsigned char));
+	FrameBuffer result(size[0],size[1],size[1]*size[0]*sizeof(FrameSource::ColorPixel));
 	
 	/* Return a dummy frame if the file is over: */
 	if(source.eof())
@@ -100,7 +102,7 @@ FrameBuffer ColorFrameReader::readNextFrame(void)
 		}
 	
 	/* Read the frame's time stamp from the source: */
-	result.timeStamp=source.read<double>();
+	result.timeStamp=source.read<Misc::Float64>();
 	
 	if(sourceHasTheora)
 		{
@@ -120,13 +122,14 @@ FrameBuffer ColorFrameReader::readNextFrame(void)
 		theoraDecoder.decodeFrame(theoraFrame);
 		
 		/* Convert the decompressed frame from Y'CbCr 4:2:0 to RGB: */
-		unsigned char* resultRowPtr=static_cast<unsigned char*>(result.getBuffer())+(size[1]-1)*size[0]*3;
+		FrameSource::ColorPixel* resultRowPtr=static_cast<FrameSource::ColorPixel*>(result.getBuffer())+(size[1]-1)*size[0];
+		ptrdiff_t resultStride=size[0];
 		const unsigned char* ypRowPtr=static_cast<const unsigned char*>(theoraFrame.planes[0].data)+theoraFrame.offsets[0];
 		const unsigned char* cbRowPtr=static_cast<const unsigned char*>(theoraFrame.planes[1].data)+theoraFrame.offsets[1];
 		const unsigned char* crRowPtr=static_cast<const unsigned char*>(theoraFrame.planes[2].data)+theoraFrame.offsets[2];
 		for(unsigned int y=0;y<size[1];y+=2)
 			{
-			unsigned char* resultPtr=resultRowPtr;
+			FrameSource::ColorPixel* resultPtr=resultRowPtr;
 			const unsigned char* ypPtr=ypRowPtr;
 			const unsigned char* cbPtr=cbRowPtr;
 			const unsigned char* crPtr=crRowPtr;
@@ -137,26 +140,26 @@ FrameBuffer ColorFrameReader::readNextFrame(void)
 				ypcbcr[0]=ypPtr[0];
 				ypcbcr[1]=*cbPtr;
 				ypcbcr[2]=*crPtr;
-				Video::ypcbcrToRgb(ypcbcr,resultPtr);
+				Video::ypcbcrToRgb(ypcbcr,resultPtr[0].rgb);
 				
 				ypcbcr[0]=ypPtr[1];
-				Video::ypcbcrToRgb(ypcbcr,resultPtr+3);
+				Video::ypcbcrToRgb(ypcbcr,resultPtr[1].rgb);
 				
 				ypcbcr[0]=ypPtr[theoraFrame.planes[0].stride];
-				Video::ypcbcrToRgb(ypcbcr,resultPtr-size[0]*3);
+				Video::ypcbcrToRgb(ypcbcr,resultPtr[-resultStride].rgb);
 				
 				ypcbcr[0]=ypPtr[theoraFrame.planes[0].stride+1];
-				Video::ypcbcrToRgb(ypcbcr,resultPtr-size[0]*3+3);
+				Video::ypcbcrToRgb(ypcbcr,resultPtr[-resultStride+1].rgb);
 				
 				/* Go to the next pixel: */
-				resultPtr+=2*3;
+				resultPtr+=2;
 				ypPtr+=2;
 				++cbPtr;
 				++crPtr;
 				}
 			
 			/* Go to the next row: */
-			resultRowPtr-=2*size[0]*3;
+			resultRowPtr-=2*resultStride;
 			ypRowPtr+=2*theoraFrame.planes[0].stride;
 			cbRowPtr+=theoraFrame.planes[1].stride;
 			crRowPtr+=theoraFrame.planes[2].stride;
@@ -179,28 +182,20 @@ FrameBuffer ColorFrameReader::readNextFrame(void)
 		source.skip<Misc::UInt8>(packetSize);
 		
 		/* Initialize the frame to 50% grey (why not?): */
-		unsigned char* resultPtr=static_cast<unsigned char*>(result.getBuffer());
+		FrameSource::ColorPixel* resultPtr=static_cast<FrameSource::ColorPixel*>(result.getBuffer());
 		for(unsigned int y=0;y<size[1];++y)
-			for(unsigned int x=0;x<size[0];++x,resultPtr+=3)
-				{
-				resultPtr[0]=(unsigned char)(128);
-				resultPtr[1]=(unsigned char)(128);
-				resultPtr[2]=(unsigned char)(128);
-				}
+			for(unsigned int x=0;x<size[0];++x,++resultPtr)
+				resultPtr->rgb[0]=resultPtr->rgb[1]=resultPtr->rgb[2]=FrameSource::ColorComponent(128U);
 		
 		#endif
 		}
 	else
 		{
 		/* Initialize the frame to 50% grey (why not?): */
-		unsigned char* resultPtr=static_cast<unsigned char*>(result.getBuffer());
+		FrameSource::ColorPixel* resultPtr=static_cast<FrameSource::ColorPixel*>(result.getBuffer());
 		for(unsigned int y=0;y<size[1];++y)
-			for(unsigned int x=0;x<size[0];++x,resultPtr+=3)
-				{
-				resultPtr[0]=(unsigned char)(128);
-				resultPtr[1]=(unsigned char)(128);
-				resultPtr[2]=(unsigned char)(128);
-				}
+			for(unsigned int x=0;x<size[0];++x,++resultPtr)
+				resultPtr->rgb[0]=resultPtr->rgb[1]=resultPtr->rgb[2]=FrameSource::ColorComponent(128U);
 		}
 	
 	return result;

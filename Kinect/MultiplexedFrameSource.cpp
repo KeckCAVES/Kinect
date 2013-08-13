@@ -23,6 +23,7 @@ Software Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA
 
 #include <Kinect/MultiplexedFrameSource.h>
 
+#include <Misc/SizedTypes.h>
 #include <Misc/ThrowStdErr.h>
 #include <Misc/FunctionCalls.h>
 #include <Cluster/ClusterPipe.h>
@@ -49,7 +50,8 @@ MultiplexedFrameSource::Stream::Stream(MultiplexedFrameSource* sOwner,unsigned i
 	}
 	
 	/* Read the format versions of the color and depth streams: */
-	source.read<unsigned int>(streamFormatVersions,2);
+	for(int i=0;i<2;++i)
+		streamFormatVersions[i]=source.read<Misc::UInt32>();
 	
 	/* Check if the depth stream has per-pixel depth correction coefficients: */
 	if(streamFormatVersions[1]>=4)
@@ -62,9 +64,9 @@ MultiplexedFrameSource::Stream::Stream(MultiplexedFrameSource* sOwner,unsigned i
 		if(streamFormatVersions[1]>=2&&source.read<char>()!=0)
 			{
 			/* Skip the depth correction buffer: */
-			int size[2];
-			source.read<int>(size,2);
-			source.skip<float>(size[1]*size[0]*2);
+			Misc::SInt32 size[2];
+			source.read<Misc::SInt32>(size,2);
+			source.skip<Misc::Float32>(size[1]*size[0]*2);
 			}
 		
 		/* Create a dummy depth correction object: */
@@ -73,7 +75,7 @@ MultiplexedFrameSource::Stream::Stream(MultiplexedFrameSource* sOwner,unsigned i
 		}
 	
 	/* Check if the depth stream uses lossy compression: */
-	bool depthIsLossy=streamFormatVersions[1]>=3&&source.read<unsigned char>()!=0;
+	bool depthIsLossy=streamFormatVersions[1]>=3&&source.read<Misc::UInt8>()!=0;
 	
 	/* Read the intrinsic and extrinsic camera parameters from the source: */
 	ips.colorProjection=Misc::Marshaller<IntrinsicParameters::PTransform>::read(source);
@@ -200,8 +202,8 @@ void* MultiplexedFrameSource::receivingThreadMethod(void)
 		while(true)
 			{
 			/* Receive the next frame's identifier: */
-			unsigned int metaFrameIndex=pipe->read<unsigned int>();
-			unsigned int frameId=pipe->read<unsigned int>();
+			unsigned int metaFrameIndex=pipe->read<Misc::UInt32>();
+			unsigned int frameId=pipe->read<Misc::UInt32>();
 			
 			/* Check for the beginning of a new meta frame: */
 			if(currentMetaFrameIndex!=metaFrameIndex)
@@ -274,14 +276,14 @@ MultiplexedFrameSource::MultiplexedFrameSource(Comm::PipePtr sPipe)
 		}
 	
 	/* Determine server's endianness: */
-	unsigned int endiannessFlag=pipe->read<unsigned int>();
+	Misc::UInt32 endiannessFlag=pipe->read<Misc::UInt32>();
 	if(endiannessFlag==0x78563412U)
 		pipe->setSwapOnRead(true);
 	else if(endiannessFlag!=0x12345678U)
 		Misc::throwStdErr("MultiplexedFrameSource::MultiplexedFrameSource: Server has unrecognized endianness");
 	
 	/* Initialize all streams: */
-	numStreams=pipe->read<unsigned int>();
+	numStreams=pipe->read<Misc::UInt32>();
 	colorFrameReaders=new FrameReader*[numStreams];
 	depthFrameReaders=new FrameReader*[numStreams];
 	streams=new Stream*[numStreams];
@@ -354,7 +356,7 @@ MultiplexedFrameSource::~MultiplexedFrameSource(void)
 	try
 		{
 		/* Send the disconnect request and shut down the server pipe: */
-		pipe->write<unsigned int>(0);
+		pipe->write<Misc::UInt32>(0);
 		pipe->flush();
 		}
 	catch(...)

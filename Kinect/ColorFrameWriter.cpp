@@ -22,6 +22,7 @@ Software Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA
 
 #include <Kinect/ColorFrameWriter.h>
 
+#include <Misc/SizedTypes.h>
 #include <Misc/ThrowStdErr.h>
 #include <IO/File.h>
 #include <IO/VariableMemoryFile.h>
@@ -34,6 +35,7 @@ Software Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA
 #include <Video/TheoraComment.h>
 #endif
 #include <Kinect/FrameBuffer.h>
+#include <Kinect/FrameSource.h>
 
 namespace Kinect {
 
@@ -50,7 +52,8 @@ ColorFrameWriter::ColorFrameWriter(IO::File& sSink,const unsigned int sSize[2])
 	 #endif
 	{
 	/* Write the frame size to the sink: */
-	sink.write(size,2);
+	for(int i=0;i<2;++i)
+		sink.write<Misc::UInt32>(size[i]);
 	
 	#if VIDEO_CONFIG_HAVE_THEORA
 	
@@ -86,13 +89,13 @@ ColorFrameWriter::ColorFrameWriter(IO::File& sSink,const unsigned int sSize[2])
 	theoraEncoder.writeHeaders(comments,theoraHeaders);
 	
 	/* Write the header size and header data to the sink: */
-	sink.write<unsigned int>((unsigned int)(theoraHeaders.getDataSize()));
+	sink.write<Misc::UInt32>(Misc::UInt32(theoraHeaders.getDataSize()));
 	theoraHeaders.writeToSink(sink);
 	
 	#else
 	
 	/* Write a dummy header sequence: */
-	sink.write<unsigned int>(0);
+	sink.write<Misc::UInt32>(0);
 	
 	#endif
 	}
@@ -109,14 +112,14 @@ size_t ColorFrameWriter::writeFrame(const FrameBuffer& frame)
 	size_t result=0;
 	
 	/* Write the frame's time stamp to the sink: */
-	sink.write<double>(frame.timeStamp);
-	result+=sizeof(double);
+	sink.write<Misc::Float64>(frame.timeStamp);
+	result+=sizeof(Misc::Float64);
 	
 	#if VIDEO_CONFIG_HAVE_THEORA
 	
 	/* Convert the new raw RGB frame to Y'CbCr 4:2:0: */
 	Video::FrameBuffer tempFrame;
-	tempFrame.start=const_cast<unsigned char*>(static_cast<const unsigned char*>(frame.getBuffer())); // It's OK
+	tempFrame.start=const_cast<FrameSource::ColorComponent*>(static_cast<const FrameSource::ColorComponent*>(frame.getBuffer())); // It's OK
 	imageExtractor->extractYpCbCr420(&tempFrame,theoraFrame.planes[0].data,theoraFrame.planes[0].stride,theoraFrame.planes[1].data,theoraFrame.planes[1].stride,theoraFrame.planes[2].data,theoraFrame.planes[2].stride);
 	
 	/* Feed the converted Y'CbCr 4:2:0 frame to the Theora encoder: */

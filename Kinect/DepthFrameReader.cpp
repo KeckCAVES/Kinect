@@ -26,6 +26,7 @@ Software Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA
 #include <IO/File.h>
 #include <Math/Constants.h>
 #include <Kinect/FrameBuffer.h>
+#include <Kinect/FrameSource.h>
 
 namespace Kinect {
 
@@ -36,7 +37,7 @@ Methods of class DepthFrameReader:
 void DepthFrameReader::readHuffmanTree(unsigned int& numLeaves,DepthFrameReader::HuffmanNode*& nodes)
 	{
 	/* Read the number of leaf nodes: */
-	source.read(numLeaves);
+	numLeaves=source.read<Misc::UInt32>();
 	
 	/* Allocate and read the tree's node array: */
 	nodes=new HuffmanNode[numLeaves-1]; // No need to store leaves; only interior nodes
@@ -44,8 +45,8 @@ void DepthFrameReader::readHuffmanTree(unsigned int& numLeaves,DepthFrameReader:
 	/* Read all nodes: */
 	for(unsigned int i=0;i<numLeaves-1;++i)
 		{
-		source.read(nodes[i].left);
-		source.read(nodes[i].right);
+		nodes[i].left=source.read<Misc::UInt32>();
+		nodes[i].right=source.read<Misc::UInt32>();
 		}
 	}
 
@@ -70,7 +71,8 @@ DepthFrameReader::DepthFrameReader(IO::File& sSource)
 	 currentBits(0x0U),currentBitMask(0x0U)
 	{
 	/* Read the frame size from the source: */
-	source.read(size,2);
+	for(int i=0;i<2;++i)
+		size[i]=source.read<Misc::UInt32>();
 	
 	/* Create the Hilbert curve offset array: */
 	hilbertCurve.init(size);
@@ -89,7 +91,7 @@ DepthFrameReader::~DepthFrameReader(void)
 FrameBuffer DepthFrameReader::readNextFrame(void)
 	{
 	/* Create the result frame: */
-	FrameBuffer result(size[0],size[1],size[0]*size[1]*sizeof(unsigned short));
+	FrameBuffer result(size[0],size[1],size[0]*size[1]*sizeof(FrameSource::DepthPixel));
 	
 	/* Return a dummy frame if the file is over: */
 	if(source.eof())
@@ -99,10 +101,10 @@ FrameBuffer DepthFrameReader::readNextFrame(void)
 		}
 	
 	/* Read the frame's time stamp from the source: */
-	result.timeStamp=source.read<double>();
+	result.timeStamp=source.read<Misc::Float64>();
 	
 	/* Process all spans: */
-	unsigned short* resultBuffer=static_cast<unsigned short*>(result.getBuffer());
+	FrameSource::DepthPixel* resultBuffer=static_cast<FrameSource::DepthPixel*>(result.getBuffer());
 	unsigned int numPixels=size[0]*size[1];
 	const unsigned int* hcPtr=hilbertCurve.getOffsets();
 	while(numPixels>0)
@@ -126,7 +128,7 @@ FrameBuffer DepthFrameReader::readNextFrame(void)
 			while(true)
 				{
 				/* Store the current pixel: */
-				resultBuffer[*hcPtr]=(unsigned short)pixelValue;
+				resultBuffer[*hcPtr]=FrameSource::DepthPixel(pixelValue);
 				++hcPtr;
 				--numPixels;
 				
@@ -167,7 +169,7 @@ FrameBuffer DepthFrameReader::readNextFrame(void)
 			while(spanLength>0)
 				{
 				/* Set the current pixel to invalid: */
-				resultBuffer[*hcPtr]=0x07ffU;
+				resultBuffer[*hcPtr]=FrameSource::invalidDepth;
 				++hcPtr;
 				--numPixels;
 				--spanLength;

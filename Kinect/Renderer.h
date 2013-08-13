@@ -1,7 +1,7 @@
 /***********************************************************************
 Renderer - Helper class to receive a 3D video stream from a frame
 source, and render it into an OpenGL context using a projector.
-Copyright (c) 2012 Oliver Kreylos
+Copyright (c) 2012-2013 Oliver Kreylos
 
 This file is part of the Kinect 3D Video Capture Project (Kinect).
 
@@ -71,7 +71,7 @@ class Renderer
 		{
 		return *projector;
 		}
-	void resetFrameTimer(void); // Resets the renderer's frame timer
+	void resetFrameTimer(double newFrameTimerOffset =0.0); // Resets the renderer's frame timer
 	void startStreaming(StreamingCallback* newStreamingCallback); // Starts streaming 3D video frames from the frame source into the projector for rendering; calls given callback every time the projector has new data; adopts callback object
 	void frame(void); // Called once per application frame to update renderer state
 	void glRenderAction(GLContextData& contextData) const; // Draws the renderer's current state into the given OpenGL context

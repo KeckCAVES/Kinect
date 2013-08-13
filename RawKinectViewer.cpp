@@ -51,46 +51,8 @@ Software Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA
 #include "DepthCorrectionTool.h"
 #include "GridTool.h"
 #include "PlaneTool.h"
+#include "PointPlaneTool.h"
 #include "CalibrationCheckTool.h"
-
-namespace {
-
-/****************
-Helper functions:
-****************/
-
-void mapDepth(float depth,const float depthRange[2],GLubyte* result)
-	{
-	static const GLubyte mapColors[6][3]=
-		{
-		{255,0,0},
-		{255,255,0},
-		{0,255,0},
-		{0,255,255},
-		{0,0,255},
-		{255,0,255}
-		};
-	float d=(depth-depthRange[0])*5.0f/(depthRange[1]-depthRange[0]);
-	if(d<=0.0f)
-		{
-		for(int i=0;i<3;++i)
-			result[i]=GLubyte(mapColors[0][i]*0.2f);
-		}
-	else if(d>=5.0f)
-		{
-		for(int i=0;i<3;++i)
-			result[i]=mapColors[5][i];
-		}
-	else
-		{
-		int i0=int(d);
-		d-=float(i0);
-		for(int i=0;i<3;++i)
-			result[i]=GLubyte((mapColors[i0][i]*(1.0f-d)+mapColors[i0+1][i]*d)*(d*0.8f+0.2f));
-		}
-	}
-
-}
 
 /******************************************
 Methods of class RawKinectViewer::DataItem:
@@ -116,6 +78,60 @@ RawKinectViewer::DataItem::~DataItem(void)
 Methods of class RawKinectViewer:
 ********************************/
 
+void RawKinectViewer::mapDepth(unsigned int x,unsigned int y,float depth,GLubyte* result) const
+	{
+	if(depthPlaneValid)
+		{
+		/* Color depth pixels by distance to the depth plane: */
+		float dist=camDepthPlane.calcDistance(Plane::Point(float(x)+0.5f,float(y)+0.5f,depth));
+		if(dist>=0.0f)
+			{
+			GLubyte col=dist<depthPlaneDistMax?255U-GLubyte((dist*255.0f)/depthPlaneDistMax+0.5f):0U;
+			result[0]=col;
+			result[1]=col;
+			result[2]=255U;
+			}
+		else
+			{
+			GLubyte col=-dist<depthPlaneDistMax?255U-GLubyte((-dist*255.0f)/depthPlaneDistMax+0.5f):0U;
+			result[0]=255U;
+			result[1]=col;
+			result[2]=col;
+			}
+		}
+	else
+		{
+		/* Color depth pixels by depth value: */
+		static const GLubyte mapColors[6][3]=
+			{
+			{255,0,0},
+			{255,255,0},
+			{0,255,0},
+			{0,255,255},
+			{0,0,255},
+			{255,0,255}
+			};
+		float d=(depth-depthValueRange[0])*5.0f/(depthValueRange[1]-depthValueRange[0]);
+		if(d<=0.0f)
+			{
+			for(int i=0;i<3;++i)
+				result[i]=GLubyte(mapColors[0][i]*0.2f);
+			}
+		else if(d>=5.0f)
+			{
+			for(int i=0;i<3;++i)
+				result[i]=mapColors[5][i];
+			}
+		else
+			{
+			int i0=int(d);
+			d-=float(i0);
+			for(int i=0;i<3;++i)
+				result[i]=GLubyte((mapColors[i0][i]*(1.0f-d)+mapColors[i0+1][i]*d)*(d*0.8f+0.2f));
+			}
+		}
+	}
+
 Vrui::Point RawKinectViewer::calcImagePoint(const Vrui::Ray& physicalRay) const
 	{
 	/* Transform the ray to navigational space: */
@@ -137,37 +153,37 @@ void RawKinectViewer::colorStreamingCallback(const Kinect::FrameBuffer& frameBuf
 		#if 0
 		
 		/* Normalize the color frame: */
-		Kinect::FrameBuffer normalizedFrame(frameBuffer.getSize(0),frameBuffer.getSize(1),frameBuffer.getSize(1)*frameBuffer.getSize(0)*3*sizeof(unsigned char));
-		const unsigned char* fPtr=static_cast<const unsigned char*>(frameBuffer.getBuffer());
-		unsigned char* nfPtr=static_cast<unsigned char*>(normalizedFrame.getBuffer());
+		Kinect::FrameBuffer normalizedFrame(frameBuffer.getSize(0),frameBuffer.getSize(1),frameBuffer.getSize(1)*frameBuffer.getSize(0)*sizeof(ColorPixel));
+		const ColorPixel* fPtr=static_cast<const ColorPixel*>(frameBuffer.getBuffer());
+		ColorPixel* nfPtr=static_cast<ColorPixel*>(normalizedFrame.getBuffer());
 		for(int y=0;y<frameBuffer.getSize(1);++y)
-			for(int x=0;x<frameBuffer.getSize(0);++x,fPtr+=3,nfPtr+=3)
+			for(int x=0;x<frameBuffer.getSize(0);++x,++fPtr,++nfPtr)
 				{
 				#if 1
 				/* Divide all color components by the largest component: */
-				unsigned int max=fPtr[0];
+				unsigned int max=fPtr->rgb[0];
 				for(int i=1;i<3;++i)
-					if(max<fPtr[i])
-						max=fPtr[i];
+					if(max<fPtr->rgb[i])
+						max=fPtr->rgb[i];
 				for(int i=0;i<3;++i)
-					nfPtr[i]=(unsigned char)(((unsigned int)fPtr[i]*256U)/(max+1));
+					nfPtr->rgb[i]=ColorComponent(((unsigned int)fPtr->rgb[i]*256U)/(max+1));
 				#endif
 				
 				#if 0
 				
 				/* Classify the unprocessed color: */
-				if(fPtr[0]<32U&&fPtr[1]<32U&&fPtr[2]<32U)
-					nfPtr[0]=nfPtr[1]=nfPtr[2]=255U;
+				if(fPtr->rgb[0]<32U&&fPtr->rgb[1]<32U&&fPtr->rgb[2]<32U)
+					nfPtr->rgb[0]=nfPtr->rgb[1]=nfPtr->rgb[2]=255U;
 				else
-					nfPtr[0]=nfPtr[1]=nfPtr[2]=0U;
+					nfPtr->rgb[0]=nfPtr->rgb[1]=nfPtr->rgb[2]=0U;
 				
 				#elif 0
 				
 				/* Classify the normalized color: */
-				if(nfPtr[0]>=240U&&nfPtr[1]<80U&&nfPtr[2]>=80U)
-					nfPtr[0]=nfPtr[1]=nfPtr[2]=255U;
+				if(nfPtr->rgb[0]>=240U&&nfPtr->rgb[1]<80U&&nfPtr->rgb[2]>=80U)
+					nfPtr->rgb[0]=nfPtr->rgb[1]=nfPtr->rgb[2]=255U;
 				else
-					nfPtr[0]=nfPtr[1]=nfPtr[2]=0U;
+					nfPtr->rgb[0]=nfPtr->rgb[1]=nfPtr->rgb[2]=0U;
 				
 				#endif
 				}
@@ -246,7 +262,7 @@ void RawKinectViewer::locatorButtonPressCallback(Vrui::LocatorTool::ButtonPressC
 		
 		/* Start the selected pixel's EKG: */
 		selectedPixelCurrentIndex=0;
-		const unsigned short* dfPtr=static_cast<const unsigned short*>(depthFrames.getLockedValue().getBuffer());
+		const DepthPixel* dfPtr=static_cast<const DepthPixel*>(depthFrames.getLockedValue().getBuffer());
 		selectedPixelPulse[0]=dfPtr[selectedPixel[1]*depthFrames.getLockedValue().getSize(0)+selectedPixel[0]];
 		for(int i=1;i<128;++i)
 			selectedPixelPulse[i]=0;
@@ -291,6 +307,7 @@ void RawKinectViewer::averageFramesCallback(GLMotif::ToggleButton::ValueChangedC
 		{
 		/* Invalidate the current average frame: */
 		averageFrameValid=false;
+		depthPlaneValid=false;
 		}
 	}
 
@@ -302,14 +319,15 @@ void RawKinectViewer::saveAverageFrameOKCallback(GLMotif::FileSelectionDialog::O
 		IO::FilePtr frameFile(cbData->selectedDirectory->openFile(cbData->selectedFileName,IO::File::WriteOnly));
 		
 		/* Write the averaged frame: */
-		frameFile->write<unsigned int>(depthFrameSize,2);
+		for(int i=0;i<2;++i)
+			frameFile->write<Misc::UInt32>(depthFrameSize[i]);
 		float cutoff=float(averageNumFrames)*0.5f;
 		float* afdPtr=averageFrameDepth;
 		float* affPtr=averageFrameForeground;
 		const PixelCorrection* dcPtr=depthCorrection;
 		for(unsigned int y=0;y<depthFrameSize[1];++y)
 			for(unsigned int x=0;x<depthFrameSize[0];++x,++afdPtr,++affPtr,++dcPtr)
-				frameFile->write<float>(*affPtr>=cutoff?dcPtr->correct((*afdPtr)/(*affPtr)):2047.0f);
+				frameFile->write<Misc::Float32>(*affPtr>=cutoff?dcPtr->correct((*afdPtr)/(*affPtr)):2047.0f);
 		}
 	catch(std::runtime_error err)
 		{
@@ -356,13 +374,13 @@ void RawKinectViewer::saveColorFrameOKCallback(GLMotif::FileSelectionDialog::OKC
 	try
 		{
 		/* Convert the current color frame into an RGB image: */
-		const unsigned char* sPtr=static_cast<const unsigned char*>(colorFrames.getLockedValue().getBuffer());
+		const ColorPixel* sPtr=static_cast<const ColorPixel*>(colorFrames.getLockedValue().getBuffer());
 		Images::RGBImage colorImage(colorFrameSize[0],colorFrameSize[1]);
 		Images::RGBImage::Color* dPtr=colorImage.modifyPixels();
 		for(unsigned int y=0;y<colorFrameSize[1];++y)
 			for(unsigned int x=0;x<colorFrameSize[0];++x,sPtr+=3,++dPtr)
 				for(int i=0;i<3;++i)
-					(*dPtr)[i]=sPtr[i];
+					(*dPtr)[i]=sPtr->rgb[i];
 		
 		/* Write the RGB image to the file: */
 		Images::writeImageFile(colorImage,cbData->selectedFileName);
@@ -454,11 +472,12 @@ RawKinectViewer::RawKinectViewer(int& argc,char**& argv,char**& appDefaults)
 	:Vrui::Application(argc,argv,appDefaults),
 	 camera(0),
 	 colorFrameSize(0),colorFrameVersion(0),
-	 depthFrameSize(0),depthCorrection(0),depthFrameVersion(0),
+	 depthFrameSize(0),depthCorrection(0),depthPlaneDistMax(10.0),depthFrameVersion(0),
 	 paused(false),
 	 averageNumFrames(150),averageFrameCounter(0),
 	 averageFrameDepth(0),averageFrameForeground(0),
 	 averageFrameValid(false),showAverageFrame(false),
+	 depthPlaneValid(false),
 	 mainMenu(0),averageDepthFrameDialog(0)
 	{
 	/*********************************************************************
@@ -471,6 +490,7 @@ RawKinectViewer::RawKinectViewer(int& argc,char**& argv,char**& appDefaults)
 	DepthCorrectionTool::initClass(*Vrui::getToolManager());
 	GridTool::initClass(*Vrui::getToolManager());
 	PlaneTool::initClass(*Vrui::getToolManager());
+	PointPlaneTool::initClass(*Vrui::getToolManager());
 	CalibrationCheckTool::initClass(*Vrui::getToolManager());
 	
 	/* Parse the command line: */
@@ -562,6 +582,9 @@ RawKinectViewer::RawKinectViewer(int& argc,char**& argv,char**& appDefaults)
 	/* Clean up: */
 	delete dc;
 	
+	/* Get the camera's intrinsic parameters: */
+	intrinsicParameters=camera->getIntrinsicParameters();
+	
 	/* Allocate the average depth frame buffer: */
 	averageFrameDepth=new float[depthFrameSize[0]*depthFrameSize[1]];
 	averageFrameForeground=new float[depthFrameSize[0]*depthFrameSize[1]];
@@ -630,14 +653,14 @@ void RawKinectViewer::frame(void)
 			++selectedPixelCurrentIndex;
 			if(selectedPixelCurrentIndex==128)
 				selectedPixelCurrentIndex=0;
-			const unsigned short* dfPtr=static_cast<const unsigned short*>(depthFrames.getLockedValue().getBuffer());
+			const DepthPixel* dfPtr=static_cast<const DepthPixel*>(depthFrames.getLockedValue().getBuffer());
 			selectedPixelPulse[selectedPixelCurrentIndex]=dfPtr[selectedPixel[1]*depthFrames.getLockedValue().getSize(0)+selectedPixel[0]];
 			}
 		
 		if(averageFrameCounter>0)
 			{
 			/* Accumulate the new depth frame into the averaging buffer: */
-			const unsigned short* dfPtr=static_cast<const unsigned short*>(depthFrames.getLockedValue().getBuffer());
+			const DepthPixel* dfPtr=static_cast<const DepthPixel*>(depthFrames.getLockedValue().getBuffer());
 			float* afdPtr=averageFrameDepth;
 			float* affPtr=averageFrameForeground;
 			for(unsigned int y=0;y<depthFrameSize[1];++y)
@@ -706,7 +729,7 @@ void RawKinectViewer::display(GLContextData& contextData) const
 				if(*affPtr>=foregroundCutoff)
 					{
 					float d=dcPtr->correct((*afdPtr)/(*affPtr));
-					mapDepth(d,depthValueRange,bfPtr);
+					mapDepth(x,y,d,bfPtr);
 					}
 				else
 					bfPtr[0]=bfPtr[1]=bfPtr[2]=GLubyte(0);
@@ -746,7 +769,7 @@ void RawKinectViewer::display(GLContextData& contextData) const
 					if(*fPtr!=Kinect::FrameSource::invalidDepth)
 						{
 						float d=dcPtr->correct(*fPtr);
-						mapDepth(d,depthValueRange,bfPtr);
+						mapDepth(x,y,d,bfPtr);
 						}
 					else
 						bfPtr[0]=bfPtr[1]=bfPtr[2]=GLubyte(0);

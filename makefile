@@ -24,7 +24,7 @@
 # matches the default Vrui installation; if Vrui's installation
 # directory was changed during Vrui's installation, the directory below
 # must be adapted.
-VRUI_MAKEDIR := $(HOME)/Vrui-2.7/share/make
+VRUI_MAKEDIR := $(HOME)/Vrui-3.0/share/make
 ifdef DEBUG
   VRUI_MAKEDIR := $(VRUI_MAKEDIR)/debug
 endif
@@ -37,9 +37,9 @@ endif
 PACKAGEROOT := $(shell pwd)
 
 # Specify version of created dynamic shared libraries
-KINECT_VERSION = 2005
+KINECT_VERSION = 2007
 MAJORLIBVERSION = 2
-MINORLIBVERSION = 5
+MINORLIBVERSION = 7
 KINECT_NAME := Kinect-$(MAJORLIBVERSION).$(MINORLIBVERSION)
 
 # Check if Vrui's collaboration infrastructure is installed
@@ -73,6 +73,9 @@ EXTRALINKDIRFLAGS += -L$(PACKAGEROOT)/$(MYLIBEXT)
 LIBDESTDIR := $(PACKAGEROOT)/$(MYLIBEXT)
 VISLETDESTDIR := $(LIBDESTDIR)/Vislets
 PLUGINDESTDIR := $(LIBDESTDIR)/Plugins
+
+# Set default destination directory for Kinect udev rule:
+UDEVRULEDIR := /etc/udev/rules.d
 
 ########################################################################
 # Specify additional compiler and linker flags
@@ -225,6 +228,7 @@ LIBKINECT_SOURCES = $(wildcard Kinect/*.cpp)
 $(OBJDIR)/Kinect/Camera.o: CFLAGS += -DKINECT_CAMERA_DEPTHCORRECTIONFILENAMEPREFIX='"DepthCorrection"'
 $(OBJDIR)/Kinect/Camera.o: CFLAGS += -DKINECT_CAMERA_INTRINSICPARAMETERSFILENAMEPREFIX='"IntrinsicParameters"'
 $(OBJDIR)/Kinect/Camera.o: CFLAGS += -DKINECT_CAMERA_EXTRINSICPARAMETERSFILENAMEPREFIX='"ExtrinsicParameters"'
+$(OBJDIR)/Kinect/Camera.o: CFLAGS += -DKINECT_CAMERA_DEFAULTBACKGROUNDFILENAMEPREFIX='"Background"'
 
 $(call LIBRARYNAME,libKinect): PACKAGES += $(MYKINECT_DEPENDS)
 $(call LIBRARYNAME,libKinect): EXTRACINCLUDEFLAGS += $(MYKINECT_INCLUDE)
@@ -262,6 +266,7 @@ $(EXEDIR)/RawKinectViewer: $(OBJDIR)/PauseTool.o \
                            $(OBJDIR)/DepthCorrectionTool.o \
                            $(OBJDIR)/GridTool.o \
                            $(OBJDIR)/PlaneTool.o \
+                           $(OBJDIR)/PointPlaneTool.o \
                            $(OBJDIR)/CalibrationCheckTool.o \
                            $(OBJDIR)/RawKinectViewer.o
 .PHONY: RawKinectViewer
@@ -500,3 +505,13 @@ endif
 	@echo Removing makefile fragments...
 	@rm -f $(MAKEINSTALLDIR)/Packages.Kinect
 	@rm -f $(MAKEINSTALLDIR)/Configuration.Kinect
+
+installudevrule:
+# Install the Kinect udev rule in the udev rule directory:
+	@echo Installing Kinect device permission udev rule in $(UDEVRULEDIR)
+	@install -m u=rw,go=r share/70-Kinect.rules $(UDEVRULEDIR)
+
+uninstalludevrule:
+# Remove the Kinect udev rule from the udev rule directory:
+	@echo Removing Kinect device permission udev rule from $(UDEVRULEDIR)
+	@rm -f $(UDEVRULEDIR)/70-Kinect.rules

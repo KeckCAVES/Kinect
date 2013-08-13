@@ -24,6 +24,7 @@ Software Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA
 
 #include <IO/File.h>
 #include <Kinect/FrameBuffer.h>
+#include <Kinect/FrameSource.h>
 
 namespace Kinect {
 
@@ -31,7 +32,7 @@ namespace Kinect {
 Static elements of class DepthFrameWriter:
 *****************************************/
 
-const unsigned int DepthFrameWriter::pixelDeltaCodes[32][2]=
+const Misc::UInt32 DepthFrameWriter::pixelDeltaCodes[32][2]=
 	{
 	{0xbU,5},{0x23bU,11},{0x229U,11},{0x222U,11},{0x226U,11},{0x239U,11},{0x224U,11},{0x47fU,12},
 	{0x22bU,11},{0x23dU,11},{0x23eU,11},{0x116U,10},{0x8cU,9},{0x20U,7},{0x9U,5},{0x0U,2},
@@ -39,7 +40,7 @@ const unsigned int DepthFrameWriter::pixelDeltaCodes[32][2]=
 	{0x22aU,11},{0x47eU,12},{0x225U,11},{0x238U,11},{0x228U,11},{0x223U,11},{0x227U,11},{0x23aU,11}
 	};
 
-const unsigned int DepthFrameWriter::pixelDeltaNodes[31][2]=
+const Misc::UInt32 DepthFrameWriter::pixelDeltaNodes[31][2]=
 	{
 	{25,7},{3,29},{6,26},{4,30},{28,2},{24,8},{27,5},{31,1},
 	{23,9},{10,32},{22,33},{34,35},{36,37},{11,21},{38,39},{40,41},
@@ -47,7 +48,7 @@ const unsigned int DepthFrameWriter::pixelDeltaNodes[31][2]=
 	{54,55},{56,14},{18,0},{57,58},{59,17},{15,60},{61,16}
 	};
 
-const unsigned int DepthFrameWriter::spanLengthCodes[256][2]=
+const Misc::UInt32 DepthFrameWriter::spanLengthCodes[256][2]=
 	{
 	{0x2U,3},{0x0U,3},{0xeU,5},{0x1fU,6},{0x18U,6},{0x9U,6},{0x1bU,7},{0x3dU,7},
 	{0x33U,7},{0xbU,6},{0x3bU,8},{0x36U,7},{0x3dU,8},{0x65U,8},{0x6bU,8},{0x3eU,8},
@@ -83,7 +84,7 @@ const unsigned int DepthFrameWriter::spanLengthCodes[256][2]=
 	{0x56dU,13},{0xc91U,13},{0xc88U,13},{0x717U,13},{0x57eU,13},{0xc9dU,13},{0xf0dU,13},{0x1U,1}
 	};
 
-const unsigned int DepthFrameWriter::spanLengthNodes[255][2]=
+const Misc::UInt32 DepthFrameWriter::spanLengthNodes[255][2]=
 	{
 	{226,227},{222,228},{223,230},{247,221},{224,220},{229,246},{204,248},{252,225},
 	{182,231},{236,219},{210,183},{240,241},{235,251},{232,218},{205,238},{256,214},
@@ -123,7 +124,7 @@ const unsigned int DepthFrameWriter::spanLengthNodes[255][2]=
 Methods of class DepthFrameWriter:
 *********************************/
 
-void DepthFrameWriter::writeManyBits(unsigned int bits,unsigned int numBits)
+void DepthFrameWriter::writeManyBits(Misc::UInt32 bits,unsigned int numBits)
 	{
 	while(numBits>0)
 		{
@@ -139,7 +140,7 @@ void DepthFrameWriter::writeManyBits(unsigned int bits,unsigned int numBits)
 			{
 			/* Write the bit buffer to the sink: */
 			sink.write(currentBits);
-			compressedSize+=sizeof(currentBits);
+			compressedSize+=sizeof(Misc::UInt32);
 			
 			/* Clear the bit buffer: */
 			currentBits=0x0U;
@@ -163,7 +164,7 @@ void DepthFrameWriter::flush(void)
 		
 		/* Write the bit buffer to the sink: */
 		sink.write(currentBits);
-		compressedSize+=sizeof(currentBits);
+		compressedSize+=sizeof(Misc::UInt32);
 		
 		/* Clear the bit buffer: */
 		currentBits=0x0U;
@@ -180,16 +181,17 @@ DepthFrameWriter::DepthFrameWriter(IO::File& sSink,const unsigned int sSize[2])
 	hilbertCurve.init(size);
 	
 	/* Write the frame size to the sink: */
-	sink.write(size,2);
+	for(int i=0;i<2;++i)
+		sink.write<Misc::UInt32>(size[i]);
 	
 	/* Write the pixel delta Huffman decoding tree to the sink: */
 	unsigned int pdnc=pixelDeltaNumCodes;
-	sink.write<unsigned int>(pdnc);
+	sink.write<Misc::UInt32>(pdnc);
 	sink.write(&pixelDeltaNodes[0][0],(pixelDeltaNumCodes-1)*2);
 	
 	/* Write the span length Huffman decoding tree to the sink: */
 	unsigned int slnc=spanLengthNumCodes;
-	sink.write<unsigned int>(slnc);
+	sink.write<Misc::UInt32>(slnc);
 	sink.write(&spanLengthNodes[0][0],(spanLengthNumCodes-1)*2);
 	}
 
@@ -202,24 +204,24 @@ size_t DepthFrameWriter::writeFrame(const FrameBuffer& frame)
 	compressedSize=0;
 	
 	/* Write the frame's time stamp: */
-	sink.write<double>(frame.timeStamp);
-	compressedSize+=sizeof(double);
+	sink.write<Misc::Float64>(frame.timeStamp);
+	compressedSize+=sizeof(Misc::Float64);
 	
 	/* Process all pixels: */
-	const unsigned short* frameBuffer=static_cast<const unsigned short*>(frame.getBuffer());
+	const FrameSource::DepthPixel* frameBuffer=static_cast<const FrameSource::DepthPixel*>(frame.getBuffer());
 	unsigned int numPixels=size[0]*size[1];
 	const unsigned int* hcPtr=hilbertCurve.getOffsets();
 	while(numPixels>0)
 		{
 		/* Check if the next span is valid or invalid: */
-		if(frameBuffer[*hcPtr]!=0x07ffU)
+		if(frameBuffer[*hcPtr]!=FrameSource::invalidDepth)
 			{
 			/******************************
 			Process a span of valid pixels:
 			******************************/
 			
 			/* Write the span header and the initial pixel value: */
-			unsigned int pixelValue=frameBuffer[*hcPtr];
+			Misc::UInt32 pixelValue=frameBuffer[*hcPtr];
 			writeBits(0x800U|pixelValue,12); // 1 bit span header, 11 bits initial pixel value
 			
 			/* Write the rest of pixels in the span: */
@@ -249,7 +251,7 @@ size_t DepthFrameWriter::writeFrame(const FrameBuffer& frame)
 			++hcPtr;
 			--numPixels;
 			unsigned int spanLength=1;
-			while(numPixels>0&&frameBuffer[*hcPtr]==0x07ffU&&spanLength<256)
+			while(numPixels>0&&frameBuffer[*hcPtr]==FrameSource::invalidDepth&&spanLength<256)
 				{
 				++hcPtr;
 				--numPixels;

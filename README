@@ -1,17 +1,18 @@
 ========================================================================
-README for Kinect 3D Video Capture Project version 2.5
+README for Kinect 3D Video Capture Project version 2.7
 Copyright (c) 2010-2013 Oliver Kreylos
 ========================================================================
 
 Requirements
 ============
 
-This software requires the Vrui VR toolkit, version 2.7 build 001 or
+This software requires the Vrui VR toolkit, version 3.0 build 001 or
 newer. It also requires libusb version 1.0, and that Vrui was configured
 with support for libusb prior to its installation. This software can
 optionally create Kinect 3D video streaming plug-ins for Vrui's
-collaboration infrastructure. The presence of Vrui's collaboration
-infrastructure will be detected automatically during the build process.
+collaboration infrastructure (version 2.6 or newer). The presence of
+Vrui's collaboration infrastructure will be detected automatically
+during the build process.
 
 Installation Guide
 ==================
@@ -36,8 +37,8 @@ instructions need to be changed.
 2. Change into the Kinect 3D Video Capture Project's base directory:
    > cd Kinect-<version>
 
-3. If the Vrui version installed in step 0 was not 2.7, or Vrui's
-   installation directory was changed from the default of ~/Vrui-2.7,
+3. If the Vrui version installed in step 0 was not 3.0, or Vrui's
+   installation directory was changed from the default of ~/Vrui-3.0,
    adapt the makefile using a text editor. Change the value of
    VRUI_MAKEDIR close to the beginning of the file as follows:
    VRUI_MAKEDIR := <Vrui install dir>/share/make
@@ -50,6 +51,11 @@ instructions need to be changed.
 
 5. Install the Kinect 3D Video Capture Project:
    > make install
+
+6. (Optional, Linux-only) Install a udev rule file to give access to all
+   Kinect devices to all users, local and remote. Read below for details
+   and security considerations.
+   > sudo make installudevrule
 
 Use
 ===
@@ -73,6 +79,27 @@ retain their intrinsic calibration over time.
 3. Run ./bin/KinectViewer -c <camera index>, where <camera index> is the
    zero-based index of the Kinect device to use if there are multiple
    ones.
+
+Installing a udev rule (Linux-only)
+===================================
+
+By default, Kinect devices can only be accessed by the root user. This
+is inconvenient and a security risk, as all Kinect applications must be
+run as root. The Kinect package contains a udev rule file to give full
+access to any Kinect device to any user, see optional installation step
+6 above. After the rule file has been installed (and all Kinect devices
+have been unplugged and re-plugged), regular users can work with the
+devices.
+
+Security concerns: At this time, the rule file gives access to all
+connected Kinect devices to *all* users, whether logged in locally or
+remotely, e.g., via ssh. This means that a remotely logged-in user could
+turn on the camera or microphones to spy on a local user. Ideally,
+access to the Kinect device would only be granted to the single user
+currently owning the console. However, the way how this is done is
+currently somewhat in flux, with the previous way of assigning ACL
+control via udev rules being deprecated. Until a new method arises,
+users can install the global-access udev rule at their own risks.
 
 Intrinsically Calibrating a Single Kinect
 =========================================
