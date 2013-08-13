@@ -30,6 +30,7 @@ Software Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA
 #include <Vrui/Tool.h>
 #include <Vrui/GenericToolFactory.h>
 #include <Vrui/Application.h>
+#include <Kinect/FrameSource.h>
 
 #include "FindBlobs.h"
 
@@ -41,11 +42,11 @@ Helper classes:
 **************/
 
 template <>
-class BlobProperty<unsigned short> // Blob property accumulator for depth frames; calculates 3D centroid of read depth image pixels
+class BlobProperty<Kinect::FrameSource::DepthPixel> // Blob property accumulator for depth frames; calculates 3D centroid of read depth image pixels
 	{
 	/* Embedded classes: */
 	public:
-	typedef unsigned short Pixel;
+	typedef Kinect::FrameSource::DepthPixel Pixel;
 	typedef Geometry::ProjectiveTransformation<double,3> PTransform;
 	typedef PTransform::Point Point;
 	
@@ -115,7 +116,7 @@ class TiePointTool:public Vrui::Tool,public Vrui::Application::Tool<RawKinectVie
 	
 	/* Embedded classes: */
 	private:
-	typedef unsigned short DepthPixel;
+	typedef Kinect::FrameSource::DepthPixel DepthPixel;
 	typedef Blob<DepthPixel> DepthBlob;
 	typedef GLColor<GLubyte,3> ColorPixel;
 	typedef Blob<ColorPixel> ColorBlob;

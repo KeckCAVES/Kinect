@@ -23,6 +23,7 @@ Software Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA
 
 #include <Kinect/FileFrameSource.h>
 
+#include <Misc/SizedTypes.h>
 #include <Misc/Time.h>
 #include <Misc/FunctionCalls.h>
 #include <Misc/ThrowStdErr.h>
@@ -44,8 +45,8 @@ Methods of class FileFrameSource:
 void FileFrameSource::initialize(void)
 	{
 	/* Read the file's format version numbers: */
-	fileFormatVersions[0]=colorFrameFile->read<unsigned int>();
-	fileFormatVersions[1]=depthFrameFile->read<unsigned int>();
+	fileFormatVersions[0]=colorFrameFile->read<Misc::UInt32>();
+	fileFormatVersions[1]=depthFrameFile->read<Misc::UInt32>();
 	
 	/* Check if there are per-pixel depth correction coefficients: */
 	if(fileFormatVersions[1]>=4)
@@ -55,12 +56,12 @@ void FileFrameSource::initialize(void)
 		}
 	else
 		{
-		if(fileFormatVersions[1]>=2&&depthFrameFile->read<char>()!=0)
+		if(fileFormatVersions[1]>=2&&depthFrameFile->read<Misc::UInt8>()!=0)
 			{
 			/* Skip the depth correction buffer: */
-			int size[2];
-			depthFrameFile->read<int>(size,2);
-			depthFrameFile->skip<float>(size[1]*size[0]*2);
+			Misc::SInt32 size[2];
+			depthFrameFile->read<Misc::SInt32>(size,2);
+			depthFrameFile->skip<Misc::Float32>(size[1]*size[0]*2);
 			}
 		
 		/* Create a dummy depth correction object: */
@@ -69,7 +70,7 @@ void FileFrameSource::initialize(void)
 		}
 	
 	/* Check if the depth stream uses lossy compression: */
-	bool depthIsLossy=fileFormatVersions[1]>=3&&depthFrameFile->read<unsigned char>()!=0;
+	bool depthIsLossy=fileFormatVersions[1]>=3&&depthFrameFile->read<Misc::UInt8>()!=0;
 	
 	/* Read the color and depth projections from their respective files: */
 	intrinsicParameters.colorProjection=Misc::Marshaller<FrameSource::IntrinsicParameters::PTransform>::read(*colorFrameFile);
@@ -147,13 +148,13 @@ void* FileFrameSource::playbackThreadMethod(void)
 				#if 0
 				
 				/* Create a median-filtered depth frame: */
-				FrameBuffer median(depthSize[0],depthSize[1],depthSize[1]*depthSize[0]*sizeof(unsigned short));
-				unsigned short* mPtr=static_cast<unsigned short*>(median.getBuffer());
-				const unsigned short* d0Ptr=static_cast<unsigned short*>(depthFrames[0].getBuffer());
-				const unsigned short* d1Ptr=static_cast<unsigned short*>(depthFrames[1].getBuffer());
-				const unsigned short* d2Ptr=static_cast<unsigned short*>(depthFrames[2].getBuffer());
-				for(int y=0;y<depthSize[1];++y)
-					for(int x=0;x<depthSize[0];++x,++mPtr,++d0Ptr,++d1Ptr,++d2Ptr)
+				FrameBuffer median(depthSize[0],depthSize[1],depthSize[1]*depthSize[0]*sizeof(DepthPixel));
+				DepthPixel* mPtr=static_cast<DepthPixel*>(median.getBuffer());
+				const DepthPixel* d0Ptr=static_cast<DepthPixel*>(depthFrames[0].getBuffer());
+				const DepthPixel* d1Ptr=static_cast<DepthPixel*>(depthFrames[1].getBuffer());
+				const DepthPixel* d2Ptr=static_cast<DepthPixel*>(depthFrames[2].getBuffer());
+				for(unsigned int y=0;y<depthSize[1];++y)
+					for(unsigned int x=0;x<depthSize[0];++x,++mPtr,++d0Ptr,++d1Ptr,++d2Ptr)
 						{
 						/* Find the median: */
 						if(*d0Ptr<=*d1Ptr)
@@ -185,8 +186,8 @@ void* FileFrameSource::playbackThreadMethod(void)
 				if(numBackgroundFrames>0)
 					{
 					/* Add the median-filtered depth frame to the background frame: */
-					unsigned short* bfPtr=backgroundFrame;
-					const unsigned short* mPtr=static_cast<const unsigned short*>(median.getBuffer());
+					DepthPixel* bfPtr=backgroundFrame;
+					const DepthPixel* mPtr=static_cast<const DepthPixel*>(median.getBuffer());
 					for(unsigned int y=0;y<depthSize[1];++y)
 						for(unsigned int x=0;x<depthSize[0];++x,++bfPtr,++mPtr)
 							if(*bfPtr>*mPtr-1)
@@ -198,8 +199,8 @@ void* FileFrameSource::playbackThreadMethod(void)
 				if(removeBackground&&backgroundFrame!=0&&numBackgroundFrames==0)
 					{
 					/* Remove background pixels from the median-filtered depth frame: */
-					unsigned short* mPtr=static_cast<unsigned short*>(median.getBuffer());
-					const unsigned short* bfPtr=backgroundFrame;
+					DepthPixel* mPtr=static_cast<DepthPixel*>(median.getBuffer());
+					const DepthPixel* bfPtr=backgroundFrame;
 					for(unsigned int y=0;y<depthSize[1];++y)
 						for(unsigned int x=0;x<depthSize[0];++x,++mPtr,++bfPtr)
 							if(*mPtr>=*bfPtr)
@@ -353,13 +354,13 @@ void FileFrameSource::captureBackground(unsigned int newNumBackgroundFrames)
 	{
 	/* Initialize the background frame buffer: */
 	if(backgroundFrame==0)
-		backgroundFrame=new unsigned short[depthSize[1]*depthSize[0]];
+		backgroundFrame=new DepthPixel[depthSize[1]*depthSize[0]];
 	
 	/* Initialize the background frame to "empty:" */
-	unsigned short* bfPtr=backgroundFrame;
+	DepthPixel* bfPtr=backgroundFrame;
 	for(unsigned int y=0;y<depthSize[1];++y)
 		for(unsigned int x=0;x<depthSize[0];++x,++bfPtr)
-			*bfPtr=0x07ffU;
+			*bfPtr=invalidDepth;
 	
 	/* Start capturing background frames: */
 	numBackgroundFrames=newNumBackgroundFrames;

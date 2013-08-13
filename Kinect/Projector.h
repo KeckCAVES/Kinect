@@ -84,7 +84,7 @@ class Projector:public GLObject
 	GLfloat* filteredDepthFrame; // Temporally filtered depth frame, same version number as current depth frame
 	GLfloat* spatialFilterBuffer; // Intermediate buffer to filter depth frames spatially
 	int quadCaseVertexOffsets[16][6]; // Offsets of triangle vertices to be used for each quad corner validity case
-	unsigned short triangleDepthRange; // Maximum depth distance between a triangle's vertices
+	FrameSource::DepthPixel triangleDepthRange; // Maximum depth distance between a triangle's vertices
 	Threads::Thread depthFrameProcessingThread; // Background thread to process incoming depth frames for rendering
 	Threads::TripleBuffer<MeshBuffer> meshes; // Triple buffer of meshes ready for rendering
 	unsigned int meshVersion; // Version number of current mesh
@@ -118,11 +118,11 @@ class Projector:public GLObject
 		return filterDepthFrames;
 		}
 	void setFilterDepthFrames(bool newFilterDepthFrames,bool newLowpassDepthFrames); // Enables or disables temporal and spatial depth frame filtering
-	unsigned short getTriangleDepthRange(void) const // Returns the maximum depth range for generated triangles
+	FrameSource::DepthPixel getTriangleDepthRange(void) const // Returns the maximum depth range for generated triangles
 		{
 		return triangleDepthRange;
 		}
-	void setTriangleDepthRange(unsigned short newTriangleDepthRange); // Sets the maximum depth range for valid triangles
+	void setTriangleDepthRange(FrameSource::DepthPixel newTriangleDepthRange); // Sets the maximum depth range for valid triangles
 	const MeshBuffer& processDepthFrame(const FrameBuffer& depthFrame); // Processes the given depth frame immediately and returns the resuling mesh
 	void startStreaming(StreamingCallback* newStreamingCallback); // Starts processing depth frames in the background; calls the provided callback function every time a new mesh is produced
 	void setDepthFrame(const FrameBuffer& newDepthFrame); // Updates the projector's current depth frame in streaming mode; can be called from any thread

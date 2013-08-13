@@ -24,6 +24,7 @@ Software Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA
 
 #include <Kinect/FrameSaver.h>
 
+#include <Misc/SizedTypes.h>
 #include <IO/File.h>
 #include <IO/OpenFile.h>
 #include <Geometry/GeometryMarshallers.h>
@@ -48,8 +49,8 @@ Methods of class FrameSaver:
 void FrameSaver::initialize(FrameSource& frameSource)
 	{
 	/* Write the file formats' version numbers to the depth and color files: */
-	colorFrameFile->write<unsigned int>(1);
-	depthFrameFile->write<unsigned int>(4);
+	colorFrameFile->write<Misc::UInt32>(1);
+	depthFrameFile->write<Misc::UInt32>(4);
 	
 	/* Write the frame source's depth correction parameters: */
 	FrameSource::DepthCorrection* dc=frameSource.getDepthCorrectionParameters();
@@ -59,12 +60,12 @@ void FrameSaver::initialize(FrameSource& frameSource)
 	#if KINECT_FRAMESAVER_LOSSY
 	
 	/* Signal whether the depth stream will contain losslessly compressed frames (lossy compression disabled for now): */
-	depthFrameFile->write<unsigned char>(1);
+	depthFrameFile->write<Misc::UInt8>(1);
 	
 	#else
 	
 	/* Signal that the depth stream will contain losslessly compressed frames: */
-	depthFrameFile->write<unsigned char>(0);
+	depthFrameFile->write<Misc::UInt8>(0);
 	
 	#endif
 	

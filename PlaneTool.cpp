@@ -155,13 +155,13 @@ void PlaneTool::buttonCallback(int buttonSlotIndex,Vrui::InputDevice::ButtonCall
 			
 			/* Transform the plane equation to camera space: */
 			PVector v0=Geometry::normal(normal);
-			PVector v1=Geometry::cross(normal,v0);
+			PVector v1=normal^v0;
 			PPoint p0=centroid+v0;
 			PPoint p1=centroid+v1;
 			PPoint cCentroid=ips.depthProjection.transform(centroid);
 			PPoint cP0=ips.depthProjection.transform(p0);
 			PPoint cP1=ips.depthProjection.transform(p1);
-			PVector cNormal=Geometry::cross(cP0-cCentroid,cP1-cCentroid);
+			PVector cNormal=(cP0-cCentroid)^(cP1-cCentroid);
 			cNormal.normalize();
 			
 			/* Print the plane equation in camera space: */

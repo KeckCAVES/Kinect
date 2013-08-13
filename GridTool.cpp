@@ -24,6 +24,7 @@ Software Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA
 
 #include <string>
 #include <iostream>
+#include <Misc/SizedTypes.h>
 #include <IO/File.h>
 #include <Math/Constants.h>
 #include <Math/Matrix.h>
@@ -174,6 +175,60 @@ void GridTool::startDrag(void)
 		/* Replace the dragged point: */
 		lastDraggedPoints[draggedPointIndex]=draggedPoint;
 		}
+	}
+
+void GridTool::dragInPlane(const GridTool::Point& moveHandle,const GridTool::Point& rotateHandle)
+	{
+	/* Project the grid's center point and rotation handle into the world-space depth plane: */
+	Point3 wmh(moveHandle[0]+double(application->depthFrameSize[0]),moveHandle[1],0.0);
+	wmh[2]=(camDepthPlane.getOffset()-camDepthPlane.getNormal()*wmh)/camDepthPlane.getNormal()[2];
+	wmh=application->intrinsicParameters.depthProjection.transform(wmh);
+	Point3 wrh(rotateHandle[0]+double(application->depthFrameSize[0]),rotateHandle[1],0.0);
+	wrh[2]=(camDepthPlane.getOffset()-camDepthPlane.getNormal()*wrh)/camDepthPlane.getNormal()[2];
+	wrh=application->intrinsicParameters.depthProjection.transform(wrh);
+	
+	/* Construct a coordinate frame around the world-space center point: */
+	Vector3 x=wrh-wmh;
+	x.normalize();
+	Vector3 y=worldDepthPlane.getNormal()^x;
+	y.normalize();
+	
+	Point gridPoints[4];
+	for(int i=0;i<4;++i)
+		{
+		gridPoints[i]=Point::origin;
+		if(i&0x1)
+			gridPoints[i][0]+=double(gridSize[0]);
+		if(i&0x2)
+			gridPoints[i][1]+=double(gridSize[1]);
+		}
+	
+	Point imagePoints[2][4];
+	for(int i=0;i<4;++i)
+		{
+		/* Construct the world-space position of the i-th grid corner: */
+		Point3 wp=wmh;
+		if(i&0x1)
+			wp+=x*double(gridSize[0])*tileSize[0]*0.5;
+		else
+			wp-=x*double(gridSize[0])*tileSize[0]*0.5;
+		if(i&0x2)
+			wp+=y*double(gridSize[1])*tileSize[1]*0.5;
+		else
+			wp-=y*double(gridSize[1])*tileSize[1]*0.5;
+
+		/* Project the grid corner into depth camera space: */
+		Point3 dcp=application->intrinsicParameters.depthProjection.inverseTransform(wp);
+		imagePoints[0][i]=Point(dcp[0]-double(application->depthFrameSize[0]),dcp[1]);
+		
+		/* Project the grid corner into color camera space: */
+		Point3 ccp=application->intrinsicParameters.colorProjection.transform(dcp);
+		imagePoints[1][i]=Point(ccp[0]*double(application->colorFrameSize[0]),ccp[1]*double(application->colorFrameSize[1]));
+		}
+	
+	/* Update the depth and color homographies: */
+	for(int i=0;i<2;++i)
+		homs[i]=calcHomography(gridPoints,imagePoints[i]);
 	}
 
 void GridTool::createTiePoint(void)
@@ -525,24 +580,21 @@ void GridTool::calibrate(void)
 	calibFile->setEndianness(Misc::LittleEndian);
 	for(int i=0;i<4;++i)
 		for(int j=0;j<4;++j)
-			calibFile->write<double>(depthProj(i,j));
+			calibFile->write<Misc::Float64>(depthProj(i,j));
 	for(int i=0;i<4;++i)
 		for(int j=0;j<4;++j)
-			calibFile->write<double>(colorProj(i,j));
+			calibFile->write<Misc::Float64>(colorProj(i,j));
 	}
 
 void GridTool::printWorldPoints(void)
 	{
-	typedef Kinect::FrameSource::IntrinsicParameters::PTransform PTransform;
+	typedef RawKinectViewer::IntrinsicParameters::PTransform PTransform;
 	
 	if(tiePoints.empty())
 		{
 		Vrui::showErrorMessage("GridTool","No tie points to unproject");
 		return;
 		}
-	
-	/* Get the camera's intrinsic parameters: */
-	Kinect::FrameSource::IntrinsicParameters ips=application->camera->getIntrinsicParameters();
 	
 	/* Unproject the grid points of the most recent tie point: */
 	const TiePoint& tp=tiePoints.back();
@@ -553,7 +605,7 @@ void GridTool::printWorldPoints(void)
 			const Plane::Vector& n=tp.gridPlane.getNormal();
 			double o=tp.gridPlane.getOffset();
 			double depth=(o-dip[0]*n[0]-dip[1]*n[1])/n[2];
-			PTransform::Point wp=ips.depthProjection.transform(PTransform::Point(dip[0]+double(application->depthFrameSize[0]),dip[1],depth));
+			PTransform::Point wp=application->intrinsicParameters.depthProjection.transform(PTransform::Point(dip[0]+double(application->depthFrameSize[0]),dip[1],depth));
 			std::cout<<wp[0]<<", "<<wp[1]<<", "<<wp[2]<<std::endl;
 			}
 	}
@@ -611,12 +663,13 @@ GridToolFactory* GridTool::initClass(Vrui::ToolManager& toolManager)
 	factory=new GridToolFactory("GridTool","Draw Grids",0,toolManager);
 	
 	/* Set up the tool class' input layout: */
-	factory->setNumButtons(5);
+	factory->setNumButtons(6);
 	factory->setButtonFunction(0,"Drag Grid Corner");
-	factory->setButtonFunction(1,"Store Grid");
-	factory->setButtonFunction(2,"Toggle Stored Grids");
-	factory->setButtonFunction(3,"Calibrate");
-	factory->setButtonFunction(4,"Unproject Last Grid");
+	factory->setButtonFunction(1,"Toggle Depth Plane Lock");
+	factory->setButtonFunction(2,"Store Grid");
+	factory->setButtonFunction(3,"Toggle Stored Grids");
+	factory->setButtonFunction(4,"Calibrate");
+	factory->setButtonFunction(5,"Unproject Last Grid");
 	
 	/* Initialize the calibration grid layout: */
 	gridSize[0]=7;
@@ -643,7 +696,7 @@ void GridTool::setTileSize(double newTileSize0,double newTileSize1)
 
 GridTool::GridTool(const Vrui::ToolFactory* factory,const Vrui::ToolInputAssignment& inputAssignment)
 	:Vrui::Tool(factory,inputAssignment),
-	 draggingMode(IDLE),
+	 lockToPlane(false),draggingMode(IDLE),
 	 showTiePoints(false)
 	{
 	}
@@ -660,19 +713,19 @@ void GridTool::initialize(void)
 	tiePointFile->setEndianness(Misc::LittleEndian);
 	
 	/* Read the grid dimensions: */
-	int gridSize[2];
-	tiePointFile->read<int>(gridSize,2);
-	double tileSize[2];
-	tiePointFile->read<double>(tileSize,2);
+	Misc::UInt32 gridSize[2];
+	tiePointFile->read(gridSize,2);
+	Misc::Float64 tileSize[2];
+	tiePointFile->read(tileSize,2);
 	
 	/* Read the depth and color frame sizes: */
-	unsigned int depthFrameSize[2];
+	Misc::UInt32 depthFrameSize[2];
 	tiePointFile->read(depthFrameSize,2);
-	unsigned int colorFrameSize[2];
+	Misc::UInt32 colorFrameSize[2];
 	tiePointFile->read(colorFrameSize,2);
 	
 	/* Read all tie points: */
-	unsigned int numTiePoints=tiePointFile->read<unsigned int>();
+	unsigned int numTiePoints=tiePointFile->read<Misc::UInt32>();
 	for(unsigned int i=0;i<numTiePoints;++i)
 		{
 		TiePoint tp;
@@ -702,24 +755,51 @@ void GridTool::buttonCallback(int buttonSlotIndex,Vrui::InputDevice::ButtonCallb
 			}
 		else if(buttonSlotIndex==1)
 			{
+			if(!lockToPlane)
+				{
+				/* Check if the application has a valid depth plane: */
+				if(application->depthPlaneValid)
+					{
+					/* Lock to the application's world-space depth plane: */
+					lockToPlane=true;
+					camDepthPlane=application->camDepthPlane;
+					worldDepthPlane=application->worldDepthPlane;
+					
+					/* Project the depth image grid into the depth plane: */
+					Point moveHandle=homs[0].transform(Point(double(gridSize[0])*0.5,double(gridSize[1])*0.5));
+					Point rotateHandle=homs[0].transform(Point(double(gridSize[0]+1),double(gridSize[1])*0.5));
+					dragInPlane(moveHandle,rotateHandle);
+					}
+				else
+					Vrui::showErrorMessage("GridTool","No valid depth plane to lock to");
+				}
+			else
+				lockToPlane=false;
+			}
+		else if(buttonSlotIndex==2)
+			{
 			/* Store the current grids as an intrinsic calibration tie point: */
 			createTiePoint();
 			}
-		else if(buttonSlotIndex==2)
+		else if(buttonSlotIndex==3)
 			{
 			/* Toggle display of previously collected tie points: */
 			showTiePoints=!showTiePoints;
 			}
-		else if(buttonSlotIndex==3)
+		else if(buttonSlotIndex==4)
 			{
 			/* Write all tie points to a file: */
 			IO::FilePtr tiePointFile(Vrui::openFile("CalibrationTiePoints.dat",IO::File::WriteOnly));
 			tiePointFile->setEndianness(Misc::LittleEndian);
-			tiePointFile->write<int>(gridSize,2);
-			tiePointFile->write<double>(tileSize,2);
-			tiePointFile->write<unsigned int>(application->depthFrameSize,2);
-			tiePointFile->write<unsigned int>(application->colorFrameSize,2);
-			tiePointFile->write<unsigned int>(tiePoints.size());
+			for(int i=0;i<2;++i)
+				tiePointFile->write<Misc::UInt32>(gridSize[i]);
+			for(int i=0;i<2;++i)
+				tiePointFile->write<Misc::Float64>(tileSize[i]);
+			for(int i=0;i<2;++i)
+				tiePointFile->write<Misc::UInt32>(application->depthFrameSize[i]);
+			for(int i=0;i<2;++i)
+				tiePointFile->write<Misc::UInt32>(application->colorFrameSize[i]);
+			tiePointFile->write<Misc::UInt32>(tiePoints.size());
 			for(std::vector<TiePoint>::const_iterator tpIt=tiePoints.begin();tpIt!=tiePoints.end();++tpIt)
 				{
 				Misc::Marshaller<Homography>::write(tpIt->depthHom,*tiePointFile);
@@ -730,7 +810,7 @@ void GridTool::buttonCallback(int buttonSlotIndex,Vrui::InputDevice::ButtonCallb
 			/* Perform intrinsic calibration: */
 			calibrate();
 			}
-		else if(buttonSlotIndex==4)
+		else if(buttonSlotIndex==5)
 			{
 			/* Print the world positions of the most recently saved tie point for extrinsic calibration: */
 			printWorldPoints();
@@ -762,41 +842,81 @@ void GridTool::frame(void)
 			{
 			case VERTEX:
 				{
-				imagePoints[draggedPointIndex]=p+dragOffset;
+				if(draggedHom==1||!lockToPlane)
+					{
+					/* Update the currently dragged grid vertex: */
+					imagePoints[draggedPointIndex]=p+dragOffset;
+					
+					/* Recalculate the dragged homography: */
+					homs[draggedHom]=calcHomography(lastDraggedPoints,imagePoints);
+					}
+				
 				break;
 				}
 			
 			case MOVE:
 				{
-				/* Calculate the image-space position of the image center and the displacement vector: */
-				Point imageCenter=homs[draggedHom].transform(Point(double(gridSize[0])*0.5,double(gridSize[1])*0.5));
-				Vector delta=(p+dragOffset)-imageCenter;
+				if(draggedHom==0&&lockToPlane)
+					{
+					/* Calculate the image-space position of the move and rotate handles and the displacement vector: */
+					Point moveHandle=homs[draggedHom].transform(Point(double(gridSize[0])*0.5,double(gridSize[1])*0.5));
+					Point rotateHandle=homs[draggedHom].transform(Point(double(gridSize[0]+1),double(gridSize[1])*0.5));
+					Vector delta=(p+dragOffset)-moveHandle;
+					
+					/* Recalculate the depth homography: */
+					dragInPlane(moveHandle+delta,rotateHandle+delta);
+					}
+				else
+					{
+					/* Calculate the image-space position of the image center and the displacement vector: */
+					Point imageCenter=homs[draggedHom].transform(Point(double(gridSize[0])*0.5,double(gridSize[1])*0.5));
+					Vector delta=(p+dragOffset)-imageCenter;
+					
+					/* Move all image points: */
+					for(int i=0;i<4;++i)
+						imagePoints[i]+=delta;
+					
+					/* Recalculate the dragged homography: */
+					homs[draggedHom]=calcHomography(lastDraggedPoints,imagePoints);
+					}
 				
-				/* Move all image points: */
-				for(int i=0;i<4;++i)
-					imagePoints[i]+=delta;
 				break;
 				}
 				
 			case ROTATE:
 				{
-				/* Calculate the image-space positions of the grid center and rotation handle: */
-				Point imageCenter=homs[draggedHom].transform(Point(double(gridSize[0])*0.5,double(gridSize[1])*0.5));
-				Point imageRh=homs[draggedHom].transform(Point(double(gridSize[0]+1),double(gridSize[1])*0.5));
-				
-				/* Calculate the rotation angle: */
-				Vector d1=imageRh-imageCenter;
-				double d1Len=Geometry::mag(d1);
-				Vector d1n=Geometry::normal(d1);
-				double d1nLen=Geometry::mag(d1n);
-				Vector d2=(p+dragOffset)-imageCenter;
-				double angle=Math::atan2((d1n*d2)/d1nLen,(d1*d2)/d1Len);
-				
-				/* Rotate all image points: */
-				for(int i=0;i<4;++i)
+				if(draggedHom==0&&lockToPlane)
 					{
-					Vector d=imagePoints[i]-imageCenter;
-					imagePoints[i]=imageCenter+Vector(d[0]*Math::cos(angle)-d[1]*Math::sin(angle),d[0]*Math::sin(angle)+d[1]*Math::cos(angle));
+					/* Calculate the image-space position of the move and dragged rotate handles: */
+					Point moveHandle=homs[draggedHom].transform(Point(double(gridSize[0])*0.5,double(gridSize[1])*0.5));
+					Point rotateHandle=p+dragOffset;
+					
+					/* Recalculate the depth homography: */
+					dragInPlane(moveHandle,rotateHandle);
+					}
+				else
+					{
+					/* Calculate the image-space positions of the grid center and rotation handle: */
+					Point imageCenter=homs[draggedHom].transform(Point(double(gridSize[0])*0.5,double(gridSize[1])*0.5));
+					Point imageRh=homs[draggedHom].transform(Point(double(gridSize[0]+1),double(gridSize[1])*0.5));
+					
+					/* Calculate the rotation angle: */
+					Vector d1=imageRh-imageCenter;
+					double d1Len=Geometry::mag(d1);
+					Vector d1n=Geometry::normal(d1);
+					double d1nLen=Geometry::mag(d1n);
+					Vector d2=(p+dragOffset)-imageCenter;
+					double angle=Math::atan2((d1n*d2)/d1nLen,(d1*d2)/d1Len);
+					
+					/* Rotate all image points: */
+					for(int i=0;i<4;++i)
+						{
+						Vector d=imagePoints[i]-imageCenter;
+						imagePoints[i]=imageCenter+Vector(d[0]*Math::cos(angle)-d[1]*Math::sin(angle),d[0]*Math::sin(angle)+d[1]*Math::cos(angle));
+						}
+					
+					/* Recalculate the dragged homography: */
+					homs[draggedHom]=calcHomography(lastDraggedPoints,imagePoints);
 					}
 				
 				break;
@@ -805,9 +925,6 @@ void GridTool::frame(void)
 			default:
 				;
 			}
-		
-		/* Recalculate the dragged homography: */
-		homs[draggedHom]=calcHomography(lastDraggedPoints,imagePoints);
 		}
 	}
 

@@ -327,7 +327,7 @@ void Camera::StreamingState::transferCallback(libusb_transfer* transfer)
 Methods of class Camera:
 ***********************/
 
-size_t Camera::sendMessage(unsigned short messageType,const unsigned short* messageData,size_t messageSize,void* replyBuffer,size_t replyBufferSize)
+size_t Camera::sendMessage(Camera::USBWord messageType,const Camera::USBWord* messageData,size_t messageSize,void* replyBuffer,size_t replyBufferSize)
 	{
 	if(messageSize>252)
 		Misc::throwStdErr("Kinect::Camera::sendMessage: Message too long");
@@ -335,7 +335,7 @@ size_t Camera::sendMessage(unsigned short messageType,const unsigned short* mess
 		Misc::throwStdErr("Kinect::Camera::sendMessage: Expected response too long");
 	
 	/* Fill a message buffer: */
-	unsigned short messageBuffer[256];
+	USBWord messageBuffer[256];
 	messageBuffer[0]=0x4d47U; // Magic number
 	messageBuffer[1]=messageSize;
 	messageBuffer[2]=messageType;
@@ -343,10 +343,10 @@ size_t Camera::sendMessage(unsigned short messageType,const unsigned short* mess
 	++messageSequenceNumber;
 	
 	/* Copy the message data: */
-	memcpy(messageBuffer+4,messageData,messageSize*sizeof(unsigned short));
+	memcpy(messageBuffer+4,messageData,messageSize*sizeof(USBWord));
 	
 	/* Send the message to the device: */
-	device.writeControl(0x40,0x00,0x0000,0x0000,reinterpret_cast<unsigned char*>(messageBuffer),(4+messageSize)*sizeof(unsigned short));
+	device.writeControl(0x40,0x00,0x0000,0x0000,reinterpret_cast<unsigned char*>(messageBuffer),(4+messageSize)*sizeof(USBWord));
 	
 	/* Receive the reply message: */
 	size_t replySize;
@@ -360,7 +360,7 @@ size_t Camera::sendMessage(unsigned short messageType,const unsigned short* mess
 	while(replySize==0||replySize==sizeof(messageBuffer)); // The second test is to work around a problem with USB 3.0
 	
 	/* Check the reply's magic number, command, and sequence number: */
-	if(replySize<4*sizeof(unsigned short)||messageBuffer[0]!=0x4252U||messageBuffer[2]!=messageType||messageBuffer[3]!=messageSequenceNumber-1)
+	if(replySize<4*sizeof(USBWord)||messageBuffer[0]!=0x4252U||messageBuffer[2]!=messageType||messageBuffer[3]!=messageSequenceNumber-1)
 		Misc::throwStdErr("Kinect::Camera::sendMessage: Protocol error while sending message %u",(unsigned int)messageType);
 	
 	/* Copy the message reply to the provided buffer: */
@@ -369,49 +369,49 @@ size_t Camera::sendMessage(unsigned short messageType,const unsigned short* mess
 	return replySize;
 	}
 
-bool Camera::sendCommand(unsigned short command,unsigned short value)
+bool Camera::sendCommand(Camera::USBWord command,Camera::USBWord value)
 	{
 	/* Prepare a command message: */
-	unsigned short commandBuffer[2];
+	USBWord commandBuffer[2];
 	commandBuffer[0]=command;
 	commandBuffer[1]=value;
-	unsigned short replyBuffer[8];
+	USBWord replyBuffer[8];
 	size_t replySize=sendMessage(0x0003U,commandBuffer,2,replyBuffer,sizeof(replyBuffer));
 	
 	/* Check for success message: */
-	return replySize==5*sizeof(unsigned short)&&replyBuffer[1]==1&&replyBuffer[4]==0x0000U;
+	return replySize==5*sizeof(USBWord)&&replyBuffer[1]==1&&replyBuffer[4]==0x0000U;
 	}
 
-unsigned short Camera::readRegister(unsigned short address)
+Camera::USBWord Camera::readRegister(Camera::USBWord address)
 	{
 	/* Prepare a command message: */
-	unsigned short commandBuffer[3];
+	USBWord commandBuffer[3];
 	commandBuffer[0]=1U; // 1 address only
 	commandBuffer[1]=address&0x7fffU; // Clear highest bit to indicate read access
 	commandBuffer[2]=0x0000U; // Dummy value
-	unsigned short replyBuffer[3];
+	USBWord replyBuffer[3];
 	size_t replySize=sendMessage(0x0095U,commandBuffer,3,replyBuffer,sizeof(replyBuffer));
 	
 	/* Check for success message: */
-	if(replySize!=3*sizeof(unsigned short)||replyBuffer[0]!=0x0000U)
+	if(replySize!=3*sizeof(USBWord)||replyBuffer[0]!=0x0000U)
 		Misc::throwStdErr("Kinect::Camera::readRegister: Protocol error");
 	
 	/* Return the read register value: */
 	return replyBuffer[2];
 	}
 
-void Camera::writeRegister(unsigned short address,unsigned short value)
+void Camera::writeRegister(Camera::USBWord address,Camera::USBWord value)
 	{
 	/* Prepare a command message: */
-	unsigned short commandBuffer[3];
+	USBWord commandBuffer[3];
 	commandBuffer[0]=1U; // 1 address only
 	commandBuffer[1]=address|0x8000U; // Set highest bit to indicate write access
 	commandBuffer[2]=value;
-	unsigned short replyBuffer[3];
+	USBWord replyBuffer[3];
 	size_t replySize=sendMessage(0x0095U,commandBuffer,3,replyBuffer,sizeof(replyBuffer));
 	
 	/* Check for success message: */
-	if(replySize!=3*sizeof(unsigned short)||replyBuffer[0]!=0x0000U)
+	if(replySize!=3*sizeof(USBWord)||replyBuffer[0]!=0x0000U)
 		Misc::throwStdErr("Kinect::Camera::writeRegister: Protocol error");
 	}
 
@@ -421,19 +421,19 @@ namespace {
 Helper functions for Bayer decoding:
 ***********************************/
 
-inline unsigned char avg(unsigned char v1,unsigned char v2)
+inline FrameSource::ColorComponent avg(FrameSource::ColorComponent v1,FrameSource::ColorComponent v2)
 	{
-	return (unsigned char)(((unsigned int)(v1)+(unsigned int)(v2)+1U)>>1);
+	return FrameSource::ColorComponent(((unsigned int)(v1)+(unsigned int)(v2)+1U)>>1);
 	}
 
-inline unsigned char avg(unsigned char v1,unsigned char v2,unsigned char v3)
+inline FrameSource::ColorComponent avg(FrameSource::ColorComponent v1,FrameSource::ColorComponent v2,FrameSource::ColorComponent v3)
 	{
-	return (unsigned char)(((unsigned int)(v1)+(unsigned int)(v2)+(unsigned int)(v3)+1U)/3U);
+	return FrameSource::ColorComponent(((unsigned int)(v1)+(unsigned int)(v2)+(unsigned int)(v3)+1U)/3U);
 	}
 
-inline unsigned char avg(unsigned char v1,unsigned char v2,unsigned char v3,unsigned char v4)
+inline FrameSource::ColorComponent avg(FrameSource::ColorComponent v1,FrameSource::ColorComponent v2,FrameSource::ColorComponent v3,FrameSource::ColorComponent v4)
 	{
-	return (unsigned char)(((unsigned int)(v1)+(unsigned int)(v2)+(unsigned int)(v3)+(unsigned int)(v4)+2U)>>2);
+	return FrameSource::ColorComponent(((unsigned int)(v1)+(unsigned int)(v2)+(unsigned int)(v3)+(unsigned int)(v4)+2U)>>2);
 	}
 
 }
@@ -446,7 +446,7 @@ void* Camera::colorDecodingThreadMethod(void)
 	while(true)
 		{
 		/* Wait for the next color frame: */
-		unsigned char* framePtr;
+		ColorComponent* framePtr;
 		double frameTimeStamp;
 		{
 		Threads::MutexCond::Lock frameReadyLock(streamers[COLOR]->frameReadyCond);
@@ -462,18 +462,18 @@ void* Camera::colorDecodingThreadMethod(void)
 		/* Allocate a new decoded color buffer: */
 		int width=streamers[COLOR]->frameSize[0];
 		int height=streamers[COLOR]->frameSize[1];
-		FrameBuffer decodedFrame(width,height,width*height*3*sizeof(unsigned char));
+		FrameBuffer decodedFrame(width,height,width*height*sizeof(ColorPixel));
 		decodedFrame.timeStamp=frameTimeStamp;
 		
 		/* Decode the raw color buffer (which is in Bayer GRBG pattern): */
 		int stride=width;
-		const unsigned char* rRowPtr=framePtr;
-		unsigned char* cRowPtr=static_cast<unsigned char*>(decodedFrame.getBuffer());
+		const ColorComponent* rRowPtr=framePtr;
+		ColorComponent* cRowPtr=static_cast<ColorComponent*>(decodedFrame.getBuffer());
 		cRowPtr+=(height-1)*stride*3; // Flip the color image vertically
 		
 		/* Convert the first row: */
-		const unsigned char* rPtr=rRowPtr;
-		unsigned char* cPtr=cRowPtr;
+		const ColorComponent* rPtr=rRowPtr;
+		ColorComponent* cPtr=cRowPtr;
 		
 		/* Convert the first row's first (G) pixel: */
 		*(cPtr++)=rPtr[1];
@@ -618,15 +618,59 @@ void* Camera::colorDecodingThreadMethod(void)
 	return 0;
 	}
 
+namespace {
+
+/****************
+Helper functions:
+****************/
+
+void openBackgroundFrame(int width,int height,FrameSource::DepthPixel* backgroundFrame)
+	{
+	/* Open the background frame: */
+	FrameSource::DepthPixel* tempFrame=new FrameSource::DepthPixel[height*width];
+	
+	/* Open the background frame in the y direction: */
+	for(int x=0;x<width;++x)
+		{
+		FrameSource::DepthPixel* bgPtr=backgroundFrame+x;
+		FrameSource::DepthPixel* tPtr=tempFrame+x;
+		*tPtr=bgPtr[0]<=bgPtr[width]?bgPtr[0]:bgPtr[width];
+		bgPtr+=width;
+		tPtr+=width;
+		for(int y=1;y<height-1;++y,bgPtr+=width,tPtr+=width)
+			*tPtr=bgPtr[-width]<=bgPtr[0]?(bgPtr[-width]<=bgPtr[width]?bgPtr[-width]:bgPtr[width]):(bgPtr[0]<=bgPtr[width]?bgPtr[0]:bgPtr[width]);
+		*tPtr=bgPtr[-width]<=bgPtr[0]?bgPtr[-width]:bgPtr[0];
+		}
+	
+	/* Open the temporary frame in the x direction: */
+	for(int y=0;y<height;++y)
+		{
+		FrameSource::DepthPixel* tPtr=tempFrame+y*width;
+		FrameSource::DepthPixel* bgPtr=backgroundFrame+y*width;
+		*bgPtr=tPtr[0]<=tPtr[1]?tPtr[0]:tPtr[1];
+		++bgPtr;
+		++tPtr;
+		for(int x=1;x<width-1;++x,++bgPtr,++tPtr)
+			*bgPtr=tPtr[-1]<=tPtr[0]?(tPtr[-1]<=tPtr[1]?tPtr[-1]:tPtr[1]):(tPtr[0]<=tPtr[1]?tPtr[0]:tPtr[1]);
+		*bgPtr=tPtr[-1]<=tPtr[0]?tPtr[-1]:tPtr[0];
+		}
+	
+	delete[] tempFrame;
+	}
+
+}
+
 void* Camera::depthDecodingThreadMethod(void)
 	{
 	Threads::Thread::setCancelState(Threads::Thread::CANCEL_ENABLE);
 	// Threads::Thread::setCancelType(Threads::Thread::CANCEL_ASYNCHRONOUS);
 	
+	typedef Misc::UInt8 Byte;
+	
 	while(true)
 		{
 		/* Wait for the next depth frame: */
-		unsigned char* framePtr;
+		Byte* framePtr;
 		double frameTimeStamp;
 		{
 		Threads::MutexCond::Lock frameReadyLock(streamers[DEPTH]->frameReadyCond);
@@ -642,32 +686,32 @@ void* Camera::depthDecodingThreadMethod(void)
 		/* Allocate a new decoded depth buffer: */
 		int width=streamers[DEPTH]->frameSize[0];
 		int height=streamers[DEPTH]->frameSize[1];
-		FrameBuffer decodedFrame(width,height,width*height*sizeof(unsigned short));
+		FrameBuffer decodedFrame(width,height,width*height*sizeof(DepthPixel));
 		decodedFrame.timeStamp=frameTimeStamp;
 		
 		/* Decode the raw depth buffer: */
-		unsigned char* sPtr=framePtr;
-		unsigned short* dRowPtr=static_cast<unsigned short*>(decodedFrame.getBuffer());
+		Byte* sPtr=framePtr;
+		DepthPixel* dRowPtr=static_cast<DepthPixel*>(decodedFrame.getBuffer());
 		dRowPtr+=width*(height-1);
 		
 		/* Process rows: */
-		unsigned short* bfPtr=backgroundFrame;
+		DepthPixel* bfPtr=backgroundFrame;
 		for(int y=0;y<height;++y,dRowPtr-=width) // Flip the depth image vertically
 			{
-			unsigned short* dPtr=dRowPtr;
+			DepthPixel* dPtr=dRowPtr;
 			
 			/* Process pixels in groups of eight: */
 			for(int x=0;x<width;x+=8,sPtr+=11,dPtr+=8,bfPtr+=8)
 				{
 				/* Convert a run of 11 8-bit bytes into 8 11-bit pixels: */
-				dPtr[0]=((unsigned short)sPtr[0]<<3)|((unsigned short)sPtr[1]>>5);
-				dPtr[1]=(((unsigned short)sPtr[1]&0x1fU)<<6)|((unsigned short)sPtr[2]>>2);
-				dPtr[2]=(((unsigned short)sPtr[2]&0x03U)<<9)|((unsigned short)sPtr[3]<<1)|((unsigned short)sPtr[4]>>7);
-				dPtr[3]=(((unsigned short)sPtr[4]&0x7fU)<<4)|((unsigned short)sPtr[5]>>4);
-				dPtr[4]=(((unsigned short)sPtr[5]&0x0fU)<<7)|((unsigned short)sPtr[6]>>1);
-				dPtr[5]=(((unsigned short)sPtr[6]&0x01U)<<10)|((unsigned short)sPtr[7]<<2)|((unsigned short)sPtr[8]>>6);
-				dPtr[6]=(((unsigned short)sPtr[8]&0x3fU)<<5)|((unsigned short)sPtr[9]>>3);
-				dPtr[7]=(((unsigned short)sPtr[9]&0x07U)<<8)|(unsigned short)sPtr[10];
+				dPtr[0]=(DepthPixel(sPtr[0])<<3)|(DepthPixel(sPtr[1])>>5);
+				dPtr[1]=((DepthPixel(sPtr[1])&0x1fU)<<6)|(DepthPixel(sPtr[2])>>2);
+				dPtr[2]=((DepthPixel(sPtr[2])&0x03U)<<9)|(DepthPixel(sPtr[3])<<1)|(DepthPixel(sPtr[4])>>7);
+				dPtr[3]=((DepthPixel(sPtr[4])&0x7fU)<<4)|(DepthPixel(sPtr[5])>>4);
+				dPtr[4]=((DepthPixel(sPtr[5])&0x0fU)<<7)|(DepthPixel(sPtr[6])>>1);
+				dPtr[5]=((DepthPixel(sPtr[6])&0x01U)<<10)|(DepthPixel(sPtr[7])<<2)|(DepthPixel(sPtr[8])>>6);
+				dPtr[6]=((DepthPixel(sPtr[8])&0x3fU)<<5)|(DepthPixel(sPtr[9])>>3);
+				dPtr[7]=((DepthPixel(sPtr[9])&0x07U)<<8)|DepthPixel(sPtr[10]);
 				
 				/* Check if we're in the middle of capturing a background frame: */
 				if(numBackgroundFrames>0)
@@ -696,35 +740,7 @@ void* Camera::depthDecodingThreadMethod(void)
 			if(numBackgroundFrames==0&&backgroundCaptureCallback!=0)
 				{
 				/* Open the background frame: */
-				unsigned short* tempFrame=new unsigned short[height*width];
-				
-				/* Open the background frame in the y direction: */
-				for(int x=0;x<width;++x)
-					{
-					unsigned short* bgPtr=backgroundFrame+x;
-					unsigned short* tPtr=tempFrame+x;
-					*tPtr=bgPtr[0]<=bgPtr[width]?bgPtr[0]:bgPtr[width];
-					bgPtr+=width;
-					tPtr+=width;
-					for(int y=1;y<height-1;++y,bgPtr+=width,tPtr+=width)
-						*tPtr=bgPtr[-width]<=bgPtr[0]?(bgPtr[-width]<=bgPtr[width]?bgPtr[-width]:bgPtr[width]):(bgPtr[0]<=bgPtr[width]?bgPtr[0]:bgPtr[width]);
-					*tPtr=bgPtr[-width]<=bgPtr[0]?bgPtr[-width]:bgPtr[0];
-					}
-				
-				/* Open the temporary frame in the x direction: */
-				for(int y=0;y<height;++y)
-					{
-					unsigned short* tPtr=tempFrame+y*width;
-					unsigned short* bgPtr=backgroundFrame+y*width;
-					*bgPtr=tPtr[0]<=tPtr[1]?tPtr[0]:tPtr[1];
-					++bgPtr;
-					++tPtr;
-					for(int x=1;x<width-1;++x,++bgPtr,++tPtr)
-						*bgPtr=tPtr[-1]<=tPtr[0]?(tPtr[-1]<=tPtr[1]?tPtr[-1]:tPtr[1]):(tPtr[0]<=tPtr[1]?tPtr[0]:tPtr[1]);
-					*bgPtr=tPtr[-1]<=tPtr[0]?tPtr[-1]:tPtr[0];
-					}
-				
-				delete[] tempFrame;
+				openBackgroundFrame(width,height,backgroundFrame);
 				
 				/* Call the callback: */
 				(*backgroundCaptureCallback)(*this);
@@ -744,7 +760,7 @@ void* Camera::depthDecodingThreadMethod(void)
 
 namespace {
 
-inline unsigned int getNybble(unsigned char*& sPtr,bool& sFull)
+inline unsigned int getNybble(Misc::UInt8*& sPtr,bool& sFull)
 	{
 	unsigned int result;
 	if(sFull)
@@ -775,10 +791,12 @@ void* Camera::compressedDepthDecodingThreadMethod(void)
 	Threads::Thread::setCancelState(Threads::Thread::CANCEL_ENABLE);
 	// Threads::Thread::setCancelType(Threads::Thread::CANCEL_ASYNCHRONOUS);
 	
+	typedef Misc::UInt8 Byte;
+	
 	while(true)
 		{
 		/* Wait for the next depth frame: */
-		unsigned char* framePtr;
+		Byte* framePtr;
 		double frameTimeStamp;
 		{
 		Threads::MutexCond::Lock frameReadyLock(streamers[DEPTH]->frameReadyCond);
@@ -794,21 +812,21 @@ void* Camera::compressedDepthDecodingThreadMethod(void)
 		/* Allocate a new decoded depth buffer: */
 		int width=streamers[DEPTH]->frameSize[0];
 		int height=streamers[DEPTH]->frameSize[1];
-		FrameBuffer decodedFrame(width,height,width*height*sizeof(unsigned short));
+		FrameBuffer decodedFrame(width,height,width*height*sizeof(DepthPixel));
 		decodedFrame.timeStamp=frameTimeStamp;
 		
 		/* Decode the raw depth buffer: */
-		unsigned char* sPtr=framePtr;
+		Byte* sPtr=framePtr;
 		bool sFull=true;
-		unsigned short* dRowPtr=static_cast<unsigned short*>(decodedFrame.getBuffer());
+		DepthPixel* dRowPtr=static_cast<DepthPixel*>(decodedFrame.getBuffer());
 		dRowPtr+=width*(height-1);
 		
 		/* Process rows: */
-		unsigned short* bfPtr=backgroundFrame;
+		DepthPixel* bfPtr=backgroundFrame;
 		for(int y=0;y<height;++y,dRowPtr-=width) // Flip the depth image vertically
 			{
-			unsigned short* dPtr=dRowPtr;
-			unsigned short* dEnd=dPtr+width;
+			DepthPixel* dPtr=dRowPtr;
+			DepthPixel* dEnd=dPtr+width;
 			
 			/* Process RLE/differential code groups from the raw depth stream: */
 			unsigned int lastPixel=0x7ffU;
@@ -827,7 +845,7 @@ void* Camera::compressedDepthDecodingThreadMethod(void)
 						
 						/* Store the depth value: */
 						lastPixel=value;
-						*dPtr=(unsigned short)(lastPixel);
+						*dPtr=DepthPixel(lastPixel);
 						++dPtr;
 						}
 					else // It's a large-step differential
@@ -837,7 +855,7 @@ void* Camera::compressedDepthDecodingThreadMethod(void)
 						
 						/* Calculate and store the depth value: */
 						lastPixel=(lastPixel+value)-0xc0U;
-						*dPtr=(unsigned short)lastPixel;
+						*dPtr=DepthPixel(lastPixel);
 						++dPtr;
 						}
 					}
@@ -849,7 +867,7 @@ void* Camera::compressedDepthDecodingThreadMethod(void)
 					/* Copy the last pixel value: */
 					while(numReps>0&&dPtr!=dEnd)
 						{
-						*dPtr=(unsigned short)lastPixel;
+						*dPtr=DepthPixel(lastPixel);
 						++dPtr;
 						--numReps;
 						}
@@ -858,7 +876,7 @@ void* Camera::compressedDepthDecodingThreadMethod(void)
 					{
 					/* Calculate and store the depth value: */
 					lastPixel=(lastPixel+code)-0x06U;
-					*dPtr=(unsigned short)lastPixel;
+					*dPtr=DepthPixel(lastPixel);
 					++dPtr;
 					}
 				}
@@ -867,18 +885,18 @@ void* Camera::compressedDepthDecodingThreadMethod(void)
 		#if 0
 		
 		/* Open the depth frame to fill holes: */
-		FrameBuffer openedFrame(width,height,width*height*sizeof(unsigned short));
+		FrameBuffer openedFrame(width,height,width*height*sizeof(DepthPixel));
 		openedFrame.timeStamp=frameTimeStamp;
 		ptrdiff_t offsets[9];
 		for(int y=0;y<3;++y)
 			for(int x=0;x<3;++x)
 				offsets[y*3+x]=(y-1)*width+(x-1);
-		unsigned short* sRowPtr=static_cast<unsigned short*>(decodedFrame.getBuffer())+width;
-		dRowPtr=static_cast<unsigned short*>(openedFrame.getBuffer())+width;
+		DepthPixel* sRowPtr=static_cast<DepthPixel*>(decodedFrame.getBuffer())+width;
+		dRowPtr=static_cast<DepthPixel*>(openedFrame.getBuffer())+width;
 		for(int y=1;y<height-1;++y,sRowPtr+=width,dRowPtr+=width)
 			{
-			unsigned short* sPtr=sRowPtr+1;
-			unsigned short* dPtr=dRowPtr+1;
+			DepthPixel* sPtr=sRowPtr+1;
+			DepthPixel* dPtr=dRowPtr+1;
 			for(int x=1;x<width-1;++x,++sPtr,++dPtr)
 				{
 				if(*sPtr!=invalidDepth)
@@ -911,7 +929,7 @@ void* Camera::compressedDepthDecodingThreadMethod(void)
 		if(numBackgroundFrames>0)
 			{
 			/* Update the pixels' background depth values: */
-			unsigned short* dPtr=static_cast<unsigned short*>(decodedFrame.getBuffer());
+			DepthPixel* dPtr=static_cast<DepthPixel*>(decodedFrame.getBuffer());
 			bfPtr=backgroundFrame;
 			for(int i=width*height;i>0;--i,++dPtr,++bfPtr)
 				{
@@ -924,7 +942,7 @@ void* Camera::compressedDepthDecodingThreadMethod(void)
 		if(removeBackground)
 			{
 			/* Remove background pixels: */
-			unsigned short* dPtr=static_cast<unsigned short*>(decodedFrame.getBuffer());
+			DepthPixel* dPtr=static_cast<DepthPixel*>(decodedFrame.getBuffer());
 			bfPtr=backgroundFrame;
 			for(int i=width*height;i>0;--i,++dPtr,++bfPtr)
 				{
@@ -940,6 +958,9 @@ void* Camera::compressedDepthDecodingThreadMethod(void)
 			/* Check if this was the last captured background frame, and whether to call a callback function: */
 			if(numBackgroundFrames==0&&backgroundCaptureCallback!=0)
 				{
+				/* Open the background frame: */
+				openBackgroundFrame(width,height,backgroundFrame);
+				
 				/* Call the callback: */
 				(*backgroundCaptureCallback)(*this);
 				
@@ -1068,10 +1089,10 @@ FrameSource::IntrinsicParameters Camera::getIntrinsicParameters(void)
 		parameterFile->setEndianness(Misc::LittleEndian);
 		
 		/* Read the parameter file: */
-		double depthMatrix[16];
+		Misc::Float64 depthMatrix[16];
 		parameterFile->read(depthMatrix,4*4);
 		result.depthProjection=IntrinsicParameters::PTransform::fromRowMajor(depthMatrix);
-		double colorMatrix[16];
+		Misc::Float64 colorMatrix[16];
 		parameterFile->read(colorMatrix,4*4);
 		result.colorProjection=IntrinsicParameters::PTransform::fromRowMajor(colorMatrix);
 		}
@@ -1152,7 +1173,7 @@ void Camera::startStreaming(FrameSource::StreamingCallback* newColorStreamingCal
 	***********************************************************/
 	
 	/* This seems to wake up the device: */
-	unsigned short replyBuffer[64];
+	USBWord replyBuffer[64];
 	sendMessage(0x0000U,0,0,replyBuffer,sizeof(replyBuffer));
 	sendMessage(0x0005U,0,0,replyBuffer,sizeof(replyBuffer));
 	
@@ -1303,7 +1324,7 @@ void Camera::getCalibrationParameters(Camera::CalibrationParameters& calib)
 		device.open();
 	
 	/* Set up the common command buffer: */
-	unsigned short cmdBuffer[5];
+	USBWord cmdBuffer[5];
 	cmdBuffer[1]=0x0000U; // Calibration parameter format
 	switch(frameSizes[COLOR])
 		{
@@ -1328,7 +1349,7 @@ void Camera::getCalibrationParameters(Camera::CalibrationParameters& calib)
 	cmdBuffer[4]=0x0000U; // Offset into calibration parameter area
 	
 	/* Request the calibration parameters in four subsets: */
-	static const unsigned short subsetOpcodes[4]={0x0040U,0x0041U,0x0000U,0x0000U};
+	static const USBWord subsetOpcodes[4]={0x0040U,0x0041U,0x0000U,0x0000U};
 	static const size_t subsetReplySizes[4]={126,16,12,330};
 	for(int subset=0;subset<4;++subset)
 		{
@@ -1341,10 +1362,10 @@ void Camera::getCalibrationParameters(Camera::CalibrationParameters& calib)
 			Misc::throwStdErr("Kinect::Camera::getCalibrationParameters: Protocol error while requesting parameter subset");
 
 		/* Extract the subset of calibration parameters: */
-		replyBuffer.skip<unsigned short>(4); // Skip the reply header
-		replyBuffer.skip<unsigned short>(1); // Skip the parameter set size
+		replyBuffer.skip<USBWord>(4); // Skip the reply header
+		replyBuffer.skip<USBWord>(1); // Skip the parameter set size
 		if(subset==3)
-			replyBuffer.skip<unsigned short>(46); // Skip some unknown parameters
+			replyBuffer.skip<USBWord>(46); // Skip some unknown parameters
 		calib.read(subset,replyBuffer);
 		}
 	
@@ -1409,14 +1430,14 @@ void Camera::captureBackground(unsigned int newNumBackgroundFrames,bool replace,
 	const unsigned int* depthFrameSize=getActualFrameSize(DEPTH);
 	if(backgroundFrame==0)
 		{
-		backgroundFrame=new unsigned short[depthFrameSize[0]*depthFrameSize[1]];
+		backgroundFrame=new DepthPixel[depthFrameSize[0]*depthFrameSize[1]];
 		replace=true;
 		}
 	
 	if(replace)
 		{
 		/* Initialize the background frame to "empty:" */
-		unsigned short* bfPtr=backgroundFrame;
+		DepthPixel* bfPtr=backgroundFrame;
 		for(unsigned int y=0;y<depthFrameSize[1];++y)
 			for(unsigned int x=0;x<depthFrameSize[0];++x,++bfPtr)
 				*bfPtr=invalidDepth;
@@ -1424,6 +1445,30 @@ void Camera::captureBackground(unsigned int newNumBackgroundFrames,bool replace,
 	
 	/* Start capturing background frames: */
 	numBackgroundFrames=newNumBackgroundFrames;
+	}
+
+bool Camera::loadDefaultBackground(void)
+	{
+	/* Construct the full name of this camera's default background image: */
+	std::string backgroundFileName=KINECT_CONFIG_DIR;
+	backgroundFileName.push_back('/');
+	backgroundFileName.append(KINECT_CAMERA_DEFAULTBACKGROUNDFILENAMEPREFIX);
+	backgroundFileName.push_back('-');
+	backgroundFileName.append(serialNumber);
+	backgroundFileName.append(".background");
+	
+	/* Check if the default background file exists: */
+	if(Misc::isFileReadable(backgroundFileName.c_str()))
+		{
+		/* Open and read the background file: */
+		IO::FilePtr file(IO::openFile(backgroundFileName.c_str()));
+		file->setEndianness(Misc::LittleEndian);
+		loadBackground(*file);
+		
+		return true;
+		}
+	
+	return false;
 	}
 
 void Camera::loadBackground(const char* fileNamePrefix)
@@ -1443,8 +1488,8 @@ void Camera::loadBackground(const char* fileNamePrefix)
 void Camera::loadBackground(IO::File& file)
 	{
 	/* Read the frame header: */
-	unsigned int fileFrameSize[2];
-	file.read<unsigned int>(fileFrameSize,2);
+	Misc::UInt32 fileFrameSize[2];
+	file.read<Misc::UInt32>(fileFrameSize,2);
 	
 	/* Check if the file matches the current depth buffer size: */
 	const unsigned int* depthFrameSize=getActualFrameSize(DEPTH);
@@ -1453,10 +1498,10 @@ void Camera::loadBackground(IO::File& file)
 	
 	/* Create the background frame buffer: */
 	if(backgroundFrame==0)
-		backgroundFrame=new unsigned short[depthFrameSize[0]*depthFrameSize[1]];
+		backgroundFrame=new DepthPixel[depthFrameSize[0]*depthFrameSize[1]];
 	
 	/* Read the background file: */
-	file.read<unsigned short>(backgroundFrame,depthFrameSize[0]*depthFrameSize[1]);
+	file.read<DepthPixel>(backgroundFrame,depthFrameSize[0]*depthFrameSize[1]);
 	}
 
 void Camera::setMaxDepth(unsigned int newMaxDepth,bool replace)
@@ -1464,20 +1509,20 @@ void Camera::setMaxDepth(unsigned int newMaxDepth,bool replace)
 	/* Limit the depth value to the valid range: */
 	if(newMaxDepth>invalidDepth)
 		newMaxDepth=invalidDepth;
-	unsigned short nmd=(unsigned short)(newMaxDepth);
+	DepthPixel nmd=DepthPixel(newMaxDepth);
 	
 	const unsigned int* depthFrameSize=getActualFrameSize(DEPTH);
 	if(backgroundFrame==0)
 		{
 		/* Create the background frame buffer: */
-		backgroundFrame=new unsigned short[depthFrameSize[0]*depthFrameSize[1]];
+		backgroundFrame=new DepthPixel[depthFrameSize[0]*depthFrameSize[1]];
 		replace=true;
 		}
 	
 	if(replace)
 		{
 		/* Initialize the background frame to the max depth value */
-		unsigned short* bfPtr=backgroundFrame;
+		DepthPixel* bfPtr=backgroundFrame;
 		for(unsigned int y=0;y<depthFrameSize[1];++y)
 			for(unsigned int x=0;x<depthFrameSize[0];++x,++bfPtr)
 				*bfPtr=nmd;
@@ -1485,7 +1530,7 @@ void Camera::setMaxDepth(unsigned int newMaxDepth,bool replace)
 	else
 		{
 		/* Modify the existing background frame buffer: */
-		unsigned short* bfPtr=backgroundFrame;
+		DepthPixel* bfPtr=backgroundFrame;
 		for(unsigned int y=0;y<depthFrameSize[1];++y)
 			for(unsigned int x=0;x<depthFrameSize[0];++x,++bfPtr)
 				if(*bfPtr>nmd)
@@ -1518,8 +1563,9 @@ void Camera::saveBackground(IO::File& file)
 		return;
 	
 	const unsigned int* depthFrameSize=getActualFrameSize(DEPTH);
-	file.write<unsigned int>(depthFrameSize,2);
-	file.write<unsigned short>(backgroundFrame,depthFrameSize[0]*depthFrameSize[1]);
+	for(int i=0;i<2;++i)
+		file.write<Misc::UInt32>(depthFrameSize[i]);
+	file.write<DepthPixel>(backgroundFrame,depthFrameSize[0]*depthFrameSize[1]);
 	}
 
 void Camera::setRemoveBackground(bool newRemoveBackground)
@@ -1534,7 +1580,7 @@ void Camera::setRemoveBackground(bool newRemoveBackground)
 
 void Camera::setBackgroundRemovalFuzz(int newBackgroundRemovalFuzz)
 	{
-	backgroundRemovalFuzz=(short int)(newBackgroundRemovalFuzz);
+	backgroundRemovalFuzz=Misc::SInt16(newBackgroundRemovalFuzz);
 	}
 
 unsigned int Camera::getSharpening(void)

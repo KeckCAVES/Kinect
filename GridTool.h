@@ -48,6 +48,8 @@ class GridTool:public Vrui::Tool,public Vrui::Application::Tool<RawKinectViewer>
 	typedef Homography::Point Point;
 	typedef Homography::Vector Vector;
 	typedef Geometry::Plane<double,3> Plane;
+	typedef Geometry::Point<double,3> Point3;
+	typedef Geometry::Vector<double,3> Vector3;
 	
 	struct TiePoint // Structure to store a calibration tie point
 		{
@@ -71,6 +73,9 @@ class GridTool:public Vrui::Tool,public Vrui::Application::Tool<RawKinectViewer>
 	static double tileSize[2]; // Size of each grid tile in world space units
 	std::vector<TiePoint> tiePoints; // List of already-created tie points
 	Homography homs[2]; // Homographies in depth image and color image
+	bool lockToPlane; // Flag whether to lock the depth grid to the depth plane
+	Plane camDepthPlane; // Camera-space equation of the plane to which the grid is locked
+	Plane worldDepthPlane; // World-space equation of the plane to which the grid is locked
 	Point lastDraggedPoints[4]; // Last four dragged points in grid coordinates
 	DraggingMode draggingMode; // Tool's current dragging mode
 	int draggedHom; // Flag which homography is being dragged
@@ -83,6 +88,7 @@ class GridTool:public Vrui::Tool,public Vrui::Application::Tool<RawKinectViewer>
 	static Homography calcHomography(const Point gridPoints[4],const Point imagePoints[4]);
 	void initHoms(void);
 	void startDrag(void);
+	void dragInPlane(const Point& moveHandle,const Point& rotateHandle);
 	void createTiePoint(void);
 	void calibrate(void);
 	void printWorldPoints(void);

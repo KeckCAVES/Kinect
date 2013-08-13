@@ -120,6 +120,8 @@ class Camera:public FrameSource
 		};
 	
 	private:
+	typedef Misc::UInt16 USBWord; // Type for words of data exchanged at the USB library API
+	
 	struct StreamingState // Structure containing necessary state to stream color or depth frames from the respective camera
 		{
 		/* Elements: */
@@ -170,27 +172,27 @@ class Camera:public FrameSource
 	std::string serialNumber; // This Kinect camera's serial number
 	FrameSize frameSizes[2]; // Selected frame sizes for the color and depth cameras
 	FrameRate frameRates[2]; // Selected frame rates for the color and depth cameras
-	unsigned short messageSequenceNumber; // Incrementing sequence number for command messages to the camera
+	USBWord messageSequenceNumber; // Incrementing sequence number for command messages to the camera
 	Misc::Timer frameTimer; // Free-running timer to time-stamp depth and color frames
 	double frameTimerOffset; // Time offset to apply to cameras' timers
 	bool compressDepthFrames; // Flag whether to request RLE/differential compressed depth frames from the depth camera
 	bool smoothDepthFrames; // Flag whether to smooth depth frames inside the Kinect's processor, whatever that means
 	StreamingState* streamers[2]; // Streaming states for color and depth frames
 	unsigned int numBackgroundFrames; // Number of background frames left to capture
-	unsigned short* backgroundFrame; // Frame containing minimal depth values for a captured background
+	DepthPixel* backgroundFrame; // Frame containing minimal depth values for a captured background
 	BackgroundCaptureCallback* backgroundCaptureCallback; // Function to call upon completion of background capture
 	bool removeBackground; // Flag whether to remove background information during frame processing
-	short int backgroundRemovalFuzz; // Fuzz value for background removal (positive values: more aggressive removal)
+	Misc::SInt16 backgroundRemovalFuzz; // Fuzz value for background removal (positive values: more aggressive removal)
 	
 	#if KINECT_CAMERA_DUMP_HEADERS
 	IO::FilePtr headerFile;
 	#endif
 	
 	/* Private methods: */
-	size_t sendMessage(unsigned short messageType,const unsigned short* messageData,size_t messageSize,void* replyBuffer,size_t replyBufferSize); // Sends a general message to the camera device; returns reply size in bytes
-	bool sendCommand(unsigned short command,unsigned short value); // Sends a command message to the camera device; returns true if command was processed properly
-	unsigned short readRegister(unsigned short address); // Reads a camera register and returns its value
-	void writeRegister(unsigned short address,unsigned short value); // Sets a camera register to the given value
+	size_t sendMessage(USBWord messageType,const USBWord* messageData,size_t messageSize,void* replyBuffer,size_t replyBufferSize); // Sends a general message to the camera device; returns reply size in bytes
+	bool sendCommand(USBWord command,USBWord value); // Sends a command message to the camera device; returns true if command was processed properly
+	USBWord readRegister(USBWord address); // Reads a camera register and returns its value
+	void writeRegister(USBWord address,USBWord value); // Sets a camera register to the given value
 	void* colorDecodingThreadMethod(void); // The color decoding thread method
 	void* depthDecodingThreadMethod(void); // The depth decoding thread method
 	void* compressedDepthDecodingThreadMethod(void); // The depth decoding thread method for RLE/differential-compressed frames
@@ -231,6 +233,7 @@ class Camera:public FrameSource
 	void setCompressDepthFrames(bool newCompressDepthFrames); // Enables or disables depth frame compression for the next streaming operation
 	void setSmoothDepthFrames(bool newSmoothDepthFrames); // Enables or disables depth frame smoothing for the next streaming operation
 	void captureBackground(unsigned int newNumBackgroundFrames,bool replace,BackgroundCaptureCallback* newBackgroundCaptureCallback =0); // Captures the given number of frames to create a background removal buffer and calls optional callback upon completion
+	bool loadDefaultBackground(void); // Loads the default background removal buffer for this camera; returns true if background was loaded
 	void loadBackground(const char* fileNamePrefix); // Loads a background removal buffer from a file with the given prefix
 	void loadBackground(IO::File& file); // Ditto, from already opened file
 	void setMaxDepth(unsigned int newMaxDepth,bool replace =false); // Sets a depth value beyond which all pixels are considered background

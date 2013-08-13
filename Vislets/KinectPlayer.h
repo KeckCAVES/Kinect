@@ -1,7 +1,7 @@
 /***********************************************************************
 KinectPlayer - Vislet to play back 3D video previously captured from one
 or more Kinect devices.
-Copyright (c) 2011 Oliver Kreylos
+Copyright (c) 2011-2013 Oliver Kreylos
 
 This file is part of the Kinect 3D Video Capture Project (Kinect).
 
@@ -40,8 +40,7 @@ namespace Sound {
 class SoundPlayer;
 }
 namespace Kinect {
-class ColorFrameReader;
-class DepthFrameReader;
+class FrameReader;
 class Projector;
 }
 
@@ -95,10 +94,10 @@ class KinectPlayer:public Vrui::Vislet
 		/* Elements: */
 		private:
 		IO::FilePtr colorFile; // Pointer to the file containing the color stream
-		Kinect::ColorFrameReader* colorDecompressor; // Decompressor for color frames
+		Kinect::FrameReader* colorDecompressor; // Decompressor for color frames
 		Threads::Thread colorDecompressorThread; // Thread to decompress color frames from the color file
 		IO::FilePtr depthFile; // Pointer to the file containing the depth stream
-		Kinect::DepthFrameReader* depthDecompressor; // Decompressor for depth frames
+		Kinect::FrameReader* depthDecompressor; // Decompressor for depth frames
 		Threads::Thread depthDecompressorThread; // Thread to decompress depth frames from the depth file
 		Kinect::Projector projector; // Projector to render a combined depth/color frame
 		Threads::MutexCond timeStampCond; // Condition variable to signal a change in the next time stamp value
@@ -132,7 +131,7 @@ class KinectPlayer:public Vrui::Vislet
 	static KinectPlayerFactory* factory; // Pointer to the class' factory object
 	std::vector<KinectStreamer*> streamers; // List of Kinect streamers
 	Sound::SoundPlayer* soundPlayer; // Pointer to optional sound player
-	bool firstFrame; // Flag indicating the first Vrui frame
+	bool firstEnable; // Flag to indicate the first time the vislet is enabled at start-up
 	
 	/* Constructors and destructors: */
 	public:
@@ -141,6 +140,7 @@ class KinectPlayer:public Vrui::Vislet
 	
 	/* Methods from Vrui::Vislet: */
 	virtual Vrui::VisletFactory* getFactory(void) const;
+	virtual void enable(void);
 	virtual void frame(void);
 	virtual void display(GLContextData& contextData) const;
 	};

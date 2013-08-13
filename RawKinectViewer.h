@@ -27,6 +27,7 @@ Software Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA
 #include <Misc/FunctionCalls.h>
 #include <Threads/TripleBuffer.h>
 #include <USB/Context.h>
+#include <Geometry/Plane.h>
 #include <GL/gl.h>
 #include <GL/GLObject.h>
 #include <GLMotif/ToggleButton.h>
@@ -49,7 +50,12 @@ class RawKinectViewer:public Vrui::Application,public GLObject
 	{
 	/* Embedded classes: */
 	private:
+	typedef Geometry::Plane<float,3> Plane; // Type for planes in depth camera or world space
+	typedef Kinect::FrameSource::DepthPixel DepthPixel; // Type for depth frame pixels
+	typedef Kinect::FrameSource::ColorComponent ColorComponent; // Type for color frame pixel components
+	typedef Kinect::FrameSource::ColorPixel ColorPixel; // Type for color frame pixels
 	typedef Kinect::FrameSource::DepthCorrection::PixelCorrection PixelCorrection; // Type for per-pixel depth correction factors
+	typedef Kinect::FrameSource::IntrinsicParameters IntrinsicParameters; // Type for camera intrinsic parameters
 	typedef Misc::FunctionCall<int> AverageFrameReadyCallback; // Type for callbacks when an average depth frame has been captured; int argument is a dummy
 	
 	struct DataItem:public GLObject::DataItem
@@ -74,6 +80,7 @@ class RawKinectViewer:public Vrui::Application,public GLObject
 	friend class DepthCorrectionTool;
 	friend class GridTool;
 	friend class PlaneTool;
+	friend class PointPlaneTool;
 	friend class CalibrationCheckTool;
 	
 	/* Elements: */
@@ -84,7 +91,9 @@ class RawKinectViewer:public Vrui::Application,public GLObject
 	unsigned int colorFrameVersion; // Version number of current color frame
 	const unsigned int* depthFrameSize; // Size of depth frames in pixels
 	PixelCorrection* depthCorrection; // Buffer containing per-pixel depth correction coefficients
+	IntrinsicParameters intrinsicParameters; // Intrinsic parameters of the Kinect camera
 	float depthValueRange[2]; // Range of depth values mapped to the depth color map
+	float depthPlaneDistMax; // Range of depth plane color map around depth plane
 	Threads::TripleBuffer<Kinect::FrameBuffer> depthFrames; // Triple buffer of depth frames received from the camera
 	unsigned int depthFrameVersion; // Version number of current depth frame
 	bool paused; // Flag whether the video stream display is paused
@@ -95,13 +104,17 @@ class RawKinectViewer:public Vrui::Application,public GLObject
 	float* averageFrameForeground; // Ratio of foreground vs background in depth frame
 	bool averageFrameValid; // Flag whether the average depth frame buffer is currently valid
 	bool showAverageFrame; // Flag whether to show the averaged frame
+	bool depthPlaneValid; // Flag whether a depth plane has been defined
+	Plane camDepthPlane; // Depth plane equation in depth camera image space
+	Plane worldDepthPlane; // Depth plane equation in world space
 	unsigned int selectedPixel[2]; // Coordinates of the selected depth image pixel
-	unsigned short selectedPixelPulse[128]; // EKG of depth value of selected pixel
+	DepthPixel selectedPixelPulse[128]; // EKG of depth value of selected pixel
 	int selectedPixelCurrentIndex; // Index of most recent value in selected pixel's EKG
 	GLMotif::PopupMenu* mainMenu; // The program's main menu
 	GLMotif::PopupWindow* averageDepthFrameDialog; // A dialog window indicating that an average depth frame is being captured
 	
 	/* Private methods: */
+	void mapDepth(unsigned int x,unsigned int y,float depth,GLubyte* colorPtr) const; // Maps a depth value to a color
 	Vrui::Point calcImagePoint(const Vrui::Ray& physicalRay) const; // Returns image-space point at which the given physical-space ray intersects the image plane
 	void colorStreamingCallback(const Kinect::FrameBuffer& frameBuffer); // Callback receiving color frames from the Kinect camera
 	void depthStreamingCallback(const Kinect::FrameBuffer& frameBuffer); // Callback receiving depth frames from the Kinect camera

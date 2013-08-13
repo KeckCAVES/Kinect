@@ -24,6 +24,7 @@ Software Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA
 #ifndef KINECT_FRAMESOURCE_INCLUDED
 #define KINECT_FRAMESOURCE_INCLUDED
 
+#include <Misc/SizedTypes.h>
 #include <Geometry/ProjectiveTransformation.h>
 
 /* Forward declarations: */
@@ -51,6 +52,20 @@ class FrameSource
 	enum Sensor // Enumerated type to select one of frame streams
 		{
 		COLOR=0,DEPTH
+		};
+	
+	typedef Misc::UInt16 DepthPixel; // Type for raw depth pixels
+	typedef Misc::UInt8 ColorComponent; // Type for color pixel components
+	
+	struct ColorPixel // Type for color pixels
+		{
+		/* Embedded classes: */
+		public:
+		typedef ColorComponent Component; // Type for color components
+		
+		/* Elements: */
+		public:
+		Component rgb[3]; // RGB color components
 		};
 	
 	class DepthCorrection // Class defining the depth correction parameters of a depth frame source
@@ -106,7 +121,7 @@ class FrameSource
 	typedef Geometry::OrthogonalTransformation<double,3> ExtrinsicParameters; // Type for extrinsic camera parameters
 	typedef Misc::FunctionCall<const FrameBuffer&> StreamingCallback; // Function call type for streaming color or depth image capture callback
 	
-	static const unsigned short invalidDepth=0x07ffU; // The depth value indicating an invalid (or removed) pixel
+	static const DepthPixel invalidDepth=0x07ffU; // The depth value indicating an invalid (or removed) pixel
 	
 	/* Constructors and destructors: */
 	public:
