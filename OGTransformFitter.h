@@ -1,7 +1,7 @@
 /***********************************************************************
 OGTransformFitter - Functor plug-in to find the best orthogonal
 transformation transforming a source point set into a target point set.
-Copyright (c) 2009-2015 Oliver Kreylos
+Copyright (c) 2009-2010 Oliver Kreylos
 
 This file is part of the Kinect 3D Video Capture Project (Kinect).
 
@@ -122,17 +122,10 @@ class OGTransformFitter
 		result[2]=d[2]/dist;
 		
 		/* Calculate the rotational partial derivatives: */
-		#if 0
 		result[3]=Scalar(2)*(+d[0]*rW-d[1]*rZ+d[2]*rY)*transform.getScaling()/dist;
 		result[4]=Scalar(2)*(+d[0]*rZ+d[1]*rW-d[2]*rX)*transform.getScaling()/dist;
 		result[5]=Scalar(2)*(-d[0]*rY+d[1]*rX+d[2]*rW)*transform.getScaling()/dist;
 		result[6]=Scalar(2)*(+d[0]*rX+d[1]*rY+d[2]*rZ)*transform.getScaling()/dist;
-		#else
-		result[3]=Scalar(2)*(d[0]*(q[1]*s[1]+q[2]*s[2])+d[1]*(q[1]*s[0]-Scalar(2)*q[0]*s[1]-q[3]*s[2])+d[2]*(q[2]*s[0]+q[3]*s[1]-Scalar(2)*q[0]*s[2]))*transform.getScaling()/dist;
-		result[4]=Scalar(2)*(d[0]*(-Scalar(2)*q[1]*s[0]+q[0]*s[1]+q[3]*s[2])+d[1]*(q[0]*s[0]+q[2]*s[2])+d[2]*(-q[3]*s[0]+q[2]*s[1]-Scalar(2)*q[1]*s[2]))*transform.getScaling()/dist;
-		result[5]=Scalar(2)*(d[0]*(-Scalar(2)*q[2]*s[0]-q[3]*s[1]+q[0]*s[2])+d[1]*(q[3]*s[0]-Scalar(2)*q[2]*s[1]+q[1]*s[2])+d[2]*(q[0]*s[0]+q[1]*s[1]))*transform.getScaling()/dist;
-		result[6]=Scalar(2)*(d[0]*(-q[2]*s[1]+q[1]*s[2])+d[1]*(q[2]*s[0]-q[0]*s[2])+d[2]*(-q[1]*s[0]+q[0]*s[1]))*transform.getScaling()/dist;
-		#endif
 		
 		/* Calculate the scaling partial derivatives: */
 		result[7]=((rZ*q[1]-rY*q[2]+rW*q[0]+rX*q[3])*d[0]

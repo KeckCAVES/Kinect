@@ -1,7 +1,7 @@
 /***********************************************************************
 KinectUtil - Utility program to detect, list, and configure Kinect
 devices.
-Copyright (c) 2011-2015 Oliver Kreylos
+Copyright (c) 2011-2013 Oliver Kreylos
 
 This file is part of the Kinect 3D Video Capture Project (Kinect).
 
@@ -502,12 +502,6 @@ void downloadCalibration(unsigned int index)
 	delete[] colorx;
 	delete[] colory;
 	
-	/* Convert the depth matrix from mm to cm: */
-	Math::Matrix scaleMatrix(4,4,1.0);
-	for(int i=0;i<3;++i)
-		scaleMatrix(i,i)=0.1;
-	depthMatrix=scaleMatrix*depthMatrix;
-	
 	/* Write the depth and color matrices to an intrinsic parameter file: */
 	std::string calibFileName=KINECT_CONFIG_DIR;
 	calibFileName.push_back('/');
@@ -544,8 +538,8 @@ bool setLed(unsigned int index,unsigned int ledState)
 	
 	/* Open and prepare the motor device: */
 	motor.open();
-	// motor.setConfiguration(1);
-	// motor.claimInterface(0);
+	motor.setConfiguration(1);
+	motor.claimInterface(0);
 	
 	/* Write an LED control message: */
 	motor.writeControl(0x40,0x06,ledState,0x0000,0,0);

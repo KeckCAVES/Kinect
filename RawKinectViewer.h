@@ -1,7 +1,7 @@
 /***********************************************************************
 RawKinectViewer - Simple application to view color and depth images
 captured from a Kinect device.
-Copyright (c) 2010-2015 Oliver Kreylos
+Copyright (c) 2010-2013 Oliver Kreylos
 
 This file is part of the Kinect 3D Video Capture Project (Kinect).
 
@@ -75,7 +75,6 @@ class RawKinectViewer:public Vrui::Application,public GLObject
 		};
 	
 	friend class PauseTool;
-	friend class MeasurementTool;
 	friend class TiePointTool;
 	friend class LineTool;
 	friend class DepthCorrectionTool;

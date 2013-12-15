@@ -1,7 +1,7 @@
 /***********************************************************************
 LWOWriter - Utility to convert a stream of depth and color frames into
 a sequence of 3D triangle meshes in Lightwave Object file format.
-Copyright (c) 2012-2015 Oliver Kreylos
+Copyright (c) 2012 Oliver Kreylos
 
 This file is part of the Kinect 3D Video Capture Project (Kinect).
 
@@ -301,7 +301,7 @@ int main(int argc,char* argv[])
 	
 	/* Create a 3D video projector: */
 	Kinect::Projector projector(frameSource);
-	projector.setFilterDepthFrames(false,true);
+	projector.setFilterDepthFrames(true);
 	
 	/* Read pairs of frames from the source and export them to a sequence of Lightwave Object files: */
 	unsigned int minIndex=argc>3?atoi(argv[3]):0;
@@ -322,8 +322,7 @@ int main(int argc,char* argv[])
 		if(frameIndex>=minIndex&&frameIndex<maxIndex)
 			{
 			/* Convert the depth frame to a mesh: */
-			Kinect::MeshBuffer mesh;
-			projector.processDepthFrame(depth,mesh);
+			const Kinect::MeshBuffer& mesh=projector.processDepthFrame(depth);
 			
 			/* Export the frame pair to an LWO file: */
 			char lwoFileName[1024];
