@@ -101,7 +101,7 @@ class KinectServer
 		void depthStreamingCallback(const Kinect::FrameBuffer& frame);
 		
 		/* Constructors and destructors: */
-		CameraState(libusb_device* sDevice,bool sLossyDepthCompression,Threads::MutexCond& sNewColorFrameCond,Threads::MutexCond& sNewDepthFrameCond); // Creates a capture and compression state for the given Kinect camera device
+		CameraState(USB::Context& usbContext,const char* serialNumber,bool sLossyDepthCompression,Threads::MutexCond& sNewColorFrameCond,Threads::MutexCond& sNewDepthFrameCond); // Creates a capture and compression state for the given Kinect camera device
 		~CameraState(void);
 		
 		/* Methods: */

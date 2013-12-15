@@ -59,7 +59,11 @@ Software Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA
 #include <Kinect/Camera.h>
 #include <Kinect/FileFrameSource.h>
 #include <Kinect/MultiplexedFrameSource.h>
+#if KINECT_USE_SHADERPROJECTOR
+#include <Kinect/ShaderProjector.h>
+#else
 #include <Kinect/Projector.h>
+#endif
 #include <Kinect/FrameSaver.h>
 
 // #include "MD5MeshAnimator.h"
@@ -93,8 +97,10 @@ void KinectViewer::KinectStreamer::depthStreamingCallback(const Kinect::FrameBuf
 		/* Forward depth frame to the projector: */
 		projector->setDepthFrame(frameBuffer);
 		
-		/* Don't update application state yet; wait until projector is done processing the frame: */
-		// Vrui::requestUpdate();
+		#if KINECT_USE_SHADERPROJECTOR
+		/* Update application state: */
+		Vrui::requestUpdate();
+		#endif
 		}
 	
 	if(frameSaver!=0)
@@ -104,6 +110,8 @@ void KinectViewer::KinectStreamer::depthStreamingCallback(const Kinect::FrameBuf
 		}
 	}
 
+#if !KINECT_USE_SHADERPROJECTOR
+
 void KinectViewer::KinectStreamer::meshStreamingCallback(const Kinect::MeshBuffer& meshBuffer)
 	{
 	if(enabled)
@@ -112,6 +120,8 @@ void KinectViewer::KinectStreamer::meshStreamingCallback(const Kinect::MeshBuffe
 		Vrui::requestUpdate();
 		}
 	}
+
+#endif
 
 void KinectViewer::KinectStreamer::showStreamerDialogCallback(GLMotif::ToggleButton::ValueChangedCallbackData* cbData)
 	{
@@ -182,6 +192,9 @@ GLMotif::PopupWindow* KinectViewer::KinectStreamer::createStreamerDialog(void)
 	processBox->setPacking(GLMotif::RowColumn::PACK_TIGHT);
 	processBox->setNumMinorWidgets(2);
 	
+	#if !KINECT_USE_SHADERPROJECTOR
+	
+	/* Create a toggle button to enable temporal depth frame filtering: */
 	GLMotif::ToggleButton* filterDepthFramesToggle=new GLMotif::ToggleButton("FilterDepthFramesToggle",processBox,"Filter Depth Frames");
 	filterDepthFramesToggle->setBorderWidth(0.0f);
 	filterDepthFramesToggle->setBorderType(GLMotif::Widget::PLAIN);
@@ -189,6 +202,8 @@ GLMotif::PopupWindow* KinectViewer::KinectStreamer::createStreamerDialog(void)
 	filterDepthFramesToggle->getValueChangedCallbacks().add(this,&KinectViewer::KinectStreamer::filterDepthFramesCallback);
 	
 	new GLMotif::Blind("ProcessBlind",processBox);
+	
+	#endif
 	
 	new GLMotif::Label("TriangleDepthRange",processBox,"Triangle Depth Range");
 	
@@ -268,6 +283,8 @@ void KinectViewer::KinectStreamer::showFacadeCallback(GLMotif::ToggleButton::Val
 
 void KinectViewer::KinectStreamer::showFromCameraCallback(Misc::CallbackData* cbData)
 	{
+	#if !KINECT_CONFIG_FRAMESOURCE_EXTRINSIC_PROJECTIVE
+	
 	/* Move the camera position to the viewer's head position: */
 	Vrui::NavTransform nav=Vrui::NavTransform::translateFromOriginTo(Vrui::getMainViewer()->getHeadPosition());
 	
@@ -278,13 +295,19 @@ void KinectViewer::KinectStreamer::showFromCameraCallback(Misc::CallbackData* cb
 	nav*=Geometry::invert(projector->getProjectorTransform());
 	
 	Vrui::setNavigationTransformation(nav);
+	
+	#endif
 	}
+
+#if !KINECT_USE_SHADERPROJECTOR
 
 void KinectViewer::KinectStreamer::filterDepthFramesCallback(GLMotif::ToggleButton::ValueChangedCallbackData* cbData)
 	{
 	/* Set the projector's depth frame filtering flag: */
 	projector->setFilterDepthFrames(cbData->set,false);
 	}
+
+#endif
 
 void KinectViewer::KinectStreamer::triangleDepthRangeCallback(GLMotif::TextFieldSlider::ValueChangedCallbackData* cbData)
 	{
@@ -344,8 +367,15 @@ void KinectViewer::KinectStreamer::saveBackgroundOKCallback(GLMotif::FileSelecti
 	Kinect::Camera* camera=dynamic_cast<Kinect::Camera*>(source);
 	if(camera!=0)
 		{
-		/* Save the current background frame: */
-		camera->saveBackground("KinectBackground");
+		try
+			{
+			/* Save the current background frame: */
+			camera->saveBackground(cbData->getSelectedPath().c_str());
+			}
+		catch(std::runtime_error err)
+			{
+			Vrui::showErrorMessage("Save Background",Misc::printStdErrMsg("Could not save background due to exception %s",err.what()));
+			}
 		}
 	}
 
@@ -383,7 +413,11 @@ void KinectViewer::KinectStreamer::streamerDialogCloseCallback(Misc::CallbackDat
 KinectViewer::KinectStreamer::KinectStreamer(KinectViewer* sApplication,Kinect::FrameSource* sSource)
 	:application(sApplication),
 	 source(sSource),
+	 #if KINECT_USE_SHADERPROJECTOR
+	 projector(new Kinect::ShaderProjector(*source)),
+	 #else
 	 projector(new Kinect::Projector(*source)),
+	 #endif
 	 frameSaver(0),
 	 enabled(true),maxDepth(1100),
 	 streamerDialog(0),showStreamerDialogToggle(0)
@@ -394,7 +428,9 @@ KinectViewer::KinectStreamer::~KinectStreamer(void)
 	{
 	/* Stop streaming: */
 	source->stopStreaming();
+	#if !KINECT_USE_SHADERPROJECTOR
 	projector->stopStreaming();
+	#endif
 	delete projector;
 	delete frameSaver;
 	
@@ -420,8 +456,12 @@ void KinectViewer::KinectStreamer::resetFrameTimer(void)
 
 void KinectViewer::KinectStreamer::startStreaming(void)
 	{
+	#if !KINECT_USE_SHADERPROJECTOR
+	
 	/* Hook this streamer into the projector's mesh callback: */
 	projector->startStreaming(Misc::createFunctionCall(this,&KinectViewer::KinectStreamer::meshStreamingCallback));
+	
+	#endif
 	
 	/* Hook this streamer into the frame source and start streaming: */
 	source->startStreaming(Misc::createFunctionCall(this,&KinectViewer::KinectStreamer::colorStreamingCallback),Misc::createFunctionCall(this,&KinectViewer::KinectStreamer::depthStreamingCallback));
@@ -504,10 +544,17 @@ void KinectViewer::resetNavigationCallback(Misc::CallbackData* cbData)
 		Kinect::FrameSource::ExtrinsicParameters::Point cp(0.0,0.0,-100.0); // 1m along projection line
 		Vrui::Point wp((*sIt)->projector->getProjectorTransform().transform(cp));
 		
+		#if KINECT_CONFIG_FRAMESOURCE_EXTRINSIC_PROJECTIVE
+		
+		Vrui::Vector ws(200.0,200.0,200.0);
+		
+		#else
+		
 		/* Calculate the projector's influence radius: */
 		Vrui::Scalar s((*sIt)->projector->getProjectorTransform().getScaling()*100.0);
 		Vrui::Vector ws(s,s,s);
 		
+		#endif
 		/* Add the projector's influence to the bounding box: */
 		bbox.addPoint(wp-ws);
 		bbox.addPoint(wp+ws);

@@ -102,7 +102,7 @@ class KinectRecorder:public Vrui::Vislet
 		
 		/* Constructors and destructors: */
 		public:
-		KinectStreamer(libusb_device* sDevice,const KinectRecorderFactory::KinectConfig& config); // Creates a streamer for the Kinect camera on the given USB device
+		KinectStreamer(USB::Context& usbContext,const KinectRecorderFactory::KinectConfig& config); // Creates a streamer for the Kinect camera on the given USB device
 		~KinectStreamer(void); // Destroys the streamer
 		
 		/* Methods: */

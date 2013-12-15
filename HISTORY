@@ -120,3 +120,30 @@ Kinect-2.7:
   Kinect::Renderer::resetFrameTimer.
 - Added stream saving and synchronized playback from stream files to
   KinectViewer vislet.
+
+Kinect-2.8:
+- API change in Kinect::Projector:
+  - processDepthFrame method no longer accesses projector's mesh triple
+    buffer and returns newest mesh; requires new MeshBuffer argument.
+  - Added new setMesh method to place newly-created meshes into the
+    projector's mesh triple buffer.
+- Moved most processing to background threads in KinectViewer and
+  KinectPlayer vislets.
+- Created new shader-based projector to offload depth image processing
+  to graphics card; significantly reduces memory bandwidth and increases
+  frame rate on modern GPUs, but can cause slowdown on older GPUs. Local
+  tests required to select optimal rendering path.
+  - Shader-based projector selected via KINECT_USE_SHADERS makefile
+    variable.
+- Bumped Vrui version requirement to 3.1-001.
+- Fixed race condition in Kinect::Projector and
+  Kinect::ShaderProjector's GL state management.
+- Improved udev (un)install rules in makefile to call sudo themselves.
+- Added code in Kinect::Camera to work with newer Kinect-for-Xbox models
+  (up to 1473 tested) and Kinect-for-Windows models (up to 1517 tested).
+- Added getCalib option to KinectUtil to download factory calibration
+  data from a Kinect camera and create an intrinsic parameter file
+  compatible with the Kinect package directly in the configuration file
+  directory.
+  - Factory calibration data appears to be broken (shift in color
+    texture mapping) on Kinect-for-Xbox 1473 and Kinect-for-Windows.

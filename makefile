@@ -24,10 +24,19 @@
 # matches the default Vrui installation; if Vrui's installation
 # directory was changed during Vrui's installation, the directory below
 # must be adapted.
-VRUI_MAKEDIR := $(HOME)/Vrui-3.0/share/make
+VRUI_MAKEDIR := $(HOME)/Vrui-3.1/share/make
 ifdef DEBUG
   VRUI_MAKEDIR := $(VRUI_MAKEDIR)/debug
 endif
+
+# Set the following flag to 1 to use the new facade projector based on
+# GLSL shaders. Using the shader projector will significantly reduce
+# CPU load and system bus bandwidth utilization, but will also
+# significantly slow down rendering on older graphics cards.
+# Which facade projector version is better depends on system hardware,
+# number of Kinect facades rendered simultaneously, rendering modes,
+# etc. I.e., to optimize performance, typical-case testing is in order.
+KINECT_USE_SHADERS = 0
 
 ########################################################################
 # Everything below here should not have to be changed
@@ -37,9 +46,9 @@ endif
 PACKAGEROOT := $(shell pwd)
 
 # Specify version of created dynamic shared libraries
-KINECT_VERSION = 2007
+KINECT_VERSION = 2008
 MAJORLIBVERSION = 2
-MINORLIBVERSION = 7
+MINORLIBVERSION = 8
 KINECT_NAME := Kinect-$(MAJORLIBVERSION).$(MINORLIBVERSION)
 
 # Check if Vrui's collaboration infrastructure is installed
@@ -52,6 +61,10 @@ endif
 # Root directory for Kinect configuration data underneath Vrui's
 # configuration directory:
 KINECTCONFIGDIREXT = $(KINECT_NAME)
+
+# Root directory for Kinect resource data underneath Vrui's shared data
+# directory:
+KINECTRESOURCEDIREXT = $(KINECT_NAME)
 
 # Include definitions for the system environment and system-provided
 # packages
@@ -170,23 +183,38 @@ config: Configure-End
 
 .PHONY: Configure-Begin
 Configure-Begin:
-	@echo "---- Configured Kinect options: ----"
-	@echo "Installation directory: $(VRUI_PACKAGEROOT)"
-	@echo "Calibration data directory: $(ETCINSTALLDIR)/$(KINECTCONFIGDIREXT)"
-	@echo "Vislet plug-in directory: $(PLUGININSTALLDIR)/$(VRVISLETSDIREXT)"
-ifneq ($(HAVE_COLLABORATION),0)
-	@echo "Vrui collaboration infrastructure detected"
-	@echo "Collaboration protocol plug-in directory: $(PLUGININSTALLDIR)/$(COLLABORATIONPLUGINSDIREXT)"
-endif
 ifeq ($(SYSTEM_HAVE_LIBUSB1),0)
 	@echo "ERROR: Vrui was not built with libusb-1 support. Please install missing development package(s) and rebuild Vrui"
 	@exit 1
 endif
+	@echo "---- Kinect configuration options: ----"
+ifneq ($(KINECT_USE_SHADERS),0)
+	@echo "GLSL shader-based facade projector selected"
+else
+	@echo "CPU-based facade projector selected"
+endif
+	@cp Kinect/Config.h Kinect/Config.h.temp
+	@$(call CONFIG_SETVAR,Kinect/Config.h.temp,KINECT_USE_SHADERPROJECTOR,$(KINECT_USE_SHADERS))
+	@if ! diff Kinect/Config.h.temp Kinect/Config.h > /dev/null ; then cp Kinect/Config.h.temp Kinect/Config.h ; fi
+	@rm Kinect/Config.h.temp
+ifneq ($(HAVE_COLLABORATION),0)
+	@echo "Vrui collaboration infrastructure detected"
+endif
+
+.PHONY: Configure-Install
+Configure-Install: Configure-Begin
+	@echo "---- Kinect installation configuration ----"
+	@echo "Root installation directory: $(VRUI_PACKAGEROOT)"
+	@echo "Calibration data directory: $(ETCINSTALLDIR)/$(KINECTCONFIGDIREXT)"
+	@echo "Resource data directory: $(SHAREINSTALLDIR)/$(KINECTRESOURCEDIREXT)"
+	@echo "Vislet plug-in directory: $(PLUGININSTALLDIR)/$(VRVISLETSDIREXT)"
+ifneq ($(HAVE_COLLABORATION),0)
+	@echo "Collaboration protocol plug-in directory: $(PLUGININSTALLDIR)/$(COLLABORATIONPLUGINSDIREXT)"
+endif
 
 .PHONY: Configure-End
-Configure-End: Configure-Begin
-Configure-End:
-	@echo "--------"
+Configure-End: Configure-Install
+	@echo "---- End of Kinect configuration options: ----"
 
 $(wildcard *.cpp Kinect/*.cpp): config
 
@@ -230,6 +258,9 @@ $(OBJDIR)/Kinect/Camera.o: CFLAGS += -DKINECT_CAMERA_INTRINSICPARAMETERSFILENAME
 $(OBJDIR)/Kinect/Camera.o: CFLAGS += -DKINECT_CAMERA_EXTRINSICPARAMETERSFILENAMEPREFIX='"ExtrinsicParameters"'
 $(OBJDIR)/Kinect/Camera.o: CFLAGS += -DKINECT_CAMERA_DEFAULTBACKGROUNDFILENAMEPREFIX='"Background"'
 
+# Define locations for shader program files: */
+$(OBJDIR)/Kinect/ShaderProjector.o: CFLAGS += -DKINECT_SHADERPROJECTOR_SHADERDIR='"$(SHAREINSTALLDIR)/$(KINECTRESOURCEDIREXT)/Shaders"'
+
 $(call LIBRARYNAME,libKinect): PACKAGES += $(MYKINECT_DEPENDS)
 $(call LIBRARYNAME,libKinect): EXTRACINCLUDEFLAGS += $(MYKINECT_INCLUDE)
 $(call LIBRARYNAME,libKinect): CFLAGS += $(MYKINECT_CFLAGS)
@@ -246,7 +277,9 @@ libKinect: $(call LIBRARYNAME,libKinect)
 # them:
 #
 
-$(EXEDIR)/KinectUtil: PACKAGES += MYKINECT
+$(OBJDIR)/KinectUtil.o: CFLAGS += -DKINECT_CAMERA_INTRINSICPARAMETERSFILENAMEPREFIX='"IntrinsicParameters"'
+
+$(EXEDIR)/KinectUtil: PACKAGES += MYKINECT MYMATH MYUSB MYIO
 $(EXEDIR)/KinectUtil: $(OBJDIR)/KinectUtil.o
 .PHONY: KinectUtil
 KinectUtil: $(EXEDIR)/KinectUtil
@@ -461,25 +494,31 @@ install: all
 	@install $(LIBRARIES) $(LIBINSTALLDIR)
 	@echo Configuring run-time linker...
 	$(foreach LIBNAME,$(LIBRARY_NAMES),$(call CREATE_SYMLINK,$(LIBNAME)))
+# Install all binaries in EXECUTABLEINSTALLDIR:
+	@echo Installing executables...
+	@install -d $(EXECUTABLEINSTALLDIR)
+	@install $(EXECUTABLES) $(EXECUTABLEINSTALLDIR)
+# Install all vislet plugins in PLUGININSTALLDIR/VRVISLETSDIREXT:
+	@echo Installing vislet plugins...
+	@install -d $(PLUGININSTALLDIR)/$(VRVISLETSDIREXT)
+	@install $(VISLETS) $(PLUGININSTALLDIR)/$(VRVISLETSDIREXT)
 ifneq ($(HAVE_COLLABORATION),0)
   # Install all collaboration protocol plugins in PLUGININSTALLDIR/COLLABORATIONPLUGINSDIREXT:
 	@echo Installing collaboration protocol plugins...
 	@install -d $(PLUGININSTALLDIR)/$(COLLABORATIONPLUGINSDIREXT)
 	@install $(PLUGINS) $(PLUGININSTALLDIR)/$(COLLABORATIONPLUGINSDIREXT)
 endif
-# Install all vislet plugins in PLUGININSTALLDIR/VRVISLETSDIREXT:
-	@echo Installing vislet plugins...
-	@install -d $(PLUGININSTALLDIR)/$(VRVISLETSDIREXT)
-	@install $(VISLETS) $(PLUGININSTALLDIR)/$(VRVISLETSDIREXT)
-# Install all binaries in EXECUTABLEINSTALLDIR:
-	@echo Installing executables...
-	@install -d $(EXECUTABLEINSTALLDIR)
-	@install $(EXECUTABLES) $(EXECUTABLEINSTALLDIR)
 # Install all configuration files in ETCINSTALLDIR:
 	@echo Installing configuration files...
 	@install -d $(ETCINSTALLDIR)
 	@install -d $(ETCINSTALLDIR)/$(KINECTCONFIGDIREXT)
 	@install -m u=rw,go=r etc/KinectServer.cfg $(ETCINSTALLDIR)/$(KINECTCONFIGDIREXT)
+# Install all resource files in SHAREINSTALLDIR:
+	@echo Installing resource files...
+	@install -d $(SHAREINSTALLDIR)
+	@install -d $(SHAREINSTALLDIR)/$(KINECTRESOURCEDIREXT)
+	@install -d $(SHAREINSTALLDIR)/$(KINECTRESOURCEDIREXT)/Shaders
+	@install -m u=rw,go=r share/Shaders/* $(SHAREINSTALLDIR)/$(KINECTRESOURCEDIREXT)/Shaders
 # Install the package and configuration files in MAKEINSTALLDIR:
 	@echo Installing makefile fragments...
 	@install -d $(MAKEINSTALLDIR)
@@ -492,16 +531,18 @@ uninstall:
 	@echo Removing libraries...
 	@rm -f $(LIBRARIES:$(LIBDESTDIR)/%=$(LIBINSTALLDIR)/%)
 	$(foreach LIBNAME,$(LIBRARY_NAMES),$(call DESTROY_SYMLINK,$(LIBNAME)))
+	@echo Removing executables...
+	@rm -f $(EXECUTABLES:$(EXEDIR)/%=$(EXECUTABLEINSTALLDIR)/%)
+	@echo Removing vislet plugins...
+	@rm -f $(VISLETS:$(VISLETDESTDIR)/%=$(PLUGININSTALLDIR)/$(VRVISLETSDIREXT)/%)
 ifneq ($(HAVE_COLLABORATION),0)
 	@echo Removing collaboration protocol plugins...
 	@rm -f $(PLUGINS:$(PLUGINDESTDIR)/%=$(PLUGININSTALLDIR)/$(COLLABORATIONPLUGINSDIREXT)/%)
 endif
-	@echo Removing vislet plugins...
-	@rm -f $(VISLETS:$(VISLETDESTDIR)/%=$(PLUGININSTALLDIR)/$(VRVISLETSDIREXT)/%)
-	@echo Removing executables...
-	@rm -f $(EXECUTABLES:$(EXEDIR)/%=$(EXECUTABLEINSTALLDIR)/%)
 	@echo Removing configuration files...
 	@rm -rf $(ETCINSTALLDIR)/$(KINECTCONFIGDIREXT)
+	@echo Removing resource files...
+	@rm -rf $(SHAREINSTALLDIR)/$(KINECTRESOURCEDIREXT)
 	@echo Removing makefile fragments...
 	@rm -f $(MAKEINSTALLDIR)/Packages.Kinect
 	@rm -f $(MAKEINSTALLDIR)/Configuration.Kinect
@@ -509,9 +550,11 @@ endif
 installudevrule:
 # Install the Kinect udev rule in the udev rule directory:
 	@echo Installing Kinect device permission udev rule in $(UDEVRULEDIR)
-	@install -m u=rw,go=r share/70-Kinect.rules $(UDEVRULEDIR)
+	@echo Please enter your password to copy the rule file into the udev directory
+	@sudo install -m u=rw,go=r share/70-Kinect.rules $(UDEVRULEDIR)
 
 uninstalludevrule:
 # Remove the Kinect udev rule from the udev rule directory:
 	@echo Removing Kinect device permission udev rule from $(UDEVRULEDIR)
-	@rm -f $(UDEVRULEDIR)/70-Kinect.rules
+	@echo Please enter your password to remove the rule file from the udev directory
+	@sudo rm -f $(UDEVRULEDIR)/70-Kinect.rules
