@@ -1,7 +1,7 @@
 /***********************************************************************
 KinectViewer - Simple application to view 3D reconstructions of color
 and depth images captured from a Kinect device.
-Copyright (c) 2010-2015 Oliver Kreylos
+Copyright (c) 2010-2013 Oliver Kreylos
 
 This file is part of the Kinect 3D Video Capture Project (Kinect).
 
@@ -25,7 +25,6 @@ Software Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA
 #define KINECTVIEWER_INCLUDED
 
 #include <vector>
-#include <Threads/Mutex.h>
 #include <USB/Context.h>
 #include <GLMotif/ToggleButton.h>
 #include <GLMotif/TextFieldSlider.h>
@@ -56,8 +55,6 @@ class Projector;
 #endif
 class FrameSaver;
 }
-class SphereExtractor;
-class SphereExtractorTool;
 
 class KinectViewer:public Vrui::Application
 	{
@@ -79,10 +76,7 @@ class KinectViewer:public Vrui::Application
 		Kinect::FrameSaver* frameSaver; // Pointer to a frame saver writing received color and depth frames to a pair of files
 		bool enabled; // Flag whether the streamer is currently processing and rendering 3D video frames
 		DepthPixel maxDepth; // Maximum depth value for background removal
-		Threads::Mutex sphereExtractorMutex; // Mutex protecting the sphere extractor object
-		SphereExtractor* sphereExtractor; // Pointer to a sphere extractor used during extrinsic calibration
 		GLMotif::PopupWindow* streamerDialog; // Pointer to a dialog window to control this streamer
-		GLMotif::Button* captureBackgroundButton; // Button to capture a current background image
 		GLMotif::ToggleButton* showStreamerDialogToggle; // Pointer to a toggle button to show/hide the control dialog window
 		
 		/* Private methods: */
@@ -127,7 +121,6 @@ class KinectViewer:public Vrui::Application
 		};
 	
 	friend class KinectStreamer;
-	friend class SphereExtractorTool;
 	
 	/* Elements: */
 	private:

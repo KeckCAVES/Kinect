@@ -2,7 +2,7 @@
 Projector - Class to project a depth frame captured from a Kinect camera
 back into calibrated 3D camera space, and texture-map it with a matching
 color frame.
-Copyright (c) 2010-2015 Oliver Kreylos
+Copyright (c) 2010-2013 Oliver Kreylos
 
 This file is part of the Kinect 3D Video Capture Project (Kinect).
 
@@ -105,26 +105,6 @@ class Projector:public GLObject
 	virtual void initContext(GLContextData& contextData) const;
 	
 	/* New methods: */
-	const unsigned int* getDepthFrameSize(void) const // Returns the current depth frame size
-		{
-		return depthSize;
-		}
-	unsigned int getDepthFrameSize(int index) const // Ditto
-		{
-		return depthSize[index];
-		}
-	const PixelCorrection* getDepthCorrection(void) const // Returns the array of per-pixel depth correction factors
-		{
-		return depthCorrection;
-		}
-	const PTransform& getDepthProjection(void) const // Returns the depth unprojection transformation from depth image space into 3D camera space
-		{
-		return depthProjection;
-		}
-	const PTransform& getColorProjection(void) const // Returns the color unprojection transformation from color image space into 3D camera space
-		{
-		return colorProjection;
-		}
 	void setDepthFrameSize(const unsigned int newDepthFrameSize[2]); // Sets the size of all future incoming depth frames
 	void setDepthCorrection(const FrameSource::DepthCorrection* dc); // Enables per-pixel depth correction using the given depth correction parameters
 	void setIntrinsicParameters(const FrameSource::IntrinsicParameters& ips); // Sets the projectors intrinsic camera parameters

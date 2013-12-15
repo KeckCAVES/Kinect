@@ -147,18 +147,3 @@ Kinect-2.8:
   directory.
   - Factory calibration data appears to be broken (shift in color
     texture mapping) on Kinect-for-Xbox 1473 and Kinect-for-Windows.
-
-Kinect-2.8-001:
-- Added 3D measurement tool to RawKinectViewer.
-- Changed udev rule file to use console access permissions, and added
-  rules for all revisions of the first-generation Kinect.
-- Changed KinectUtil to download intrinsic calibration parameters using
-  centimeters as camera space units.
-
-Kinect-2.8-002:
-- Added extrinsic calibration tool for multiple Kinects using a large
-  sphere tracking target.
-- Fixed problem in timer synchronization for pre-recorded 3D video
-  files.
-- Brought LWOWriter utility up to new Kinect library API.
-- Changed default file name and location to save background frames.
