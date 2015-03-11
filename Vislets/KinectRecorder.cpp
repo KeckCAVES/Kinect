@@ -155,8 +155,8 @@ extern "C" void destroyKinectRecorderFactory(Vrui::VisletFactory* factory)
 Methods of class KinectRecorder::KinectStreamer:
 ***********************************************/
 
-KinectRecorder::KinectStreamer::KinectStreamer(libusb_device* sDevice,const KinectRecorderFactory::KinectConfig& config)
-	:camera(sDevice),frameSaver(0)
+KinectRecorder::KinectStreamer::KinectStreamer(USB::Context& usbContext,const KinectRecorderFactory::KinectConfig& config)
+	:camera(usbContext,config.deviceSerialNumber.c_str()),frameSaver(0)
 	{
 	/* Check if there is an existing background frame for the camera: */
 	bool removeBackground=false;
@@ -244,27 +244,12 @@ KinectRecorder::KinectRecorder(int numArguments,const char* const arguments[])
 		/* Enable background USB event handling: */
 		usbContext.startEventHandling();
 		
-		/* Enumerate all USB devices: */
-		USB::DeviceList usbDevices(usbContext);
-		size_t numKinectCameras=usbDevices.getNumDevices(0x045eU,0x02aeU);
-		
+		/* Connect to all requested Kinect devices: */
 		for(std::vector<KinectRecorderFactory::KinectConfig>::const_iterator kcIt=factory->kinectConfigs.begin();kcIt!=factory->kinectConfigs.end();++kcIt)
 			if(kcIt->nodeIndex==Vrui::getNodeIndex())
 				{
-				/* Find the Kinect camera with the given serial number: */
-				unsigned int cameraIndex;
-				for(cameraIndex=0;cameraIndex<numKinectCameras;++cameraIndex)
-					{
-					/* Tentatively open the Kinect camera device: */
-					USB::Device cam(usbDevices.getDevice(0x045eU,0x02aeU,cameraIndex));
-					if(cam.getSerialNumber()==kcIt->deviceSerialNumber) // Bail out if the desired device was found
-						break;
-					}
-				if(cameraIndex<numKinectCameras)
-					{
-					/* Create a streamer for the found camera: */
-					streamers.push_back(new KinectStreamer(usbDevices.getDevice(0x045eU,0x02aeU,cameraIndex),*kcIt));
-					}
+				/* Create a streamer for the Kinect device of the given serial number: */
+				streamers.push_back(new KinectStreamer(usbContext,*kcIt));
 				}
 		}
 	

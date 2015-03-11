@@ -43,6 +43,7 @@ Software Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA
 
 #include "ONTransformFitter.h"
 #include "OGTransformFitter.h"
+#include "PTransformFitter.h"
 #include "LevenbergMarquardtMinimizer.h"
 
 template <class TransformFitterParam>
@@ -90,11 +91,15 @@ findTransform(std::vector<typename TransformFitterParam::Point>& points0,
 	bestTransform*=centroidTransform;
 	
 	/* Print the result: */
-	std::cout<<"Best distance: "<<bestDistance<<std::endl;
+	std::cout<<"Best residual: "<<bestDistance<<std::endl;
 	
 	/* Transform the first point set: */
 	for(typename std::vector<typename TransformFitterParam::Point>::iterator pIt=points0.begin();pIt!=points0.end();++pIt)
 		*pIt=bestTransform.transform(*pIt);
+	double rmsd=0.0;
+	for(size_t i=0;i<numPoints;++i)
+		rmsd+=Geometry::sqrDist(points0[i],points1[i]);
+	std::cout<<"Best distance: "<<Math::sqrt(rmsd/double(numPoints))<<std::endl;
 	
 	return bestTransform;
 	}
@@ -336,6 +341,8 @@ AlignPoints::AlignPoints(int& argc,char**& argv,char**& appDefaults)
 				transformMode=1;
 			else if(strcasecmp(argv[i]+1,"OG")==0)
 				transformMode=2;
+			else if(strcasecmp(argv[i]+1,"P")==0)
+				transformMode=3;
 			else if(strcasecmp(argv[i]+1,"S")==0)
 				{
 				++i;
@@ -390,29 +397,51 @@ AlignPoints::AlignPoints(int& argc,char**& argv,char**& appDefaults)
 		}
 	
 	/* Align the point sets: */
-	OGTransform finalTransform=preTransform;
 	switch(transformMode)
 		{
 		case 1: // Orthonormal transformation
 			{
-			ONTransform best=findTransform<ONTransformFitter>(points[0],points[1]);
-			finalTransform*=best;
+			if(preTransform.getScaling()!=1.0)
+				{
+				OGTransform finalTransform=preTransform;
+				finalTransform*=findTransform<ONTransformFitter>(points[0],points[1]);
+				std::cout<<"Best transformation: "<<Misc::ValueCoder<OGTransform>::encode(finalTransform)<<std::endl;
+				}
+			else
+				{
+				ONTransform finalTransform(preTransform.getTranslation(),preTransform.getRotation());
+				finalTransform*=findTransform<ONTransformFitter>(points[0],points[1]);
+				std::cout<<"Best transformation: "<<Misc::ValueCoder<ONTransform>::encode(finalTransform)<<std::endl;
+				}
 			break;
 			}
 		
 		case 2: // Orthogonal transformation
 			{
-			//OGTransform best=findTransform<OGTransformFitter>(points[0],points[1]);
-			//finalTransform*=best;
+			OGTransform finalTransform=preTransform;
+			#if 1
+			finalTransform*=findTransform2<OGTransformFitter>(points[0],points[1]);
+			#else
+			finalTransform*=findTransform<OGTransformFitter>(points[0],points[1]);
+			#endif
+			std::cout<<"Best transformation: "<<Misc::ValueCoder<OGTransform>::encode(finalTransform)<<std::endl;
+			break;
+			}
+		
+		case 3: // Projective transformation
+			{
+			PTransform finalTransform=preTransform;
 			
-			OGTransform best2=findTransform2<OGTransformFitter>(points[0],points[1]);
-			finalTransform*=best2;
+			/* Calculate an orthogonal transformation first: */
+			PTransform bestOg=findTransform2<OGTransformFitter>(points[0],points[1]);
+			
+			/* Fine-tune it with a projective transformation: */
+			finalTransform*=findTransform<PTransformFitter>(points[0],points[1]);
+			finalTransform*=bestOg;
+			std::cout<<"Best transformation: "<<Misc::ValueCoder<PTransform>::encode(finalTransform)<<std::endl;
 			break;
 			}
 		}
-	
-	/* Write the final transformation: */
-	std::cout<<"Best transformation: "<<Misc::ValueCoder<OGTransform>::encode(finalTransform)<<std::endl;
 	
 	if(outputFileName!=0)
 		{

@@ -50,7 +50,6 @@ Software Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA
 #include <Kinect/ColorFrameReader.h>
 #include <Kinect/MultiplexedFrameSource.h>
 #include <Kinect/FrameSaver.h>
-#include <Kinect/Renderer.h>
 
 /************************************
 Methods of class KinectViewerFactory:
@@ -148,6 +147,10 @@ void KinectViewer::LiveRenderer::depthStreamingCallback(const Kinect::FrameBuffe
 	/* Forward depth frame to the projector: */
 	projector->setDepthFrame(frameBuffer);
 	
+	#if KINECT_USE_SHADERPROJECTOR
+	Vrui::requestUpdate();
+	#endif
+	
 	if(frameSaver!=0)
 		{
 		/* Time-stamp the incoming frame: */
@@ -159,17 +162,25 @@ void KinectViewer::LiveRenderer::depthStreamingCallback(const Kinect::FrameBuffe
 		}
 	}
 
+#if !KINECT_USE_SHADERPROJECTOR
+
 void KinectViewer::LiveRenderer::meshStreamingCallback(const Kinect::MeshBuffer& meshBuffer)
 	{
 	Vrui::requestUpdate();
 	}
+
+#endif
 
 KinectViewer::LiveRenderer::LiveRenderer(Kinect::FrameSource* sSource)
 	:source(sSource),started(false),
 	 frameSaver(0),timeStamp(0.0)
 	{
 	/* Create the projector: */
+	#if KINECT_USE_SHADERPROJECTOR
+	projector=new Kinect::ShaderProjector(*source);
+	#else
 	projector=new Kinect::Projector(*source);
+	#endif
 	}
 
 KinectViewer::LiveRenderer::~LiveRenderer(void)
@@ -178,7 +189,9 @@ KinectViewer::LiveRenderer::~LiveRenderer(void)
 		{
 		/* Stop streaming: */
 		source->stopStreaming();
+		#if !KINECT_USE_SHADERPROJECTOR
 		projector->stopStreaming();
+		#endif
 		}
 	
 	/* Destroy the frame source: */
@@ -190,8 +203,12 @@ KinectViewer::LiveRenderer::~LiveRenderer(void)
 
 void KinectViewer::LiveRenderer::startStreaming(void)
 	{
+	#if !KINECT_USE_SHADERPROJECTOR
+	
 	/* Hook this renderer into the projector's mesh callback: */
 	projector->startStreaming(Misc::createFunctionCall(this,&KinectViewer::LiveRenderer::meshStreamingCallback));
+	
+	#endif
 	
 	/* Hook this renderer into the frame source and start streaming: */
 	source->startStreaming(Misc::createFunctionCall(this,&KinectViewer::LiveRenderer::colorStreamingCallback),Misc::createFunctionCall(this,&KinectViewer::LiveRenderer::depthStreamingCallback));
@@ -231,25 +248,25 @@ void* KinectViewer::SynchedRenderer::colorReaderThreadMethod(void)
 	// Threads::Thread::setCancelType(Threads::Thread::CANCEL_ASYNCHRONOUS);
 	
 	/* Read color frames: */
-	Kinect::FrameBuffer nextFrame;
-	do
+	while(true)
 		{
 		/* Read the next color frame: */
 		Kinect::FrameBuffer nextFrame=colorReader->readNextFrame();
 		
 		/* Put the new color frame into the queue: */
 		{
-		Threads::MutexCond::Lock frameQueueLock(frameQueueCond);
-		while(numColorFrames==2)
-			frameQueueCond.wait(frameQueueLock);
-		mostRecentColorFrame=1-mostRecentColorFrame;
+		Threads::Mutex::Lock frameQueueLock(frameQueueMutex);
+		while(numColorFrames==numQueueSlots)
+			colorFrameQueueFullCond.wait(frameQueueMutex);
+		mostRecentColorFrame=(mostRecentColorFrame+1)%numQueueSlots;
 		colorFrames[mostRecentColorFrame]=nextFrame;
-		++numColorFrames;
-		if(numColorFrames==1)
-			frameQueueCond.broadcast();
+		if(++numColorFrames==1)
+			frameQueuesEmptyCond.broadcast();
 		}
+		
+		if(nextFrame.timeStamp>=Math::Constants<double>::max)
+			break;
 		}
-	while(nextFrame.timeStamp<Math::Constants<double>::max);
 	
 	return 0;
 	}
@@ -260,35 +277,59 @@ void* KinectViewer::SynchedRenderer::depthReaderThreadMethod(void)
 	// Threads::Thread::setCancelType(Threads::Thread::CANCEL_ASYNCHRONOUS);
 	
 	/* Read depth frames: */
-	Kinect::FrameBuffer nextFrame;
-	do
+	while(true)
 		{
 		/* Read the next depth frame: */
 		Kinect::FrameBuffer nextFrame=depthReader->readNextFrame();
 		
+		#if KINECT_USE_SHADERPROJECTOR
+		
 		/* Put the new depth frame into the queue: */
 		{
-		Threads::MutexCond::Lock frameQueueLock(frameQueueCond);
-		while(numDepthFrames==2)
-			frameQueueCond.wait(frameQueueLock);
-		mostRecentDepthFrame=1-mostRecentDepthFrame;
+		Threads::Mutex::Lock frameQueueLock(frameQueueMutex);
+		while(numDepthFrames==numQueueSlots)
+			depthFrameQueueFullCond.wait(frameQueueMutex);
+		mostRecentDepthFrame=(mostRecentDepthFrame+1)%numQueueSlots;
 		depthFrames[mostRecentDepthFrame]=nextFrame;
-		++numDepthFrames;
-		if(numDepthFrames==1)
-			frameQueueCond.broadcast();
+		if(++numDepthFrames==1)
+			frameQueuesEmptyCond.broadcast();
 		}
+		
+		if(nextFrame.timeStamp>=Math::Constants<double>::max)
+			break;
+		
+		#else
+		
+		/* Process the next depth frame into a mesh: */
+		Kinect::MeshBuffer nextMesh;
+		projector->processDepthFrame(nextFrame,nextMesh);
+		
+		/* Put the new mesh into the queue: */
+		{
+		Threads::Mutex::Lock frameQueueLock(frameQueueMutex);
+		while(numDepthFrames==numQueueSlots)
+			depthFrameQueueFullCond.wait(frameQueueMutex);
+		mostRecentDepthFrame=(mostRecentDepthFrame+1)%numQueueSlots;
+		depthFrames[mostRecentDepthFrame]=nextMesh;
+		if(++numDepthFrames==1)
+			frameQueuesEmptyCond.broadcast();
 		}
-	while(nextFrame.timeStamp<Math::Constants<double>::max);
+		
+		if(nextMesh.timeStamp>=Math::Constants<double>::max)
+			break;
+		
+		#endif
+		}
 	
 	return 0;
 	}
 
 KinectViewer::SynchedRenderer::SynchedRenderer(const std::string& fileName)
 	:colorReader(0),depthReader(0),
+	 started(false),
 	 timeStamp(0.0),
 	 numColorFrames(0),mostRecentColorFrame(0),
-	 numDepthFrames(0),mostRecentDepthFrame(0),
-	 started(false)
+	 numDepthFrames(0),mostRecentDepthFrame(0)
 	{
 	/* Open the color file: */
 	std::string colorFileName=fileName;
@@ -357,11 +398,19 @@ KinectViewer::SynchedRenderer::SynchedRenderer(const std::string& fileName)
 		depthReader=new Kinect::DepthFrameReader(*depthFile);
 	
 	/* Create and initialize the projector: */
+	#if KINECT_USE_SHADERPROJECTOR
+	projector=new Kinect::ShaderProjector();
+	#else
 	projector=new Kinect::Projector();
+	#endif
 	projector->setDepthFrameSize(depthReader->getSize());
 	projector->setDepthCorrection(depthCorrection);
+	#if KINECT_USE_SHADERPROJECTOR
+	projector->setParameters(ips,eps);
+	#else
 	projector->setIntrinsicParameters(ips);
 	projector->setExtrinsicParameters(eps);
+	#endif
 	
 	/* Clean up: */
 	delete depthCorrection;
@@ -397,41 +446,53 @@ void KinectViewer::SynchedRenderer::frame(double newTimeStamp)
 	timeStamp=newTimeStamp;
 	
 	/* Wait until the next frame is newer than the new time step: */
+	bool newColor=false;
 	Kinect::FrameBuffer currentColorFrame;
+	bool newDepth=false;
+	#if KINECT_USE_SHADERPROJECTOR
 	Kinect::FrameBuffer currentDepthFrame;
+	#else
+	Kinect::MeshBuffer currentDepthFrame;
+	#endif
 	while(nextColorFrame.timeStamp<=timeStamp||nextDepthFrame.timeStamp<=timeStamp)
 		{
-		if(nextColorFrame.timeStamp<=timeStamp)
+		/* Check if both frame queues are empty: */
+		Threads::Mutex::Lock frameQueueLock(frameQueueMutex);
+		while(numColorFrames==0&&numDepthFrames==0)
+			frameQueuesEmptyCond.wait(frameQueueMutex);
+		
+		/* Advance in the color frame queue: */
+		while(numColorFrames>0&&nextColorFrame.timeStamp<=timeStamp)
 			{
+			newColor=true;
 			currentColorFrame=nextColorFrame;
-			{
-			Threads::MutexCond::Lock frameQueueLock(frameQueueCond);
-			while(numColorFrames==0)
-				frameQueueCond.wait(frameQueueLock);
-			nextColorFrame=colorFrames[(mostRecentColorFrame-numColorFrames+3)%2];
-			if(--numColorFrames==1)
-				frameQueueCond.broadcast();
+			nextColorFrame=colorFrames[(mostRecentColorFrame-numColorFrames+numQueueSlots+1)%numQueueSlots];
+			if(--numColorFrames==numQueueSlots-1)
+				colorFrameQueueFullCond.broadcast();
 			}
-			}
-		if(nextDepthFrame.timeStamp<=timeStamp)
+		
+		/* Advance in the depth frame queue: */
+		while(numDepthFrames>0&&nextDepthFrame.timeStamp<=timeStamp)
 			{
+			newDepth=true;
 			currentDepthFrame=nextDepthFrame;
-			{
-			Threads::MutexCond::Lock frameQueueLock(frameQueueCond);
-			while(numDepthFrames==0)
-				frameQueueCond.wait(frameQueueLock);
-			nextDepthFrame=depthFrames[(mostRecentDepthFrame-numDepthFrames+3)%2];
-			if(--numDepthFrames==1)
-				frameQueueCond.broadcast();
-			}
+			nextDepthFrame=depthFrames[(mostRecentDepthFrame-numDepthFrames+numQueueSlots+1)%numQueueSlots];
+			if(--numDepthFrames==numQueueSlots-1)
+				depthFrameQueueFullCond.broadcast();
 			}
 		}
 	
 	/* Update the projector: */
-	if(currentColorFrame.timeStamp!=0.0)
+	if(newColor)
 		projector->setColorFrame(currentColorFrame);
-	if(currentDepthFrame.timeStamp!=0.0)
-		projector->processDepthFrame(currentDepthFrame);
+	if(newDepth)
+		{
+		#if KINECT_USE_SHADERPROJECTOR
+		projector->setDepthFrame(currentDepthFrame);
+		#else
+		projector->setMesh(currentDepthFrame);
+		#endif
+		}
 	projector->updateFrames();
 	}
 
@@ -491,7 +552,6 @@ KinectViewer::KinectViewer(int numArguments,const char* const arguments[])
 					}
 				
 				/* Connect to a local Kinect device: */
-				++i;
 				if(Vrui::getClusterMultiplexer()==0)
 					{
 					/* Open the camera of the given index: */

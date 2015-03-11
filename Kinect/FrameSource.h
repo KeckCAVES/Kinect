@@ -26,6 +26,7 @@ Software Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA
 
 #include <Misc/SizedTypes.h>
 #include <Geometry/ProjectiveTransformation.h>
+#include <Kinect/Config.h>
 
 /* Forward declarations: */
 namespace Misc {
@@ -36,8 +37,13 @@ namespace IO {
 class File;
 }
 namespace Geometry {
+#if KINECT_CONFIG_FRAMESOURCE_EXTRINSIC_PROJECTIVE
+template <class ScalarParam,int dimensionParam>
+class ProjectiveTransformation;
+#else
 template <class ScalarParam,int dimensionParam>
 class OrthogonalTransformation;
+#endif
 }
 namespace Kinect {
 class FrameBuffer;
@@ -117,8 +123,11 @@ class FrameSource
 		PTransform depthProjection; // The projection transformation from depth image space into 3D camera space
 		PTransform colorProjection; // The projection transformation from 3D camera space into color image space
 		};
-	
+	#if KINECT_CONFIG_FRAMESOURCE_EXTRINSIC_PROJECTIVE
+	typedef Geometry::ProjectiveTransformation<double,3> ExtrinsicParameters; // Type for extrinsic camera parameters
+	#else
 	typedef Geometry::OrthogonalTransformation<double,3> ExtrinsicParameters; // Type for extrinsic camera parameters
+	#endif
 	typedef Misc::FunctionCall<const FrameBuffer&> StreamingCallback; // Function call type for streaming color or depth image capture callback
 	
 	static const DepthPixel invalidDepth=0x07ffU; // The depth value indicating an invalid (or removed) pixel

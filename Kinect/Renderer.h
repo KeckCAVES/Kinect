@@ -24,6 +24,8 @@ Software Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA
 #ifndef KINECT_RENDERER_INCLUDED
 #define KINECT_RENDERER_INCLUDED
 
+#include <Kinect/Config.h>
+
 /* Forward declarations: */
 namespace Misc {
 template <class ParameterParam>
@@ -33,8 +35,14 @@ class GLContextData;
 namespace Kinect {
 class FrameBuffer;
 class FrameSource;
+#if !KINECT_USE_SHADERPROJECTOR
 class MeshBuffer;
+#endif
+#if KINECT_USE_SHADERPROJECTOR
+class ShaderProjector;
+#else
 class Projector;
+#endif
 }
 
 namespace Kinect {
@@ -48,14 +56,20 @@ class Renderer
 	/* Elements: */
 	private:
 	FrameSource* source; // Pointer to the 3D video frame source
+	#if KINECT_USE_SHADERPROJECTOR
+	ShaderProjector* projector; // Pointer to the projector
+	#else
 	Projector* projector; // Pointer to the projector
+	#endif
 	StreamingCallback* streamingCallback; // Function to be called when the state of the projector has changed
 	bool enabled; // Flag whether the renderer is currently enabled, i.e., receiving and rendering 3D video frames
 	
 	/* Private methods: */
 	void colorStreamingCallback(const FrameBuffer& frameBuffer); // Callback receiving color frames from the frame source
 	void depthStreamingCallback(const FrameBuffer& frameBuffer); // Callback receiving depth frames from the frame source
+	#if !KINECT_USE_SHADERPROJECTOR
 	void meshStreamingCallback(const MeshBuffer& meshBuffer); // Callback receiving projected meshes from the projector
+	#endif
 	
 	/* Constructors and destructors: */
 	public:
@@ -67,7 +81,11 @@ class Renderer
 		{
 		return *source;
 		}
+	#if KINECT_USE_SHADERPROJECTOR
+	ShaderProjector& getProjector(void) // Returns a reference to the renderer's projector
+	#else
 	Projector& getProjector(void) // Returns a reference to the renderer's projector
+	#endif
 		{
 		return *projector;
 		}

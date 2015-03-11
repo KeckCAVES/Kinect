@@ -30,6 +30,7 @@ Software Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA
 #include <GLMotif/TextFieldSlider.h>
 #include <Vrui/Application.h>
 #include <Vrui/FileSelectionHelper.h>
+#include <Kinect/Config.h>
 #include <Kinect/FrameSource.h>
 
 /* Forward declarations: */
@@ -44,8 +45,14 @@ class SoundPlayer;
 namespace Kinect {
 class FrameBuffer;
 class Camera;
-class Projector;
+#if !KINECT_USE_SHADERPROJECTOR
 class MeshBuffer;
+#endif
+#if KINECT_USE_SHADERPROJECTOR
+class ShaderProjector;
+#else
+class Projector;
+#endif
 class FrameSaver;
 }
 
@@ -61,7 +68,11 @@ class KinectViewer:public Vrui::Application
 		public:
 		KinectViewer* application; // Pointer to the application object
 		Kinect::FrameSource* source; // Pointer to the 3D video frame source
+		#if KINECT_USE_SHADERPROJECTOR
+		Kinect::ShaderProjector* projector; // Pointer to the shader-based projector
+		#else
 		Kinect::Projector* projector; // Pointer to the projector
+		#endif
 		Kinect::FrameSaver* frameSaver; // Pointer to a frame saver writing received color and depth frames to a pair of files
 		bool enabled; // Flag whether the streamer is currently processing and rendering 3D video frames
 		DepthPixel maxDepth; // Maximum depth value for background removal
@@ -71,12 +82,16 @@ class KinectViewer:public Vrui::Application
 		/* Private methods: */
 		void colorStreamingCallback(const Kinect::FrameBuffer& frameBuffer); // Callback receiving color frames from the frame source
 		void depthStreamingCallback(const Kinect::FrameBuffer& frameBuffer); // Callback receiving depth frames from the frame source
+		#if !KINECT_USE_SHADERPROJECTOR
 		void meshStreamingCallback(const Kinect::MeshBuffer& meshBuffer); // Callback receiving projected meshes from the Kinect projector
+		#endif
 		void showStreamerDialogCallback(GLMotif::ToggleButton::ValueChangedCallbackData* cbData); // Callback when the control dialog show/hide button is pressed
 		GLMotif::PopupWindow* createStreamerDialog(void); // Creates a dialog box to control parameters of this streamer
 		void showFacadeCallback(GLMotif::ToggleButton::ValueChangedCallbackData* cbData);
 		void showFromCameraCallback(Misc::CallbackData* cbData);
+		#if !KINECT_USE_SHADERPROJECTOR
 		void filterDepthFramesCallback(GLMotif::ToggleButton::ValueChangedCallbackData* cbData);
+		#endif
 		void triangleDepthRangeCallback(GLMotif::TextFieldSlider::ValueChangedCallbackData* cbData);
 		void removeBackgroundCallback(GLMotif::ToggleButton::ValueChangedCallbackData* cbData);
 		void backgroundCaptureCompleteCallback(Kinect::Camera& camera);

@@ -32,6 +32,7 @@ Software Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA
 #include <Geometry/OrthogonalTransformation.h>
 #include <Sound/SoundDataFormat.h>
 #include <Kinect/FrameBuffer.h>
+#include <Kinect/MeshBuffer.h>
 #include <Kinect/Projector.h>
 #include <Vrui/Vislet.h>
 
@@ -107,10 +108,10 @@ class KinectPlayer:public Vrui::Vislet
 		int numColorFrames; // Number of color frames in queue
 		int mostRecentColorFrame; // Index of the most recently read depth frame
 		Kinect::FrameBuffer nextColorFrame; // The next color frame
-		Kinect::FrameBuffer depthFrames[2]; // The two most recently read depth frames
+		Kinect::MeshBuffer depthFrames[2]; // The two most recently read depth frames
 		int numDepthFrames; // Number of depth frames in queue
 		int mostRecentDepthFrame; // Index of the most recently read depth frame
-		Kinect::FrameBuffer nextDepthFrame; // The next depth frame
+		Kinect::MeshBuffer nextDepthFrame; // The next depth frame
 		
 		/* Private methods: */
 		void* colorDecompressorThreadMethod(void); // Thread method to read color frames

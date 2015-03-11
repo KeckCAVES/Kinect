@@ -150,7 +150,6 @@ void PlaneTool::buttonCallback(int buttonSlotIndex,Vrui::InputDevice::ButtonCall
 			std::cout<<"Depth-space plane equation: x * "<<normal<<" = "<<centroid*normal<<std::endl;
 			
 			/* Get the camera's intrinsic parameters: */
-			typedef Kinect::FrameSource::IntrinsicParameters::PTransform PTransform;
 			Kinect::FrameSource::IntrinsicParameters ips=application->camera->getIntrinsicParameters();
 			
 			/* Transform the plane equation to camera space: */

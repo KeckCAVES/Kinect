@@ -27,7 +27,11 @@ Software Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA
 #include <Kinect/FunctionCalls.h>
 #include <Kinect/FrameSource.h>
 #include <Kinect/Camera.h>
+#if KINECT_USE_SHADERPROJECTOR
+#include <Kinect/ShaderProjector.h>
+#else
 #include <Kinect/Projector.h>
+#endif
 
 namespace Kinect {
 
@@ -54,8 +58,18 @@ void Renderer::depthStreamingCallback(const FrameBuffer& frameBuffer)
 		{
 		/* Forward depth frame to the projector: */
 		projector->setDepthFrame(frameBuffer);
+		
+		#if KINECT_USE_SHADERPROJECTOR
+		
+		/* Notify interested parties: */
+		if(streamingCallback!=0)
+			(*streamingCallback)();
+		
+		#endif
 		}
 	}
+
+#if !KINECT_USE_SHADERPROJECTOR
 
 void Renderer::meshStreamingCallback(const MeshBuffer& meshBuffer)
 	{
@@ -67,9 +81,15 @@ void Renderer::meshStreamingCallback(const MeshBuffer& meshBuffer)
 		}
 	}
 
+#endif
+
 Renderer::Renderer(FrameSource* sSource)
 	:source(sSource),
+	 #if KINECT_USE_SHADERPROJECTOR
+	 projector(new ShaderProjector(*source)),
+	 #else
 	 projector(new Projector(*source)),
+	 #endif
 	 streamingCallback(0),
 	 enabled(true)
 	{
@@ -79,7 +99,9 @@ Renderer::~Renderer(void)
 	{
 	/* Stop streaming: */
 	source->stopStreaming();
+	#if !KINECT_USE_SHADERPROJECTOR
 	projector->stopStreaming();
+	#endif
 	
 	/* Destroy the projector and frame source: */
 	delete projector;
@@ -105,8 +127,12 @@ void Renderer::startStreaming(StreamingCallback* newStreamingCallback)
 	delete streamingCallback;
 	streamingCallback=newStreamingCallback;
 	
+	#if !KINECT_USE_SHADERPROJECTOR
+	
 	/* Hook this renderer into the projector's mesh callback: */
 	projector->startStreaming(Misc::createFunctionCall(this,&Renderer::meshStreamingCallback));
+	
+	#endif
 	
 	/* Hook this renderer into the frame source and start streaming: */
 	source->startStreaming(Misc::createFunctionCall(this,&Renderer::colorStreamingCallback),Misc::createFunctionCall(this,&Renderer::depthStreamingCallback));

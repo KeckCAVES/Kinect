@@ -74,8 +74,8 @@ void KinectServer::CameraState::depthStreamingCallback(const Kinect::FrameBuffer
 	++depthFrameIndex;
 	}
 
-KinectServer::CameraState::CameraState(libusb_device* sDevice,bool sLossyDepthCompression,Threads::MutexCond& sNewColorFrameCond,Threads::MutexCond& sNewDepthFrameCond)
-	:camera(sDevice),
+KinectServer::CameraState::CameraState(USB::Context& usbContext,const char* serialNumber,bool sLossyDepthCompression,Threads::MutexCond& sNewColorFrameCond,Threads::MutexCond& sNewDepthFrameCond)
+	:camera(usbContext,serialNumber),
 	 depthCorrection(0),
 	 colorFile(16384),colorCompressor(0),
 	 colorFrameIndex(0),newColorFrameCond(sNewColorFrameCond),hasSentColorFrame(false),
@@ -166,7 +166,7 @@ void* KinectServer::listeningThreadMethod(void)
 		try
 			{
 			#ifdef VERBOSE
-			std::cout<<"KinectServer: Waiting for client connection"<<std::endl<<std::flush;
+			std::cout<<"KinectServer: Waiting for client connection on TCP port "<<listeningSocket.getPortId()<<std::endl<<std::flush;
 			#endif
 			newClientSocket=new Comm::TCPPipe(listeningSocket);
 			#ifdef VERBOSE
@@ -403,12 +403,7 @@ KinectServer::KinectServer(USB::Context& usbContext,Misc::ConfigurationFileSecti
 	numCameras=cameraNames.size();
 	cameraStates=new CameraState*[numCameras];
 	
-	/* Enumerate all USB devices: */
-	#ifdef VERBOSE
-	std::cout<<"KinectServer: Enumerating Kinect camera devices on USB bus"<<std::endl;
-	#endif
-	USB::DeviceList usbDevices(usbContext);
-	size_t numKinectCameras=usbDevices.getNumDevices(0x045eU,0x02aeU);
+	/* Connect to all requested Kinect devices: */
 	unsigned int numFoundCameras=0;
 	for(unsigned int i=0;i<numCameras;++i)
 		{
@@ -416,22 +411,13 @@ KinectServer::KinectServer(USB::Context& usbContext,Misc::ConfigurationFileSecti
 		Misc::ConfigurationFileSection cameraSection=configFileSection.getSection(cameraNames[i].c_str());
 		std::string serialNumber=cameraSection.retrieveValue<std::string>("./serialNumber");
 		
-		/* Find a Kinect camera of the specified serial number: */
-		unsigned int j;
-		for(j=0;j<numKinectCameras;++j)
+		try
 			{
-			/* Tentatively open the Kinect camera device: */
-			USB::Device cam(usbDevices.getDevice(0x045eU,0x02aeU,j));
-			if(cam.getSerialNumber()==serialNumber) // Bail out if the desired device was found
-				break;
-			}
-		if(j<numKinectCameras)
-			{
-			/* Create a streamer for the found camera: */
+			/* Create a streamer for the Kinect device of the requested serial number: */
 			#ifdef VERBOSE
 			std::cout<<"KinectServer: Creating streamer for camera with serial number "<<serialNumber<<std::endl;
 			#endif
-			cameraStates[numFoundCameras]=new CameraState(usbDevices.getDevice(0x045eU,0x02aeU,j),cameraSection.retrieveValue<bool>("./lossyDepthCompression",false),newFrameCond,newFrameCond);
+			cameraStates[numFoundCameras]=new CameraState(usbContext,serialNumber.c_str(),cameraSection.retrieveValue<bool>("./lossyDepthCompression",false),newFrameCond,newFrameCond);
 			
 			/* Check if camera is to remove background: */
 			if(cameraSection.retrieveValue<bool>("./removeBackground",true))
@@ -487,8 +473,10 @@ KinectServer::KinectServer(USB::Context& usbContext,Misc::ConfigurationFileSecti
 			
 			++numFoundCameras;
 			}
-		else
-			std::cerr<<"Kinect camera with serial number "<<serialNumber<<" not found on USB bus"<<std::endl;
+		catch(std::runtime_error err)
+			{
+			std::cerr<<"Could not open Kinect camera with serial number "<<serialNumber<<" due to exception "<<err.what()<<std::endl;
+			}
 		}
 	
 	/* Initialize streaming state: */
