@@ -27,10 +27,16 @@ Software Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA
 #include <string>
 #include <vector>
 #include <Threads/Thread.h>
-#include <Threads/MutexCond.h>
+#include <Threads/Mutex.h>
+#include <Threads/Cond.h>
 #include <IO/File.h>
 #include <Vrui/Vislet.h>
+#include <Kinect/Config.h>
+#if KINECT_USE_SHADERPROJECTOR
+#include <Kinect/ShaderProjector.h>
+#else
 #include <Kinect/Projector.h>
+#endif
 
 /* Forward declarations: */
 
@@ -39,7 +45,9 @@ class Context;
 }
 namespace Kinect {
 class FrameBuffer;
+#if !KINECT_USE_SHADERPROJECTOR
 class MeshBuffer;
+#endif
 class FrameSource;
 class FrameSaver;
 class FrameReader;
@@ -70,7 +78,11 @@ class KinectViewer:public Vrui::Vislet
 		{
 		/* Elements: */
 		protected:
+		#if KINECT_USE_SHADERPROJECTOR
+		Kinect::ShaderProjector* projector;
+		#else
 		Kinect::Projector* projector;
+		#endif
 		
 		/* Constructors and destructors: */
 		public:
@@ -102,7 +114,9 @@ class KinectViewer:public Vrui::Vislet
 		/* Private methods: */
 		void colorStreamingCallback(const Kinect::FrameBuffer& frameBuffer); // Callback receiving color frames from the frame source
 		void depthStreamingCallback(const Kinect::FrameBuffer& frameBuffer); // Callback receiving depth frames from the frame source
+		#if !KINECT_USE_SHADERPROJECTOR
 		void meshStreamingCallback(const Kinect::MeshBuffer& meshBuffer); // Callback receiving projected meshes from the projector
+		#endif
 		
 		/* Constructors and destructors: */
 		LiveRenderer(Kinect::FrameSource* sSource); // Creates a renderer for the given 3D video source and saves streams from source if save file name is non-empty; adopts source object
@@ -122,21 +136,37 @@ class KinectViewer:public Vrui::Vislet
 		private:
 		IO::FilePtr colorFile; // Pointer to the file containing the color stream
 		Kinect::FrameReader* colorReader; // Reader for the color stream file
-		Threads::Thread colorReaderThread; // Thread to read color frames from the color stream file
 		IO::FilePtr depthFile; // Pointer to the file containing the depth stream
 		Kinect::FrameReader* depthReader; // Reader for the depth stream file
+		
+		Threads::Thread colorReaderThread; // Thread to read color frames from the color stream file
 		Threads::Thread depthReaderThread; // Thread to read depth frames from the depth stream file
-		Threads::MutexCond frameQueueCond; // Condition variable to synchronize access to the frame queues
+		bool started; // Flag whether streaming has been started
+		
 		double timeStamp; // Current display time stamp
+		static const int numQueueSlots=3; // Number of frames that can be read ahead from the input files
+		Threads::Mutex frameQueueMutex; // Mutex protecting the frame queue state and the condition variables
+		Threads::Cond frameQueuesEmptyCond; // Condition variable to wait when both frame queues are empty
+		
+		Threads::Cond colorFrameQueueFullCond; // Condition variable to wait when the color frame queue is full
 		int numColorFrames; // Number of color frames currently in the queue
-		Kinect::FrameBuffer colorFrames[2]; // Queue of two color frames whose time stamps bracket the display time stamp
+		Kinect::FrameBuffer colorFrames[numQueueSlots]; // Queue of two color frames whose time stamps bracket the display time stamp
 		Kinect::FrameBuffer nextColorFrame; // The next color frame
 		int mostRecentColorFrame; // Index of the queue slot containing the most recent color frame
+		
+		Threads::Cond depthFrameQueueFullCond; // Condition variable to wait when the depth frame queue is full
 		int numDepthFrames; // Number of depth frames currently in the queue
-		Kinect::FrameBuffer depthFrames[2]; // Queue of two depth frames whose time stamps bracket the display time stamp
+		#if KINECT_USE_SHADERPROJECTOR
+		Kinect::FrameBuffer depthFrames[numQueueSlots]; // Queue of two depth frames whose time stamps bracket the display time stamp
+		#else
+		Kinect::MeshBuffer depthFrames[numQueueSlots]; // Queue of two depth frames whose time stamps bracket the display time stamp
+		#endif
 		int mostRecentDepthFrame; // Index of the queue slot containing the most recent depth frame
+		#if KINECT_USE_SHADERPROJECTOR
 		Kinect::FrameBuffer nextDepthFrame; // The next depth frame
-		bool started; // Flag whether streaming has been started
+		#else
+		Kinect::MeshBuffer nextDepthFrame; // The next depth frame
+		#endif
 		
 		/* Private methods: */
 		void* colorReaderThreadMethod(void);

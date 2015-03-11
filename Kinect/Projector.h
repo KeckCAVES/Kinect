@@ -52,7 +52,7 @@ class Projector:public GLObject
 	private:
 	typedef FrameSource::DepthCorrection::PixelCorrection PixelCorrection; // Type for per-pixel depth correction factors
 	typedef FrameSource::IntrinsicParameters::PTransform PTransform; // Type for projective transformations
-	typedef FrameSource::ExtrinsicParameters OGTransform; // Type for orthogonal transformations
+	typedef FrameSource::ExtrinsicParameters ProjectorTransform; // Type for transformations from 3D camera space to 3D world space
 	
 	struct DataItem:public GLObject::DataItem // Structure containing per-context state
 		{
@@ -74,15 +74,15 @@ class Projector:public GLObject
 	unsigned int depthSize[2]; // Width and height of all incoming depth frames
 	PTransform depthProjection; // Projection transformation from depth image space into 3D camera space
 	PTransform colorProjection; // Projection transformation from color image space into 3D camera space
-	OGTransform projectorTransform; // Transformation from 3D camera space into 3D world space
+	ProjectorTransform projectorTransform; // Transformation from 3D camera space into 3D world space
 	PixelCorrection* depthCorrection; // Buffer of per-pixel depth correction parameters
 	Threads::MutexCond inDepthFrameCond; // Condition variable to signal arrival of a new depth frame
 	unsigned int inDepthFrameVersion; // Version number of most-recently arrived raw depth frame
 	FrameBuffer inDepthFrame; // Most-recently arrived raw depth frame
 	bool filterDepthFrames; // Flag if temporal depth frame filtering is enabled
 	bool lowpassDepthFrames; // Flag it spatial depth frame filtering is enabled
-	GLfloat* filteredDepthFrame; // Temporally filtered depth frame, same version number as current depth frame
-	GLfloat* spatialFilterBuffer; // Intermediate buffer to filter depth frames spatially
+	mutable GLfloat* filteredDepthFrame; // Temporally filtered depth frame, same version number as current depth frame
+	mutable GLfloat* spatialFilterBuffer; // Intermediate buffer to filter depth frames spatially
 	int quadCaseVertexOffsets[16][6]; // Offsets of triangle vertices to be used for each quad corner validity case
 	FrameSource::DepthPixel triangleDepthRange; // Maximum depth distance between a triangle's vertices
 	Threads::Thread depthFrameProcessingThread; // Background thread to process incoming depth frames for rendering
@@ -109,7 +109,7 @@ class Projector:public GLObject
 	void setDepthCorrection(const FrameSource::DepthCorrection* dc); // Enables per-pixel depth correction using the given depth correction parameters
 	void setIntrinsicParameters(const FrameSource::IntrinsicParameters& ips); // Sets the projectors intrinsic camera parameters
 	void setExtrinsicParameters(const FrameSource::ExtrinsicParameters& eps); // Sets the projectors extrinsic camera parameters
-	const OGTransform& getProjectorTransform(void) const // Returns the transformation from camera to world space
+	const ProjectorTransform& getProjectorTransform(void) const // Returns the transformation from camera to world space
 		{
 		return projectorTransform;
 		}
@@ -123,9 +123,10 @@ class Projector:public GLObject
 		return triangleDepthRange;
 		}
 	void setTriangleDepthRange(FrameSource::DepthPixel newTriangleDepthRange); // Sets the maximum depth range for valid triangles
-	const MeshBuffer& processDepthFrame(const FrameBuffer& depthFrame); // Processes the given depth frame immediately and returns the resuling mesh
+	void processDepthFrame(const FrameBuffer& depthFrame,MeshBuffer& meshBuffer) const; // Processes the given depth frame into the given mesh buffer immediately and returns the resuling mesh
 	void startStreaming(StreamingCallback* newStreamingCallback); // Starts processing depth frames in the background; calls the provided callback function every time a new mesh is produced
 	void setDepthFrame(const FrameBuffer& newDepthFrame); // Updates the projector's current depth frame in streaming mode; can be called from any thread
+	void setMesh(const MeshBuffer& newMesh); // Updates the projector's current mesh in streaming mode; can be called from any thread
 	void setColorFrame(const FrameBuffer& newColorFrame); // Updates the projector's current color frame in streaming mode; can be called from any thread
 	void stopStreaming(void); // Stops background processing of depth frames
 	void updateFrames(void); // Selects the most recent depth and color frames for rendering; must be called from foreground thread

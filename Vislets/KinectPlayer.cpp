@@ -183,19 +183,23 @@ void* KinectPlayer::KinectStreamer::depthDecompressorThreadMethod(void)
 		/* Read the next depth frame: */
 		Kinect::FrameBuffer nextFrame=depthDecompressor->readNextFrame();
 		
+		/* Process the next depth frame into a mesh: */
+		Kinect::MeshBuffer nextMesh;
+		projector.processDepthFrame(nextFrame,nextMesh);
+		
 		/* Put the new depth frame into the queue: */
 		{
 		Threads::MutexCond::Lock frameQueueLock(frameQueueCond);
 		while(numDepthFrames==2)
 			frameQueueCond.wait(frameQueueLock);
 		mostRecentDepthFrame=1-mostRecentDepthFrame;
-		depthFrames[mostRecentDepthFrame]=nextFrame;
+		depthFrames[mostRecentDepthFrame]=nextMesh;
 		++numDepthFrames;
 		if(numDepthFrames==1)
 			frameQueueCond.broadcast();
 		}
 		
-		if(nextFrame.timeStamp==Math::Constants<double>::max)
+		if(nextMesh.timeStamp>=Math::Constants<double>::max)
 			break;
 		}
 	
@@ -305,7 +309,7 @@ void KinectPlayer::KinectStreamer::updateFrames(double currentTimeStamp)
 	{
 	/* Wait until the next frame is newer than the new time step: */
 	Kinect::FrameBuffer currentColorFrame;
-	Kinect::FrameBuffer currentDepthFrame;
+	Kinect::MeshBuffer currentDepthFrame;
 	while(nextColorFrame.timeStamp<=currentTimeStamp||nextDepthFrame.timeStamp<=currentTimeStamp)
 		{
 		if(nextColorFrame.timeStamp<=currentTimeStamp)
@@ -338,7 +342,7 @@ void KinectPlayer::KinectStreamer::updateFrames(double currentTimeStamp)
 	if(currentColorFrame.timeStamp!=0.0)
 		projector.setColorFrame(currentColorFrame);
 	if(currentDepthFrame.timeStamp!=0.0)
-		projector.processDepthFrame(currentDepthFrame);
+		projector.setMesh(currentDepthFrame);
 	projector.updateFrames();
 	}
 

@@ -1,7 +1,7 @@
 /***********************************************************************
 RawKinectViewer - Simple application to view color and depth images
 captured from a Kinect device.
-Copyright (c) 2010-2013 Oliver Kreylos
+Copyright (c) 2010-2015 Oliver Kreylos
 
 This file is part of the Kinect 3D Video Capture Project (Kinect).
 
@@ -46,6 +46,7 @@ Software Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA
 #include <Kinect/Camera.h>
 
 #include "PauseTool.h"
+#include "MeasurementTool.h"
 #include "TiePointTool.h"
 #include "LineTool.h"
 #include "DepthCorrectionTool.h"
@@ -485,6 +486,7 @@ RawKinectViewer::RawKinectViewer(int& argc,char**& argv,char**& appDefaults)
 	*********************************************************************/
 	
 	PauseTool::initClass(*Vrui::getToolManager());
+	MeasurementTool::initClass(*Vrui::getToolManager());
 	TiePointTool::initClass(*Vrui::getToolManager());
 	LineTool::initClass(*Vrui::getToolManager());
 	DepthCorrectionTool::initClass(*Vrui::getToolManager());

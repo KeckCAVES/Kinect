@@ -977,10 +977,77 @@ void* Camera::compressedDepthDecodingThreadMethod(void)
 	return 0;
 	}
 
-void Camera::initialize(void)
+namespace {
+
+/****************
+Helper functions:
+****************/
+
+std::string getKinectSerialNumber(USB::Context& usbContext,libusb_device* device,USB::DeviceList* deviceList)
 	{
-	/* Get the device's serial number: */
-	serialNumber=device.getSerialNumber();
+	/* Determine the Kinect's model number: */
+	USB::Device camera(device);
+	libusb_device_descriptor dd=camera.getDeviceDescriptor();
+	
+	/* Check whether the Kinect's serial number is stored with the camera or audio sub-device: */
+	if(dd.idProduct==0x02bfU||dd.bcdDevice>0x010bU)
+		{
+		/*******************************************************************
+		Return the serial number of the Kinect audio device on the same hub
+		as this camera device:
+		*******************************************************************/
+		
+		std::string result;
+		
+		/* Enumerate all USB devices to find the audio sub-device sharing the same internal hub as the camera sub-device: */
+		USB::DeviceList* myDeviceList=0;
+		if(deviceList==0)
+			deviceList=myDeviceList=new USB::DeviceList(usbContext);
+		
+		/* Get the Kinect camera device's parent device, i.e., the Kinect's internal USB hub: */
+		libusb_device* hub=deviceList->getParent(device);
+		
+		/* Determine the vendor/product ID for the matching Kinect audio sub-device: */
+		USB::VendorProductId kinectAudioId(0x045eU,dd.idProduct==0x02bfU?0x02beU:0x02adU);
+		
+		/* Find the Kinect audio device connected to the same hub: */
+		for(size_t i=0;i<deviceList->getNumDevices();++i)
+			if(deviceList->getVendorProductId(i)==kinectAudioId&&deviceList->getParent(deviceList->getDevice(i))==hub)
+				{
+				/* Return the audio device's serial number: */
+				USB::Device audio(deviceList->getDevice(i));
+				result=audio.getSerialNumber();
+				break;
+				}
+		
+		delete myDeviceList;
+		return result;
+		}
+	else
+		{
+		/* Return the camera sub-device's serial number: */
+		return camera.getSerialNumber();
+		}
+	}
+
+}
+
+void Camera::initialize(USB::Context& usbContext,USB::DeviceList* deviceList)
+	{
+	/* Determine the Kinect's model number: */
+	libusb_device_descriptor dd=device.getDeviceDescriptor();
+	
+	/* Get the Kinect's serial number: */
+	serialNumber=getKinectSerialNumber(usbContext,device.getDevice(),deviceList);
+	
+	/* Initialize calibration parameter reply sizes (fourth reply's size depends on Kinect model): */
+	calibrationParameterReplySizes[0]=126;
+	calibrationParameterReplySizes[1]=16;
+	calibrationParameterReplySizes[2]=12;
+	calibrationParameterReplySizes[3]=(dd.idProduct==0x02bfU||dd.bcdDevice>0x010bU)?342:330; // Behavior change in Kinect-for-Xbox model 1473 and Kinect-for-Windows
+	
+	/* Check whether the camera requires alternative interface settings: */
+	needAltInterface=dd.idProduct==0x02bfU; // Behavior change in Kinect-for-Windows
 	
 	/* Initialize the camera and streamer states: */
 	frameSizes[0]=FS_640_480;
@@ -992,7 +1059,7 @@ void Camera::initialize(void)
 	streamers[1]=0;
 	}
 
-Camera::Camera(libusb_device* sDevice)
+Camera::Camera(USB::Context& usbContext,libusb_device* sDevice)
 	:device(sDevice),
 	 messageSequenceNumber(0x2000U),
 	 frameTimerOffset(0.0),
@@ -1005,8 +1072,27 @@ Camera::Camera(libusb_device* sDevice)
 	 #endif
 	{
 	/* Initialize the camera: */
-	initialize();
+	initialize(usbContext,0);
 	}
+
+namespace {
+
+/**************
+Helper classes:
+**************/
+
+class KinectCameraMatcher // Class to match a Kinect camera device
+	{
+	/* Methods: */
+	public:
+	bool operator()(const libusb_device_descriptor& dd) const
+		{
+		/* Check for Kinect-for-Xbox and Kinect-for-Windows camera devices: */
+		return dd.idVendor==0x045eU&&(dd.idProduct==0x02aeU||dd.idProduct==0x02bfU);
+		}
+	};
+
+}
 
 Camera::Camera(USB::Context& usbContext,size_t index)
 	:messageSequenceNumber(0x2000U),
@@ -1021,12 +1107,49 @@ Camera::Camera(USB::Context& usbContext,size_t index)
 	{
 	/* Get the index-th Kinect camera device from the context: */
 	USB::DeviceList deviceList(usbContext);
-	device=deviceList.getDevice(0x045e,0x02ae,index);
+	device=deviceList.getDevice(KinectCameraMatcher(),index);
 	if(!device.isValid())
 		Misc::throwStdErr("Kinect::Camera::Camera: Less than %d Kinect camera devices detected",int(index));
 	
 	/* Initialize the camera: */
-	initialize();
+	initialize(usbContext,&deviceList);
+	}
+
+Camera::Camera(USB::Context& usbContext,const char* serialNumber)
+	:messageSequenceNumber(0x2000U),
+	 frameTimerOffset(0.0),
+	 compressDepthFrames(true),smoothDepthFrames(true),
+	 numBackgroundFrames(0),backgroundFrame(0),
+	 backgroundCaptureCallback(0),
+	 removeBackground(false),backgroundRemovalFuzz(5)
+	 #if KINECT_CAMERA_DUMP_HEADERS
+	 ,headerFile(0)
+	 #endif
+	{
+	/* Enumerate all Kinect cameras on the USB bus: */
+	USB::DeviceList deviceList(usbContext);
+	
+	/* Search for all Kinect cameras: */
+	libusb_device* dev=0;
+	KinectCameraMatcher kcm;
+	for(size_t i=0;dev==0&&i<deviceList.getNumDevices();++i)
+		{
+		/* Check if the device is a Kinect camera: */
+		libusb_device_descriptor dd;
+		if(kcm(deviceList.getDeviceDescriptor(i,dd)))
+			{
+			/* Get the device's serial number: */
+			std::string devSerialNumber=getKinectSerialNumber(usbContext,deviceList.getDevice(i),&deviceList);
+			if(devSerialNumber==serialNumber)
+				dev=deviceList.getDevice(i);
+			}
+		}
+	if(dev==0)
+		Misc::throwStdErr("Kinect::Camera::Camera: Kinect device with serial number %s not found",serialNumber);
+	
+	/* Initialize the camera: */
+	device=dev;
+	initialize(usbContext,&deviceList);
 	}
 
 Camera::~Camera(void)
@@ -1167,6 +1290,11 @@ void Camera::startStreaming(FrameSource::StreamingCallback* newColorStreamingCal
 	device.open();
 	// device.setConfiguration(1); // This seems to confuse the device
 	device.claimInterface(0,true); // Must detach kernel driver; Kinect supported as UVC camera in newer kernels
+	if(needAltInterface)
+		{
+		/* Switch the camera to an alternative interface setting: */
+		device.setAlternateSetting(0,1);
+		}
 	
 	/***********************************************************
 	Query the device's serial number(?) and firmware version(?):
@@ -1350,15 +1478,14 @@ void Camera::getCalibrationParameters(Camera::CalibrationParameters& calib)
 	
 	/* Request the calibration parameters in four subsets: */
 	static const USBWord subsetOpcodes[4]={0x0040U,0x0041U,0x0000U,0x0000U};
-	static const size_t subsetReplySizes[4]={126,16,12,330};
 	for(int subset=0;subset<4;++subset)
 		{
 		/* Request the subset of calibration parameters: */
 		cmdBuffer[0]=subsetOpcodes[subset];
 		
 		/* Send the message and receive the reply: */
-		IO::FixedMemoryFile replyBuffer(subsetReplySizes[subset]);
-		if(sendMessage(subset<3?0x0016U:0x0004U,cmdBuffer,subset<3?5:1,replyBuffer.getMemory(),subsetReplySizes[subset])!=subsetReplySizes[subset])
+		IO::FixedMemoryFile replyBuffer(calibrationParameterReplySizes[subset]);
+		if(sendMessage(subset<3?0x0016U:0x0004U,cmdBuffer,subset<3?5:1,replyBuffer.getMemory(),calibrationParameterReplySizes[subset])!=calibrationParameterReplySizes[subset])
 			Misc::throwStdErr("Kinect::Camera::getCalibrationParameters: Protocol error while requesting parameter subset");
 
 		/* Extract the subset of calibration parameters: */
@@ -1371,7 +1498,7 @@ void Camera::getCalibrationParameters(Camera::CalibrationParameters& calib)
 	
 	/* Close the device again if it was temporarily opened: */
 	if(tempOpen)
-		device.open();
+		device.close();
 	}
 
 void Camera::setFrameSize(int camera,Camera::FrameSize newFrameSize)

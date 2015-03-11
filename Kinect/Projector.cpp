@@ -102,8 +102,10 @@ void* Projector::depthFrameProcessingThreadMethod(void)
 		rawDepthFrame=inDepthFrame;
 		}
 		
-		/* Process the depth frame: */
-		const MeshBuffer& newMesh=processDepthFrame(rawDepthFrame);
+		/* Process the depth frame into a new slot in the mesh triple buffer: */
+		MeshBuffer& newMesh=meshes.startNewValue();
+		processDepthFrame(rawDepthFrame,newMesh);
+		meshes.postNewValue();
 		
 		/* Call the mesh streaming callback: */
 		if(streamingCallback!=0)
@@ -126,7 +128,8 @@ Projector::Projector(void)
 	}
 
 Projector::Projector(FrameSource& frameSource)
-	:depthCorrection(0),
+	:GLObject(false),
+	 depthCorrection(0),
 	 inDepthFrameVersion(0),
 	 filterDepthFrames(false),lowpassDepthFrames(false),filteredDepthFrame(0),spatialFilterBuffer(0),
 	 triangleDepthRange(5),
@@ -145,6 +148,8 @@ Projector::Projector(FrameSource& frameSource)
 	colorProjection=ips.colorProjection;
 	depthProjection=ips.depthProjection;
 	projectorTransform=frameSource.getExtrinsicParameters();
+	
+	GLObject::init();
 	}
 
 Projector::~Projector(void)
@@ -247,19 +252,16 @@ void Projector::setTriangleDepthRange(FrameSource::DepthPixel newTriangleDepthRa
 	triangleDepthRange=newTriangleDepthRange;
 	}
 
-const MeshBuffer& Projector::processDepthFrame(const FrameBuffer& depthFrame)
+void Projector::processDepthFrame(const FrameBuffer& depthFrame,MeshBuffer& meshBuffer) const
 	{
-	/* Start a new mesh in the mesh triple buffer: */
-	MeshBuffer& newMesh=meshes.startNewValue();
-	
 	/* Check if the buffer is invalid, or is still referenced by someone else: */
-	if(!newMesh.isValid()||!newMesh.isPrivate())
+	if(!meshBuffer.isValid()||!meshBuffer.isPrivate())
 		{
 		/* Create a new mesh buffer of the largest possible size: */
-		newMesh=MeshBuffer(depthSize[1]*depthSize[0],(depthSize[1]-1)*(depthSize[0]-1)*2);
+		meshBuffer=MeshBuffer(depthSize[1]*depthSize[0],(depthSize[1]-1)*(depthSize[0]-1)*2);
 		
 		/* Initialize the x and y positions of all vertices: */
-		MeshBuffer::Vertex* vPtr=newMesh.getVertices();
+		MeshBuffer::Vertex* vPtr=meshBuffer.getVertices();
 		for(unsigned int y=0;y<depthSize[1];++y)
 			for(unsigned int x=0;x<depthSize[0];++x,++vPtr)
 				{
@@ -385,7 +387,7 @@ const MeshBuffer& Projector::processDepthFrame(const FrameBuffer& depthFrame)
 			**************************************/
 			
 			GLfloat* sPtr=spatialFilterBuffer;
-			MeshBuffer::Vertex* vPtr=newMesh.getVertices();
+			MeshBuffer::Vertex* vPtr=meshBuffer.getVertices();
 			for(unsigned int y=0;y<depthSize[1];++y)
 				{
 				GLfloat sum=0.0f;
@@ -451,7 +453,7 @@ const MeshBuffer& Projector::processDepthFrame(const FrameBuffer& depthFrame)
 			
 			/* Copy the filtered depth frame into the mesh vertex buffer: */
 			const float* fdfPtr=filteredDepthFrame;
-			MeshBuffer::Vertex* vPtr=newMesh.getVertices();
+			MeshBuffer::Vertex* vPtr=meshBuffer.getVertices();
 			for(unsigned int y=0;y<depthSize[1];++y)
 				for(unsigned int x=0;x<depthSize[0];++x,++fdfPtr,++vPtr)
 					vPtr->position[2]=*fdfPtr;
@@ -473,7 +475,7 @@ const MeshBuffer& Projector::processDepthFrame(const FrameBuffer& depthFrame)
 		
 		/* Update the vertex array: */
 		const FrameSource::DepthPixel* dfPtr=static_cast<const FrameSource::DepthPixel*>(depthFrame.getBuffer());
-		MeshBuffer::Vertex* vPtr=newMesh.getVertices();
+		MeshBuffer::Vertex* vPtr=meshBuffer.getVertices();
 		const PixelCorrection* dcPtr=depthCorrection;
 		for(unsigned int y=0;y<depthSize[1];++y)
 			for(unsigned int x=0;x<depthSize[0];++x,++dfPtr,++dcPtr,++vPtr)
@@ -481,7 +483,7 @@ const MeshBuffer& Projector::processDepthFrame(const FrameBuffer& depthFrame)
 		}
 	
 	/* Store the number of generated vertices: */
-	newMesh.numVertices=depthSize[1]*depthSize[0];
+	meshBuffer.numVertices=depthSize[1]*depthSize[0];
 	
 	/*******************************************************************
 	Create triangle indices for all valid pixels that don't exceed the
@@ -490,8 +492,8 @@ const MeshBuffer& Projector::processDepthFrame(const FrameBuffer& depthFrame)
 	
 	/* Iterate through all quads and generate triangles: */
 	FrameSource::DepthPixel tdr=triangleDepthRange; // Get the currently set triangle depth range
-	newMesh.numTriangles=0;
-	MeshBuffer::Index* tiPtr=newMesh.getTriangleIndices();
+	meshBuffer.numTriangles=0;
+	MeshBuffer::Index* tiPtr=meshBuffer.getTriangleIndices();
 	const FrameSource::DepthPixel* dfRowPtr=static_cast<const FrameSource::DepthPixel*>(depthFrame.getBuffer());
 	GLuint rowIndex=0;
 	for(unsigned int y=1;y<depthSize[1];++y,dfRowPtr+=depthSize[0],rowIndex+=depthSize[0])
@@ -532,18 +534,14 @@ const MeshBuffer& Projector::processDepthFrame(const FrameBuffer& depthFrame)
 					/* Generate the triangle: */
 					for(int j=0;j<3;++j)
 						*(tiPtr++)=index+cvo[j];
-					++newMesh.numTriangles;
+					++meshBuffer.numTriangles;
 					}
 				}
 			}
 		}
 	
-	/* Post the finished projected depth frame to the foreground thread: */
-	newMesh.timeStamp=depthFrame.timeStamp;
-	meshes.postNewValue();
-	
-	/* Return the finish mesh: */
-	return newMesh;
+	/* Copy the depth buffer's time stamp: */
+	meshBuffer.timeStamp=depthFrame.timeStamp;
 	}
 
 void Projector::startStreaming(Projector::StreamingCallback* newStreamingCallback)
@@ -563,6 +561,12 @@ void Projector::setDepthFrame(const FrameBuffer& newDepthFrame)
 	++inDepthFrameVersion;
 	inDepthFrame=newDepthFrame;
 	inDepthFrameCond.signal();
+	}
+
+void Projector::setMesh(const MeshBuffer& newMesh)
+	{
+	/* Post the new mesh into the triple buffer: */
+	meshes.postNewValue(newMesh);
 	}
 
 void Projector::setColorFrame(const FrameBuffer& newColorFrame)

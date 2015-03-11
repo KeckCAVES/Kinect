@@ -47,6 +47,7 @@ class FunctionCall;
 }
 namespace USB {
 class Context;
+class DeviceList;
 }
 namespace IO {
 class File;
@@ -170,6 +171,8 @@ class Camera:public FrameSource
 	private:
 	USB::Device device; // The USB device representing this Kinect camera
 	std::string serialNumber; // This Kinect camera's serial number
+	size_t calibrationParameterReplySizes[4]; // USB reply sizes when querying the four subsets of factory calibration parameters
+	bool needAltInterface; // Flag whether the camera device needs to be switched to an alternate interface
 	FrameSize frameSizes[2]; // Selected frame sizes for the color and depth cameras
 	FrameRate frameRates[2]; // Selected frame rates for the color and depth cameras
 	USBWord messageSequenceNumber; // Incrementing sequence number for command messages to the camera
@@ -196,12 +199,13 @@ class Camera:public FrameSource
 	void* colorDecodingThreadMethod(void); // The color decoding thread method
 	void* depthDecodingThreadMethod(void); // The depth decoding thread method
 	void* compressedDepthDecodingThreadMethod(void); // The depth decoding thread method for RLE/differential-compressed frames
-	void initialize(void); // Initializes the Kinect camera; called from constructors
+	void initialize(USB::Context& usbContext,USB::DeviceList* deviceList =0); // Initializes the Kinect camera; called from constructors
 	
 	/* Constructors and destructors: */
 	public:
-	Camera(libusb_device* sDevice); // Creates a Kinect camera wrapper around the given USB device, which is assumed to be a Kinect camera
+	Camera(USB::Context& usbContext,libusb_device* sDevice); // Creates a Kinect camera wrapper around the given USB device, which is assumed to be a Kinect camera
 	Camera(USB::Context& usbContext,size_t index =0); // Opens the index-th Kinect camera device on the given USB context
+	Camera(USB::Context& usbContext,const char* serialNumber); // Opens the Kinect camera with the given serial number on the given USB context
 	virtual ~Camera(void); // Destroys the camera
 	
 	/* Methods from FrameSource: */

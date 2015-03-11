@@ -1,18 +1,21 @@
 ========================================================================
-README for Kinect 3D Video Capture Project version 2.7
+README for Kinect 3D Video Capture Project version 2.8
 Copyright (c) 2010-2013 Oliver Kreylos
 ========================================================================
 
 Requirements
 ============
 
-This software requires the Vrui VR toolkit, version 3.0 build 001 or
+This software requires the Vrui VR toolkit, version 3.1 build 001 or
 newer. It also requires libusb version 1.0, and that Vrui was configured
-with support for libusb prior to its installation. This software can
-optionally create Kinect 3D video streaming plug-ins for Vrui's
-collaboration infrastructure (version 2.6 or newer). The presence of
-Vrui's collaboration infrastructure will be detected automatically
-during the build process.
+with support for libusb prior to its installation. To properly work with
+multiple Kinect-for-Xbox version 1473 and/or Kinect-for-Windows devices,
+the libusb library needs to provide USB bus topology query functions
+such as those provided by the libusbx fork. This software can optionally
+create Kinect 3D video streaming plug-ins for Vrui's collaboration
+infrastructure (version 2.6 or newer). The presence of Vrui's
+collaboration infrastructure will be detected automatically during the
+build process.
 
 Installation Guide
 ==================
@@ -37,8 +40,8 @@ instructions need to be changed.
 2. Change into the Kinect 3D Video Capture Project's base directory:
    > cd Kinect-<version>
 
-3. If the Vrui version installed in step 0 was not 3.0, or Vrui's
-   installation directory was changed from the default of ~/Vrui-3.0,
+3. If the Vrui version installed in step 0 was not 3.1, or Vrui's
+   installation directory was changed from the default of ~/Vrui-3.1,
    adapt the makefile using a text editor. Change the value of
    VRUI_MAKEDIR close to the beginning of the file as follows:
    VRUI_MAKEDIR := <Vrui install dir>/share/make
@@ -55,7 +58,9 @@ instructions need to be changed.
 6. (Optional, Linux-only) Install a udev rule file to give access to all
    Kinect devices to all users, local and remote. Read below for details
    and security considerations.
-   > sudo make installudevrule
+   > make installudevrule
+   This will ask for the user's password to copy the rule file,
+   70-Kinect.rules, into the udev rule directory /etc/udev/rules.d.
 
 Use
 ===
@@ -63,18 +68,26 @@ Use
 1. Run ./bin/KinectUtil list to list all Kinect devices connected to the
    host computer.
 
-2. Run ./bin/RawKinectViewer <camera index> to intrinsically calibrate
-   the <camera index>-th Kinect device on the host's USB bus (with the
-   first device having index 0), using a semi-transparent checkerboard
-   calibration target (see next section for details). This generates a
-   binary IntrinsicParameters-<serial number>.dat file in
-   <Vrui install dir>/etc/Kinect-<version>, where <serial number> is the
-   unique factory-assigned serial number of the Kinect device as
-   displayed in step 1.
+2a. Run ./bin/KinectUtil getCalib <camera index> to download factory
+    calibration data from the <camera index>-th Kinect device on the
+    host's USB bus (with the first device having index 0) and create a
+    intrinsic camera calibration file for that device in the Kinect
+    package's configuration file directory.
 
-Step 2 only has to be performed once for each Kinect device, unless the
-resulting calibration proves unsatisfactory. Kinect devices typically
-retain their intrinsic calibration over time.
+-- or --
+
+2b. Run ./bin/RawKinectViewer <camera index> to intrinsically calibrate
+    the <camera index>-th Kinect device on the host's USB bus (with the
+    first device having index 0), using a semi-transparent checkerboard
+    calibration target (see next section for details). This generates a
+    binary IntrinsicParameters-<serial number>.dat file in
+    <Vrui install dir>/etc/Kinect-<version>, where <serial number> is
+    the unique factory-assigned serial number of the Kinect device as
+    displayed in step 1.
+
+Step 2 (a or b) only have to be performed once for each Kinect device,
+unless the resulting calibration proves unsatisfactory. Kinect devices
+typically retain their intrinsic calibration over time.
 
 3. Run ./bin/KinectViewer -c <camera index>, where <camera index> is the
    zero-based index of the Kinect device to use if there are multiple
@@ -111,6 +124,68 @@ triangulated surface, and a 4x4 projection matrix to map the color
 camera's image stream onto that point cloud or surface. After proper
 calibration, the virtual 3D objects captured by a Kinect will precisely
 match the original real objects in shape and size.
+
+Intrinsic calibration has two sub-procedures. The first, optional, one
+is to calculate per-pixel depth correction equations. Due to radial lens
+distortion in the IR pattern projector and the IR camera, a completely
+flat surface seen by the Kinect will not be reconstructed as a flat
+surface, but as a bowl shape. Depth correction will calculate a linear
+equation for each depth pixel that can rectify distance values. The
+second sub-procedure is to calculate 4x4 homogeneous depth unprojection
+and color projection matrices. The results of sub-procedure two depend
+on sub-procedure one, meaning that the second has to be performed every
+time after the first one is performed.
+
+Per-pixel Depth Correction
+--------------------------
+
+Calculating per-pixel depth correction equations only requires a flat
+and ideally vertical surface large enough to fill the Kinect's
+field-of-view at larger distances (up to about 2 meters). These are the
+calibration procedure's steps:
+
+1. Start RawKinectViewer for the Kinect to be calibrated.
+
+2. Create a "Calibrate Depth Lens" tool by binding it to two (2) buttons
+   (keyboard keys or mouse buttons). Here, we will use the keys "1" and
+   "2". Pressing the "1" key will capture the current depth image as a
+   calibration point, and pressing the "2" key will calculate per-pixel
+   depth correction equations after several depth images have been
+   captured.
+
+3. Move the Kinect such that it faces the flat surface orthogonally and
+   at close distance. The best approach is to position the Kinect to be
+   roughly orthogonal to the surface, and push it so close that the
+   entire depth image turns black (this happens at a distance of around
+   50cm). Then slowly pull the Kinect back until about half the pixels
+   have valid depth values. Then carefully rotate the Kinect until the
+   valid pixels are distributed evenly across the depth image, and then
+   pull back slightly further until most or all pixels have valid depth.
+
+4. Press the "1" key to capture the current depth image. This will
+   capture a number of frames, as indicated by the pop-up window. Do not
+   move the Kinect while the pop-up window stays on the screen.
+
+5. Move the Kinect further back, ideally until a sharp change in depth
+   mapping color. Carefully rotate the Kinect such that pixels of
+   different colors are evenly distributed, and adjust the distance
+   until there are approximately the same number of pixels of either
+   color.
+
+6. Repeat from step 4, until the distance from the Kinect to the flat
+   surface is larger than the largest distance you intend to capture
+   during use, or repeat until the Kinect is approximately 2m away from
+   the surface (the maximum practical capture distance).
+
+7. Press the "2" key to calculate per-pixel depth correction equations.
+   When the calculation is complete, the correction parameters will
+   automatically be written to a DepthCorrection-<serial number>.dat
+   file in the Kinect package's configuration directory.
+
+8. Exit from RawKinectViewer.
+
+Projection Matrix Calculation
+-----------------------------
 
 The new intrinsic calibration method uses a semi-transparent
 checkerboard calibration target. The idea is that the target looks like
