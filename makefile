@@ -1,6 +1,6 @@
 ########################################################################
 # Makefile for Kinect 3D Video Capture Project.
-# Copyright (c) 2010-2013 Oliver Kreylos
+# Copyright (c) 2010-2015 Oliver Kreylos
 #
 # This file is part of the WhyTools Build Environment.
 # 
@@ -339,8 +339,12 @@ KinectServer: $(EXEDIR)/KinectServer
 # recorded files or 3D video streaming servers:
 #
 
+$(OBJDIR)/KinectViewer.o: CFLAGS += -DKINECT_CAMERA_DEFAULTBACKGROUNDFILENAMEPREFIX='"Background"'
+
 $(EXEDIR)/KinectViewer: PACKAGES += MYVRUI MYKINECT
-$(EXEDIR)/KinectViewer: $(OBJDIR)/KinectViewer.o
+$(EXEDIR)/KinectViewer: $(OBJDIR)/SphereExtractor.o \
+                        $(OBJDIR)/SphereExtractorTool.o \
+                        $(OBJDIR)/KinectViewer.o
 .PHONY: KinectViewer
 KinectViewer: $(EXEDIR)/KinectViewer
 

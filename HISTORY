@@ -154,3 +154,11 @@ Kinect-2.8-001:
   rules for all revisions of the first-generation Kinect.
 - Changed KinectUtil to download intrinsic calibration parameters using
   centimeters as camera space units.
+
+Kinect-2.8-002:
+- Added extrinsic calibration tool for multiple Kinects using a large
+  sphere tracking target.
+- Fixed problem in timer synchronization for pre-recorded 3D video
+  files.
+- Brought LWOWriter utility up to new Kinect library API.
+- Changed default file name and location to save background frames.
