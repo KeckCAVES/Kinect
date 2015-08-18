@@ -1,12 +1,12 @@
 ========================================================================
 README for Kinect 3D Video Capture Project version 2.8
-Copyright (c) 2010-2013 Oliver Kreylos
+Copyright (c) 2010-2015 Oliver Kreylos
 ========================================================================
 
 Requirements
 ============
 
-This software requires the Vrui VR toolkit, version 3.1 build 001 or
+This software requires the Vrui VR toolkit, version 3.1 build 004 or
 newer. It also requires libusb version 1.0, and that Vrui was configured
 with support for libusb prior to its installation. To properly work with
 multiple Kinect-for-Xbox version 1473 and/or Kinect-for-Windows devices,
@@ -56,8 +56,8 @@ instructions need to be changed.
    > make install
 
 6. (Optional, Linux-only) Install a udev rule file to give access to all
-   Kinect devices to all users, local and remote. Read below for details
-   and security considerations.
+   Kinect devices to the user currently logged in to the computer's
+   physical console. Read below for details.
    > make installudevrule
    This will ask for the user's password to copy the rule file,
    70-Kinect.rules, into the udev rule directory /etc/udev/rules.d.
@@ -99,20 +99,19 @@ Installing a udev rule (Linux-only)
 By default, Kinect devices can only be accessed by the root user. This
 is inconvenient and a security risk, as all Kinect applications must be
 run as root. The Kinect package contains a udev rule file to give full
-access to any Kinect device to any user, see optional installation step
-6 above. After the rule file has been installed (and all Kinect devices
-have been unplugged and re-plugged), regular users can work with the
-devices.
+access to any Kinect device to the user currently logged in to the local
+console, see optional installation step 6 above. After the rule file has
+been installed, it needs to be activated. The recommended way is to
+restart the device manager:
 
-Security concerns: At this time, the rule file gives access to all
-connected Kinect devices to *all* users, whether logged in locally or
-remotely, e.g., via ssh. This means that a remotely logged-in user could
-turn on the camera or microphones to spy on a local user. Ideally,
-access to the Kinect device would only be granted to the single user
-currently owning the console. However, the way how this is done is
-currently somewhat in flux, with the previous way of assigning ACL
-control via udev rules being deprecated. Until a new method arises,
-users can install the global-access udev rule at their own risks.
+> sudo udevadm control --reload
+> sudo udevadm trigger --action=change
+
+Alternatively, the rule can be activated by unplugging the Kinect from
+its USB port, waiting a few seconds, and then plugging it back in, or,
+if everything else fails, by restarting the computer. After initial
+installation, the rule file will be activated automatically when the
+computer boots, or when a Kinect device is plugged into any USB port.
 
 Intrinsically Calibrating a Single Kinect
 =========================================

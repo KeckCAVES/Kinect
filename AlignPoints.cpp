@@ -1,7 +1,7 @@
 /***********************************************************************
 AlignPoints - Utility to align two sets of measurements of the same set
 of points using a variety of transformation types.
-Copyright (c) 2009-2011 Oliver Kreylos
+Copyright (c) 2009-2014 Oliver Kreylos
 
 This file is part of the Kinect 3D Video Capture Project (Kinect).
 
@@ -35,6 +35,7 @@ Software Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA
 #include <Geometry/Box.h>
 #include <Geometry/GeometryValueCoders.h>
 #include <Geometry/OutputOperators.h>
+#include <Geometry/LevenbergMarquardtMinimizer.h>
 #include <GL/gl.h>
 #include <GL/GLGeometryWrappers.h>
 #include <Vrui/Vrui.h>
@@ -44,7 +45,6 @@ Software Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA
 #include "ONTransformFitter.h"
 #include "OGTransformFitter.h"
 #include "PTransformFitter.h"
-#include "LevenbergMarquardtMinimizer.h"
 
 template <class TransformFitterParam>
 inline
@@ -77,9 +77,12 @@ findTransform(std::vector<typename TransformFitterParam::Point>& points0,
 	for(int i=0;i<5;++i)
 		{
 		/* Minimize the distance: */
+		Geometry::LevenbergMarquardtMinimizer<TransformFitterParam> minimizer;
+		minimizer.maxNumIterations=500000;
+		minimizer.epsilon2=1.0e-40;
 		TransformFitterParam tf(numPoints,&cPoints0[0],&points1[0]);
 		tf.setTransform(bestTransform);
-		typename TransformFitterParam::Scalar result=LevenbergMarquardtMinimizer<TransformFitterParam>::minimize(tf);
+		typename TransformFitterParam::Scalar result=minimizer.minimize(tf);
 		if(bestDistance>result)
 			{
 			bestTransform=tf.getTransform();
@@ -366,6 +369,7 @@ AlignPoints::AlignPoints(int& argc,char**& argv,char**& appDefaults)
 		}
 	
 	/* Read the two point sets: */
+	std::vector<bool> invalidPoints;
 	for(int pointSet=0;pointSet<2;++pointSet)
 		{
 		/* Open the input file: */
@@ -378,9 +382,23 @@ AlignPoints::AlignPoints(int& argc,char**& argv,char**& appDefaults)
 		while(!reader.eof())
 			{
 			Point p;
-			for(int i=0;i<3;++i)
-				p[i]=Scalar(reader.readNumber());
+			bool valid=true;
+			try
+				{
+				for(int i=0;i<3;++i)
+					p[i]=Scalar(reader.readNumber());
+				}
+			catch(IO::ValueSource::NumberError)
+				{
+				for(int i=0;i<3;++i)
+					p[i]=Math::Constants<Scalar>::max;
+				valid=false;
+				}
 			points[pointSet].push_back(p);
+			if(invalidPoints.size()<points[pointSet].size())
+				invalidPoints.push_back(!valid);
+			else
+				invalidPoints[points[pointSet].size()-1]=!valid||invalidPoints[points[pointSet].size()-1];
 			reader.skipLine();
 			reader.skipWs();
 			}
@@ -388,6 +406,19 @@ AlignPoints::AlignPoints(int& argc,char**& argv,char**& appDefaults)
 	size_t numPoints=points[0].size();
 	if(numPoints>points[1].size())
 		numPoints=points[1].size();
+	
+	/* Remove invalid point pairs: */
+	for(size_t i=invalidPoints.size();i>0;--i)
+		if(i<=numPoints&&invalidPoints[i-1])
+			{
+			for(int pointSet=0;pointSet<2;++pointSet)
+				points[pointSet].erase(points[pointSet].begin()+i-1);
+			--numPoints;
+			}
+	
+	/* Print point pairs: */
+	for(size_t i=0;i<numPoints;++i)
+		std::cout<<points[0][i]<<" <=> "<<points[1][i]<<std::endl;
 	
 	if(preScale!=Scalar(1))
 		{
@@ -420,7 +451,10 @@ AlignPoints::AlignPoints(int& argc,char**& argv,char**& appDefaults)
 			{
 			OGTransform finalTransform=preTransform;
 			#if 1
-			finalTransform*=findTransform2<OGTransformFitter>(points[0],points[1]);
+			OGTransform first=findTransform2<OGTransformFitter>(points[0],points[1]);
+			finalTransform*=findTransform<OGTransformFitter>(points[0],points[1]);
+			finalTransform*=first;
+			finalTransform.renormalize();
 			#else
 			finalTransform*=findTransform<OGTransformFitter>(points[0],points[1]);
 			#endif

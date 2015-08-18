@@ -1,7 +1,7 @@
 /***********************************************************************
 KinectViewer - Simple application to view 3D reconstructions of color
 and depth images captured from a Kinect device.
-Copyright (c) 2010-2013 Oliver Kreylos
+Copyright (c) 2010-2015 Oliver Kreylos
 
 This file is part of the Kinect 3D Video Capture Project (Kinect).
 
@@ -66,6 +66,8 @@ Software Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA
 #endif
 #include <Kinect/FrameSaver.h>
 
+#include "SphereExtractorTool.h"
+
 // #include "MD5MeshAnimator.h"
 
 /*********************************************
@@ -81,6 +83,15 @@ void KinectViewer::KinectStreamer::colorStreamingCallback(const Kinect::FrameBuf
 		
 		/* Update application state: */
 		Vrui::requestUpdate();
+		
+		{
+		Threads::Mutex::Lock sphereExtractorLock(sphereExtractorMutex);
+		if(sphereExtractor!=0)
+			{
+			/* Forward color frame to the sphere extractor: */
+			sphereExtractor->setColorFrame(frameBuffer);
+			}
+		}
 		}
 	
 	if(frameSaver!=0)
@@ -101,6 +112,15 @@ void KinectViewer::KinectStreamer::depthStreamingCallback(const Kinect::FrameBuf
 		/* Update application state: */
 		Vrui::requestUpdate();
 		#endif
+		
+		{
+		Threads::Mutex::Lock sphereExtractorLock(sphereExtractorMutex);
+		if(sphereExtractor!=0)
+			{
+			/* Forward depth frame to the sphere extractor: */
+			sphereExtractor->setDepthFrame(frameBuffer);
+			}
+		}
 		}
 	
 	if(frameSaver!=0)
@@ -232,7 +252,7 @@ GLMotif::PopupWindow* KinectViewer::KinectStreamer::createStreamerDialog(void)
 		removeBackgroundToggle->setToggle(camera->getRemoveBackground());
 		removeBackgroundToggle->getValueChangedCallbacks().add(this,&KinectViewer::KinectStreamer::removeBackgroundCallback);
 		
-		GLMotif::Button* captureBackgroundButton=new GLMotif::Button("CaptureBackgroundButton",backgroundBox,"Capture Background");
+		captureBackgroundButton=new GLMotif::Button("CaptureBackgroundButton",backgroundBox,"Capture Background");
 		captureBackgroundButton->getSelectCallbacks().add(this,&KinectViewer::KinectStreamer::captureBackgroundCallback);
 		
 		GLMotif::Button* loadBackgroundButton=new GLMotif::Button("LoadBackgroundButton",backgroundBox,"Load Background...");
@@ -335,6 +355,9 @@ void KinectViewer::KinectStreamer::removeBackgroundCallback(GLMotif::ToggleButto
 
 void KinectViewer::KinectStreamer::backgroundCaptureCompleteCallback(Kinect::Camera& camera)
 	{
+	/* Enable the capture button to indicate that capture is complete: */
+	// captureBackgroundButton->setEnabled(true);
+	
 	/* Apply a max depth value, if one is defined: */
 	if(maxDepth<1100)
 		camera.setMaxDepth(maxDepth);
@@ -345,7 +368,10 @@ void KinectViewer::KinectStreamer::captureBackgroundCallback(Misc::CallbackData*
 	Kinect::Camera* camera=dynamic_cast<Kinect::Camera*>(source);
 	if(camera!=0)
 		{
-		/* Capture five second worth of background frames: */
+		/* Disable the capture button to indicate that a capture is in progress: */
+		// captureBackgroundButton->setEnabled(false);
+		
+		/* Capture five seconds worth of background frames: */
 		camera->captureBackground(150,Misc::createFunctionCall(this,&KinectViewer::KinectStreamer::backgroundCaptureCompleteCallback));
 		}
 	}
@@ -420,6 +446,7 @@ KinectViewer::KinectStreamer::KinectStreamer(KinectViewer* sApplication,Kinect::
 	 #endif
 	 frameSaver(0),
 	 enabled(true),maxDepth(1100),
+	 sphereExtractor(0),
 	 streamerDialog(0),showStreamerDialogToggle(0)
 	{
 	}
@@ -431,6 +458,13 @@ KinectViewer::KinectStreamer::~KinectStreamer(void)
 	#if !KINECT_USE_SHADERPROJECTOR
 	projector->stopStreaming();
 	#endif
+	{
+	Threads::Mutex::Lock sphereExtractorLock(sphereExtractorMutex);
+	if(sphereExtractor!=0)
+		sphereExtractor->stopStreaming();
+	delete sphereExtractor;
+	sphereExtractor=0;
+	}
 	delete projector;
 	delete frameSaver;
 	
@@ -452,6 +486,9 @@ void KinectViewer::KinectStreamer::resetFrameTimer(void)
 	Kinect::Camera* camera=dynamic_cast<Kinect::Camera*>(source);
 	if(camera!=0)
 		camera->resetFrameTimer();
+	Kinect::FileFrameSource* file=dynamic_cast<Kinect::FileFrameSource*>(source);
+	if(file!=0)
+		file->resetFrameTimer();
 	}
 
 void KinectViewer::KinectStreamer::startStreaming(void)
@@ -606,7 +643,7 @@ void KinectViewer::saveStreamsOKCallback(GLMotif::FileSelectionDialog::OKCallbac
 
 KinectViewer::KinectViewer(int& argc,char**& argv)
 	:Vrui::Application(argc,argv),
-	 backgroundSelectionHelper("KinectBackground",".background",Vrui::openDirectory(".")),
+	 backgroundSelectionHelper(KINECT_CAMERA_DEFAULTBACKGROUNDFILENAMEPREFIX,".background",Vrui::openDirectory(KINECT_CONFIG_DIR)),
 	 streamSelectionHelper("SavedStreams",".color;.depth",Vrui::openDirectory(".")),
 	 soundRecorder(0),soundPlayer(0),
 	 mainMenu(0)
@@ -646,14 +683,9 @@ KinectViewer::KinectViewer(int& argc,char**& argv)
 					camera->setFrameSize(Kinect::FrameSource::COLOR,highres?Kinect::Camera::FS_1280_1024:Kinect::Camera::FS_640_480);
 					camera->setCompressDepthFrames(compressDepth);
 					
-					#if 0
+					/* Enable background removal if the camera has a default background image: */
 					if(camera->loadDefaultBackground())
-						{
-						camera->setMaxDepth(990);
-						camera->setBackgroundRemovalFuzz(1);
 						camera->setRemoveBackground(true);
-						}
-					#endif
 					
 					/* Add a new streamer for the camera: */
 					streamers.push_back(new KinectStreamer(this,camera));
@@ -751,6 +783,9 @@ KinectViewer::KinectViewer(int& argc,char**& argv)
 	mainMenu=createMainMenu();
 	Vrui::setMainMenu(mainMenu);
 	
+	/* Initialize the custom tool classes: */
+	SphereExtractorTool::initClass();
+	
 	/* Initialize the navigation transformation: */
 	resetNavigationCallback(0);
 	}
@@ -768,6 +803,7 @@ KinectViewer::~KinectViewer(void)
 	/* Delete all streamers: */
 	for(std::vector<KinectStreamer*>::iterator sIt=streamers.begin();sIt!=streamers.end();++sIt)
 		delete *sIt;
+	streamers.clear();
 	}
 
 void KinectViewer::frame(void)
