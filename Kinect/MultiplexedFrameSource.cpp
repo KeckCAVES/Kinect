@@ -1,7 +1,7 @@
 /***********************************************************************
 MultiplexedFrameSource - Class to stream several pairs of color and
 depth frames from a single source file or pipe.
-Copyright (c) 2010-2013 Oliver Kreylos
+Copyright (c) 2010-2016 Oliver Kreylos
 
 This file is part of the Kinect 3D Video Capture Project (Kinect).
 
@@ -25,6 +25,7 @@ Software Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA
 
 #include <Misc/SizedTypes.h>
 #include <Misc/ThrowStdErr.h>
+#include <Misc/MessageLogger.h>
 #include <Misc/FunctionCalls.h>
 #include <Cluster/ClusterPipe.h>
 #include <Geometry/GeometryMarshallers.h>
@@ -76,6 +77,13 @@ MultiplexedFrameSource::Stream::Stream(MultiplexedFrameSource* sOwner,unsigned i
 	
 	/* Check if the depth stream uses lossy compression: */
 	bool depthIsLossy=streamFormatVersions[1]>=3&&source.read<Misc::UInt8>()!=0;
+	
+	/* Check if the depth camera has lens distortion correction parameters: */
+	if(streamFormatVersions[1]>=5)
+		{
+		/* Read the depth camera's lens distortion correction parameters: */
+		ips.depthLensDistortion.read(source);
+		}
 	
 	/* Read the intrinsic and extrinsic camera parameters from the source: */
 	ips.colorProjection=Misc::Marshaller<IntrinsicParameters::PTransform>::read(source);
@@ -248,11 +256,15 @@ void* MultiplexedFrameSource::receivingThreadMethod(void)
 				frames[frameId]=colorFrameReaders[streamIndex]->readNextFrame();
 				--numMissingColorFrames;
 				}
+			
+			/* Adjust the new frame's time stamp: */
+			frames[frameId].timeStamp-=timeStampOffset;
 			}
 		}
 	catch(std::runtime_error err)
 		{
-		/* Ignore the error and terminate the thread */
+		/* Log an error message: */
+		Misc::formattedUserError("Kinect::MultiplexedFrameSource: Terminating streaming thread due to exception %s",err.what());
 		}
 	
 	return 0;
@@ -275,12 +287,23 @@ MultiplexedFrameSource::MultiplexedFrameSource(Comm::PipePtr sPipe)
 		cPipe->couple(true,false);
 		}
 	
+	/* Write client's endianness flag and protocol version number: */
+	pipe->write<Misc::UInt32>(0x12345678U);
+	pipe->write<Misc::UInt32>(1U);
+	pipe->flush();
+	
 	/* Determine server's endianness: */
 	Misc::UInt32 endiannessFlag=pipe->read<Misc::UInt32>();
 	if(endiannessFlag==0x78563412U)
 		pipe->setSwapOnRead(true);
 	else if(endiannessFlag!=0x12345678U)
 		Misc::throwStdErr("MultiplexedFrameSource::MultiplexedFrameSource: Server has unrecognized endianness");
+	
+	/* Read the server's protocol version number: */
+	serverProtocolVersion=pipe->read<Misc::UInt32>();
+	
+	/* Read the server's current time stamp offset: */
+	timeStampOffset=double(pipe->read<Misc::Float64>());
 	
 	/* Initialize all streams: */
 	numStreams=pipe->read<Misc::UInt32>();

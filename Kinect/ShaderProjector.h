@@ -2,7 +2,7 @@
 ShaderProjector - Class to project a depth frame captured from a Kinect
 camera back into calibrated 3D camera space, and texture-map it with a
 matching color frame using a custom shader to perform most processing on
-the GPU. Copyright (c) 2013 Oliver Kreylos
+the GPU. Copyright (c) 2013-2016 Oliver Kreylos
 
 This file is part of the Kinect 3D Video Capture Project (Kinect).
 
@@ -32,6 +32,7 @@ Software Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA
 #include <GL/GLObject.h>
 #include <GL/Extensions/GLARBShaderObjects.h>
 #include <Kinect/FrameBuffer.h>
+#include <Kinect/LensDistortion.h>
 #include <Kinect/FrameSource.h>
 
 namespace Kinect {
@@ -64,15 +65,17 @@ class ShaderProjector:public GLObject
 		virtual ~DataItem(void);
 		
 		/* Methods: */
-		void buildShader(GLContextData& contextData); // Builds the shader program based on current OpenGL state
+		void buildShader(bool depthCorrection,GLContextData& contextData); // Builds the shader program based on current OpenGL state
 		};
 	
 	/* Elements: */
 	unsigned int depthSize[2]; // Width and height of all incoming depth frames
 	PixelCorrection* depthCorrection; // Buffer of per-pixel depth correction parameters
 	ProjectorTransform projectorTransform; // Transformation from 3D camera space to 3D world space
+	LensDistortion depthLensDistortion; // Lens distortion correction parameters for the depth camera
 	PTransform depthProjection; // Projection transformation from depth image space into 3D camera space
-	PTransform colorProjection; // Projection transformation from color image space into 3D camera space
+	PTransform worldDepthProjection; // Projection transformation from depth image space into 3D world space
+	PTransform colorProjection; // Projection transformation from 3D camera space into color image space
 	FrameSource::DepthPixel triangleDepthRange; // Maximum depth distance between a triangle's vertices
 	Threads::TripleBuffer<FrameBuffer> depthFrames; // Triple buffer of depth frames ready for rendering
 	unsigned int depthFrameVersion; // Version number of current depth frame
@@ -89,9 +92,34 @@ class ShaderProjector:public GLObject
 	virtual void initContext(GLContextData& contextData) const;
 	
 	/* New methods: */
+	const unsigned int* getDepthFrameSize(void) const // Returns the current depth frame size
+		{
+		return depthSize;
+		}
+	unsigned int getDepthFrameSize(int index) const // Ditto
+		{
+		return depthSize[index];
+		}
+	const PixelCorrection* getDepthCorrection(void) const // Returns the array of per-pixel depth correction factors
+		{
+		return depthCorrection;
+		}
+	const LensDistortion& getDepthLensDistortion(void) const // Returns the lens distortion correction parameters for the depth camera
+		{
+		return depthLensDistortion;
+		}
+	const PTransform& getDepthProjection(void) const // Returns the depth unprojection transformation from depth image space into 3D camera space
+		{
+		return depthProjection;
+		}
+	const PTransform& getColorProjection(void) const // Returns the color unprojection transformation from color image space into 3D camera space
+		{
+		return colorProjection;
+		}
 	void setDepthFrameSize(const unsigned int newDepthFrameSize[2]); // Sets the size of all future incoming depth frames
 	void setDepthCorrection(const FrameSource::DepthCorrection* dc); // Enables per-pixel depth correction using the given depth correction parameters
-	void setParameters(const FrameSource::IntrinsicParameters& ips,const FrameSource::ExtrinsicParameters& eps); // Sets the projectors intrinsic and extrinsic camera parameters
+	void setIntrinsicParameters(const FrameSource::IntrinsicParameters& ips); // Sets the projector's intrinsic camera parameters
+	void setExtrinsicParameters(const FrameSource::ExtrinsicParameters& eps); // Sets the projector's extrinsic camera parameters
 	const ProjectorTransform& getProjectorTransform(void) const // Returns the transformation from camera to world space
 		{
 		return projectorTransform;
@@ -104,6 +132,14 @@ class ShaderProjector:public GLObject
 	void setDepthFrame(const FrameBuffer& newDepthFrame); // Updates the projector's current depth frame in streaming mode; can be called from any thread
 	void setColorFrame(const FrameBuffer& newColorFrame); // Updates the projector's current color frame in streaming mode; can be called from any thread
 	void updateFrames(void); // Selects the most recent depth and color frames for rendering; must be called from foreground thread
+	double getColorTimeStamp(void) const // Returns the time stamp of the color frame currently locked for rendering
+		{
+		return colorFrames.getLockedValue().timeStamp;
+		}
+	double getMeshTimeStamp(void) const // Returns the time stamp of the triangle mesh currently locked for rendering
+		{
+		return depthFrames.getLockedValue().timeStamp;
+		}
 	void glRenderAction(GLContextData& contextData) const; // Draws the current depth and color frames in the current model coordinate system
 	};
 

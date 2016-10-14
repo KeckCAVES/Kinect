@@ -1,7 +1,7 @@
 /***********************************************************************
 KinectServer - Server to stream 3D video data from one or more Kinect
 cameras to remote clients for tele-immersion.
-Copyright (c) 2010-2013 Oliver Kreylos
+Copyright (c) 2010-2016 Oliver Kreylos
 
 This file is part of the Kinect 3D Video Capture Project (Kinect).
 
@@ -30,12 +30,12 @@ Software Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA
 #include <Misc/StandardValueCoders.h>
 #include <Misc/CompoundValueCoders.h>
 #include <Misc/ConfigurationFile.h>
-#include <USB/Context.h>
 #include <USB/DeviceList.h>
 #include <IO/File.h>
 #include <Comm/TCPPipe.h>
 #include <Geometry/GeometryMarshallers.h>
 #include <Video/Config.h>
+#include <Kinect/Internal/Config.h>
 #include <Kinect/ColorFrameWriter.h>
 #include <Kinect/DepthFrameWriter.h>
 #include <Kinect/LossyDepthFrameWriter.h>
@@ -74,8 +74,8 @@ void KinectServer::CameraState::depthStreamingCallback(const Kinect::FrameBuffer
 	++depthFrameIndex;
 	}
 
-KinectServer::CameraState::CameraState(USB::Context& usbContext,const char* serialNumber,bool sLossyDepthCompression,Threads::MutexCond& sNewColorFrameCond,Threads::MutexCond& sNewDepthFrameCond)
-	:camera(usbContext,serialNumber),
+KinectServer::CameraState::CameraState(const char* serialNumber,bool sLossyDepthCompression,Threads::MutexCond& sNewColorFrameCond,Threads::MutexCond& sNewDepthFrameCond)
+	:camera(serialNumber),
 	 depthCorrection(0),
 	 colorFile(16384),colorCompressor(0),
 	 colorFrameIndex(0),newColorFrameCond(sNewColorFrameCond),hasSentColorFrame(false),
@@ -118,9 +118,10 @@ KinectServer::CameraState::~CameraState(void)
 	delete depthCorrection;
 	}
 
-void KinectServer::CameraState::startStreaming(void)
+void KinectServer::CameraState::startStreaming(const Kinect::FrameSource::Time& timeBase)
 	{
 	/* Start streaming: */
+	camera.setTimeBase(timeBase);
 	camera.startStreaming(Misc::createFunctionCall(this,&KinectServer::CameraState::colorStreamingCallback),Misc::createFunctionCall(this,&KinectServer::CameraState::depthStreamingCallback));
 	}
 
@@ -128,7 +129,7 @@ void KinectServer::CameraState::writeHeaders(IO::File& sink) const
 	{
 	/* Write the stream format versions: */
 	sink.write<Misc::UInt32>(1);
-	sink.write<Misc::UInt32>(4);
+	sink.write<Misc::UInt32>(5);
 	
 	/* Write the camera's depth correction parameters: */
 	depthCorrection->write(sink);
@@ -139,6 +140,9 @@ void KinectServer::CameraState::writeHeaders(IO::File& sink) const
 	#else
 	sink.write<Misc::UInt8>(0);
 	#endif
+	
+	/* Write the depth camera's lens distortion correction parameters to the sink: */
+	ips.depthLensDistortion.write(sink);
 	
 	/* Write the camera's intrinsic and extrinsic parameters to the sink: */
 	Misc::Marshaller<Kinect::FrameSource::IntrinsicParameters::PTransform>::write(ips.colorProjection,sink);
@@ -180,11 +184,24 @@ void* KinectServer::listeningThreadMethod(void)
 		
 		try
 			{
+			/* Read endianness flag and protocol version from new client: */
+			Misc::UInt32 endiannessFlag=newClientSocket->read<Misc::UInt32>();
+			if(endiannessFlag==0x78563412U)
+				newClientSocket->setSwapOnRead(true);
+			else if(endiannessFlag!=0x12345678U)
+				throw std::runtime_error("Client has unrecognized endianness");
+			unsigned int protocolVersion=newClientSocket->read<Misc::UInt32>();
+			if(protocolVersion>1U)
+				protocolVersion=1U;
+			
 			/* Send stream initialization states to the new client: */
 			#ifdef VERBOSE
 			std::cout<<"KinectServer: Sending stream headers to new client"<<std::endl<<std::flush;
 			#endif
 			newClientSocket->write<Misc::UInt32>(0x12345678U);
+			newClientSocket->write<Misc::UInt32>(protocolVersion);
+			Kinect::FrameSource::Time now;
+			newClientSocket->write<Misc::Float64>(double(now-timeBase));
 			newClientSocket->write<Misc::UInt32>(numCameras);
 			for(unsigned i=0;i<numCameras;++i)
 				cameraStates[i]->writeHeaders(*newClientSocket);
@@ -394,7 +411,7 @@ void* KinectServer::streamingThreadMethod(void)
 	return 0;
 	}
 
-KinectServer::KinectServer(USB::Context& usbContext,Misc::ConfigurationFileSection& configFileSection)
+KinectServer::KinectServer(Misc::ConfigurationFileSection& configFileSection)
 	:numCameras(0),cameraStates(0),
 	 listeningSocket(configFileSection.retrieveValue<int>("./listenPortId",26000),1)
 	{
@@ -417,7 +434,7 @@ KinectServer::KinectServer(USB::Context& usbContext,Misc::ConfigurationFileSecti
 			#ifdef VERBOSE
 			std::cout<<"KinectServer: Creating streamer for camera with serial number "<<serialNumber<<std::endl;
 			#endif
-			cameraStates[numFoundCameras]=new CameraState(usbContext,serialNumber.c_str(),cameraSection.retrieveValue<bool>("./lossyDepthCompression",false),newFrameCond,newFrameCond);
+			cameraStates[numFoundCameras]=new CameraState(serialNumber.c_str(),cameraSection.retrieveValue<bool>("./lossyDepthCompression",false),newFrameCond,newFrameCond);
 			
 			/* Check if camera is to remove background: */
 			if(cameraSection.retrieveValue<bool>("./removeBackground",true))
@@ -429,7 +446,7 @@ KinectServer::KinectServer(USB::Context& usbContext,Misc::ConfigurationFileSecti
 				if(!backgroundFile.empty())
 					{
 					/* Load the background file: */
-					std::string fullBackgroundFileName=KINECT_CONFIG_DIR;
+					std::string fullBackgroundFileName=KINECT_INTERNAL_CONFIG_CONFIGDIR;
 					fullBackgroundFileName.push_back('/');
 					fullBackgroundFileName.append(backgroundFile);
 					#ifdef VERBOSE
@@ -494,8 +511,9 @@ KinectServer::KinectServer(USB::Context& usbContext,Misc::ConfigurationFileSecti
 		streamingThread.start(this,&KinectServer::streamingThreadMethod);
 	
 	/* Start streaming on all connected cameras: */
+	timeBase.set();
 	for(unsigned int i=0;i<numCameras;++i)
-		cameraStates[i]->startStreaming();
+		cameraStates[i]->startStreaming(timeBase);
 	}
 
 KinectServer::~KinectServer(void)

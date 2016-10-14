@@ -69,12 +69,16 @@ CalibrationCheckTool::~CalibrationCheckTool(void)
 
 void CalibrationCheckTool::initialize(void)
 	{
+	#if 0
+	
 	/* Retrieve the factory calibration data: */
 	Kinect::Camera::CalibrationParameters cal;
+	
+	/* This entire thing should be based on intrinsic parameters instead... */
 	application->camera->getCalibrationParameters(cal);
 	
 	/* Calculate the depth-to-distance conversion formula: */
-	double numerator=10.0*(4.0*cal.dcmosEmitterDist*cal.referenceDistance)/cal.referencePixelSize;
+	double numerator=(4.0*cal.dcmosEmitterDist*cal.referenceDistance)/cal.referencePixelSize;
 	double denominator=4.0*cal.dcmosEmitterDist/cal.referencePixelSize+4.0*cal.constantShift+1.5;
 	
 	/* Calculate the depth-to-color mapping: */
@@ -154,6 +158,8 @@ void CalibrationCheckTool::initialize(void)
 	
 	/* Store the row offset between the depth and color images: */
 	rowOffset=cal.startLines;
+	
+	#endif
 	}
 
 const Vrui::ToolFactory* CalibrationCheckTool::getFactory(void) const

@@ -2,7 +2,7 @@
 ShaderProjector - Class to project a depth frame captured from a Kinect
 camera back into calibrated 3D camera space, and texture-map it with a
 matching color frame using a custom shader to perform most processing on
-the GPU. Copyright (c) 2013 Oliver Kreylos
+the GPU. Copyright (c) 2013-2015 Oliver Kreylos
 
 This file is part of the Kinect 3D Video Capture Project (Kinect).
 
@@ -41,6 +41,7 @@ Software Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA
 #include <GL/Extensions/GLARBVertexShader.h>
 #include <GL/GLGeometryVertex.h>
 #include <GL/GLTransformationWrappers.h>
+#include <Kinect/Internal/Config.h>
 
 #define KINECT_SHADERPROJECTOR_USE_ZIGZAGSTRIP 0
 
@@ -118,11 +119,14 @@ ShaderProjector::DataItem::~DataItem(void)
 	glDeleteObjectARB(shaderProgramId);
 	}
 
-void ShaderProjector::DataItem::buildShader(GLContextData& contextData)
+void ShaderProjector::DataItem::buildShader(bool depthCorrection,GLContextData& contextData)
 	{
 	/* Compile the vertex, geometry, and fragment shaders: */
-	std::string shaderDir=KINECT_SHADERPROJECTOR_SHADERDIR;
-	glCompileShaderFromFile(vertexShaderId,(shaderDir+"/RenderFacade.vs").c_str());
+	std::string shaderDir=KINECT_INTERNAL_CONFIG_SHADERDIR;
+	if(depthCorrection)
+		glCompileShaderFromFile(vertexShaderId,(shaderDir+"/RenderFacade.vs").c_str());
+	else
+		glCompileShaderFromFile(vertexShaderId,(shaderDir+"/RenderFacadeNoDepthCorrection.vs").c_str());
 	#if KINECT_SHADERPROJECTOR_USE_ZIGZAGSTRIP
 	glCompileShaderFromFile(geometryShaderId,(shaderDir+"/RenderFacadeZigZag.gs").c_str());
 	#else
@@ -160,7 +164,10 @@ void ShaderProjector::DataItem::buildShader(GLContextData& contextData)
 	
 	/* Get the shader program's uniform variable locations: */
 	shaderUniforms[0]=glGetUniformLocationARB(shaderProgramId,"depthSampler");
-	shaderUniforms[1]=glGetUniformLocationARB(shaderProgramId,"depthCorrectionSampler");
+	if(depthCorrection)
+		shaderUniforms[1]=glGetUniformLocationARB(shaderProgramId,"depthCorrectionSampler");
+	else
+		shaderUniforms[1]=-1;
 	shaderUniforms[2]=glGetUniformLocationARB(shaderProgramId,"depthProjection");
 	shaderUniforms[3]=glGetUniformLocationARB(shaderProgramId,"colorProjection");
 	shaderUniforms[4]=glGetUniformLocationARB(shaderProgramId,"triangleDepthRange");
@@ -196,7 +203,13 @@ ShaderProjector::ShaderProjector(FrameSource& frameSource)
 	delete dc;
 	
 	/* Query the source's intrinsic and extrinsic parameters: */
-	setParameters(frameSource.getIntrinsicParameters(),frameSource.getExtrinsicParameters());
+	projectorTransform=frameSource.getExtrinsicParameters();
+	FrameSource::IntrinsicParameters ips=frameSource.getIntrinsicParameters();
+	depthLensDistortion=ips.depthLensDistortion;
+	depthProjection=ips.depthProjection;
+	worldDepthProjection=projectorTransform;
+	worldDepthProjection*=depthProjection;
+	colorProjection=ips.colorProjection;
 	
 	/* Register this object with the current OpenGL context: */
 	GLObject::init();
@@ -219,14 +232,49 @@ void ShaderProjector::initContext(GLContextData& contextData) const
 	glBindBufferARB(GL_ARRAY_BUFFER_ARB,dataItem->vertexBufferId);
 	glBufferDataARB(GL_ARRAY_BUFFER_ARB,size_t(depthSize[1])*size_t(depthSize[0])*sizeof(Vertex),0,GL_STATIC_DRAW_ARB);
 	Vertex* vPtr=static_cast<Vertex*>(glMapBufferARB(GL_ARRAY_BUFFER_ARB,GL_WRITE_ONLY_ARB));
-	for(unsigned int y=0;y<depthSize[1];++y)
-		for(unsigned int x=0;x<depthSize[0];++x,++vPtr)
-			{
-			/* Intrinsic calibration matrices expect depth space vertices at integer pixel-center positions: */
-			vPtr->position[0]=GLfloat(x)+0.5f;
-			vPtr->position[1]=GLfloat(y)+0.5f;
-			vPtr->position[2]=0.0f;
-			}
+	
+	/* Check if the depth camera requires lens distortion correction: */
+	if(!depthLensDistortion.isIdentity())
+		{
+		/* Extract the depth camera's 2D intrinsic parameters from the depth unprojection matrix: */
+		const PTransform::Matrix& dpMat=depthProjection.getMatrix();
+		double fxfy=-dpMat(2,3);
+		double fy=fxfy/dpMat(1,1);
+		double cy=-dpMat(1,3)*fy/fxfy;
+		double fx=fxfy/dpMat(0,0);
+		double sk=-dpMat(0,1)*fx*fy/fxfy;
+		double cx=(-dpMat(0,3)/fxfy+sk*cy/(fx*fy))*fx;
+		
+		/* Create a grid of undistorted pixel positions: */
+		for(unsigned int y=0;y<depthSize[1];++y)
+			for(unsigned int x=0;x<depthSize[0];++x,++vPtr)
+				{
+				/* Calculate the distorted pixel position in normalized camera space: */
+				LensDistortion::Point dp;
+				dp[1]=(double(y)+0.5-cy)/fy;
+				dp[0]=(double(x)+0.5-cx-sk*dp[1])/fx;
+				
+				/* Calculate the undistorted pixel position in normalized camera space: */
+				LensDistortion::Point up=depthLensDistortion.undistort(dp);
+				
+				/* Calculate the undistorted pixel position in pixel space: */
+				vPtr->position[0]=GLfloat(fx*up[0]+sk*up[1]+cx);
+				vPtr->position[1]=GLfloat(fy*up[1]+cy);
+				vPtr->position[2]=0.0f;
+				}
+		}
+	else
+		{
+		for(unsigned int y=0;y<depthSize[1];++y)
+			for(unsigned int x=0;x<depthSize[0];++x,++vPtr)
+				{
+				/* Intrinsic calibration matrices expect depth space vertices at integer pixel-center positions: */
+				vPtr->position[0]=GLfloat(x)+0.5f;
+				vPtr->position[1]=GLfloat(y)+0.5f;
+				vPtr->position[2]=0.0f;
+				}
+		}
+	
 	glUnmapBufferARB(GL_ARRAY_BUFFER_ARB);
 	glBindBufferARB(GL_ARRAY_BUFFER_ARB,0);
 	
@@ -279,12 +327,15 @@ void ShaderProjector::initContext(GLContextData& contextData) const
 	
 	#endif
 	
-	/* Upload per-pixel depth correction coefficients as a 2-component float texture: */
-	glBindTexture(GL_TEXTURE_RECTANGLE_ARB,dataItem->depthCorrectionTextureId);
-	glTexParameteri(GL_TEXTURE_RECTANGLE_ARB,GL_TEXTURE_MIN_FILTER,GL_NEAREST);
-	glTexParameteri(GL_TEXTURE_RECTANGLE_ARB,GL_TEXTURE_MAG_FILTER,GL_NEAREST);
-	glTexImage2D(GL_TEXTURE_RECTANGLE_ARB,0,GL_RG32F,depthSize[0],depthSize[1],0,GL_RG,GL_FLOAT,depthCorrection);
-	glBindTexture(GL_TEXTURE_RECTANGLE_ARB,0);
+	if(depthCorrection!=0)
+		{
+		/* Upload per-pixel depth correction coefficients as a 2-component float texture: */
+		glBindTexture(GL_TEXTURE_RECTANGLE_ARB,dataItem->depthCorrectionTextureId);
+		glTexParameteri(GL_TEXTURE_RECTANGLE_ARB,GL_TEXTURE_MIN_FILTER,GL_NEAREST);
+		glTexParameteri(GL_TEXTURE_RECTANGLE_ARB,GL_TEXTURE_MAG_FILTER,GL_NEAREST);
+		glTexImage2D(GL_TEXTURE_RECTANGLE_ARB,0,GL_RG32F,depthSize[0],depthSize[1],0,GL_RG,GL_FLOAT,depthCorrection);
+		glBindTexture(GL_TEXTURE_RECTANGLE_ARB,0);
+		}
 	
 	/* Prepare the depth frame texture: */
 	glBindTexture(GL_TEXTURE_RECTANGLE_ARB,dataItem->depthTextureId);
@@ -303,7 +354,7 @@ void ShaderProjector::initContext(GLContextData& contextData) const
 	glBindTexture(GL_TEXTURE_2D,0);
 	
 	/* Build the initial version of the facade rendering shader: */
-	dataItem->buildShader(contextData);
+	dataItem->buildShader(depthCorrection!=0,contextData);
 	}
 
 void ShaderProjector::setDepthFrameSize(const unsigned int newDepthFrameSize[2])
@@ -315,21 +366,39 @@ void ShaderProjector::setDepthFrameSize(const unsigned int newDepthFrameSize[2])
 
 void ShaderProjector::setDepthCorrection(const FrameSource::DepthCorrection* dc)
 	{
-	/* Evaluate the depth correction parameters to create a per-pixel depth value offset buffer: */
-	depthCorrection=dc->getPixelCorrection(depthSize);
+	/* Delete current per-pixel depth correction buffer: */
+	delete[] depthCorrection;
+	depthCorrection=0;
+	
+	if(dc!=0)
+		{
+		/* Evaluate the depth correction parameters to create a per-pixel depth value offset buffer: */
+		depthCorrection=dc->getPixelCorrection(depthSize);
+		}
 	}
 
-void ShaderProjector::setParameters(const FrameSource::IntrinsicParameters& ips,const FrameSource::ExtrinsicParameters& eps)
+void ShaderProjector::setIntrinsicParameters(const FrameSource::IntrinsicParameters& ips)
 	{
+	/* Get the depth camera's lens distortion correction parameters: */
+	depthLensDistortion=ips.depthLensDistortion;
+	
+	/* Set the color and depth projection matrices: */
+	depthProjection=ips.depthProjection;
+	colorProjection=ips.colorProjection;
+	
+	/* Calculate the combined world-space depth projection matrix: */
+	worldDepthProjection=projectorTransform;
+	worldDepthProjection*=depthProjection;
+	}
+
+void ShaderProjector::setExtrinsicParameters(const FrameSource::ExtrinsicParameters& eps)
+	{
+	/* Set the projector transformation: */
 	projectorTransform=eps;
 	
-	/* Calculate the combined depth projection matrix: */
-	depthProjection=eps;
-	depthProjection*=ips.depthProjection;
-	
-	/* Calculate the combined color projection matrix: */
-	colorProjection=ips.colorProjection;
-	// colorProjection*=ips.depthProjection;
+	/* Calculate the combined world-space depth projection matrix: */
+	worldDepthProjection=projectorTransform;
+	worldDepthProjection*=depthProjection;
 	}
 
 void ShaderProjector::setTriangleDepthRange(FrameSource::DepthPixel newTriangleDepthRange)
@@ -382,7 +451,7 @@ void ShaderProjector::glRenderAction(GLContextData& contextData) const
 		const FrameBuffer& depthFrame=depthFrames.getLockedValue();
 		
 		/* Upload the depth frame into the texture object: */
-		const GLushort* dfPtr=static_cast<const GLushort*>(depthFrame.getBuffer());
+		const GLushort* dfPtr=depthFrame.getData<GLushort>();
 		glTexImage2D(GL_TEXTURE_RECTANGLE_ARB,0,GL_R16UI,depthSize[0],depthSize[1],0,GL_RED_INTEGER_EXT,GL_UNSIGNED_SHORT,dfPtr);
 		
 		/* Mark the cached depth frame as up-to-date: */
@@ -390,15 +459,18 @@ void ShaderProjector::glRenderAction(GLContextData& contextData) const
 		}
 	glUniformARB(dataItem->shaderUniforms[0],0);
 	
-	/* Bind the depth correction texture: */
-	glActiveTextureARB(GL_TEXTURE1_ARB);
-	glBindTexture(GL_TEXTURE_RECTANGLE_ARB,dataItem->depthCorrectionTextureId);
-	glUniformARB(dataItem->shaderUniforms[1],1);
+	if(depthCorrection!=0)
+		{
+		/* Bind the depth correction texture: */
+		glActiveTextureARB(GL_TEXTURE1_ARB);
+		glBindTexture(GL_TEXTURE_RECTANGLE_ARB,dataItem->depthCorrectionTextureId);
+		glUniformARB(dataItem->shaderUniforms[1],1);
+		}
 	
 	/* Calculate and upload the full depth projection matrix: */
 	PTransform fullDP=glGetProjectionMatrix<GLfloat>();
 	fullDP*=glGetModelviewMatrix<GLfloat>();
-	fullDP*=depthProjection;
+	fullDP*=worldDepthProjection;
 	glUniformMatrix4fvARB(dataItem->shaderUniforms[2],1,GL_TRUE,fullDP.getMatrix().getEntries());
 	
 	/* Upload the color projection matrix: */
@@ -418,7 +490,7 @@ void ShaderProjector::glRenderAction(GLContextData& contextData) const
 		/* Upload the color frame into the texture object: */
 		unsigned int width=colorFrame.getSize(0);
 		unsigned int height=colorFrame.getSize(1);
-		const GLubyte* cfPtr=static_cast<const GLubyte*>(colorFrame.getBuffer());
+		const GLubyte* cfPtr=colorFrame.getData<GLubyte>();
 		glTexImage2D(GL_TEXTURE_2D,0,GL_RGB8,width,height,0,GL_RGB,GL_UNSIGNED_BYTE,cfPtr);
 		
 		/* Mark the cached color frame as up-to-date: */
@@ -455,8 +527,11 @@ void ShaderProjector::glRenderAction(GLContextData& contextData) const
 	
 	/* Protect the texture objects: */
 	glBindTexture(GL_TEXTURE_2D,0);
-	glActiveTextureARB(GL_TEXTURE1_ARB);
-	glBindTexture(GL_TEXTURE_RECTANGLE_ARB,0);
+	if(depthCorrection!=0)
+		{
+		glActiveTextureARB(GL_TEXTURE1_ARB);
+		glBindTexture(GL_TEXTURE_RECTANGLE_ARB,0);
+		}
 	glActiveTextureARB(GL_TEXTURE0_ARB);
 	glBindTexture(GL_TEXTURE_RECTANGLE_ARB,0);
 	

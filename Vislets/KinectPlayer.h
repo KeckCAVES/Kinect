@@ -1,7 +1,7 @@
 /***********************************************************************
 KinectPlayer - Vislet to play back 3D video previously captured from one
 or more Kinect devices.
-Copyright (c) 2011-2013 Oliver Kreylos
+Copyright (c) 2011-2016 Oliver Kreylos
 
 This file is part of the Kinect 3D Video Capture Project (Kinect).
 
@@ -33,7 +33,7 @@ Software Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA
 #include <Sound/SoundDataFormat.h>
 #include <Kinect/FrameBuffer.h>
 #include <Kinect/MeshBuffer.h>
-#include <Kinect/Projector.h>
+#include <Kinect/ProjectorHeader.h>
 #include <Vrui/Vislet.h>
 
 /* Forward declarations: */
@@ -42,7 +42,6 @@ class SoundPlayer;
 }
 namespace Kinect {
 class FrameReader;
-class Projector;
 }
 
 class KinectPlayer;
@@ -100,7 +99,7 @@ class KinectPlayer:public Vrui::Vislet
 		IO::FilePtr depthFile; // Pointer to the file containing the depth stream
 		Kinect::FrameReader* depthDecompressor; // Decompressor for depth frames
 		Threads::Thread depthDecompressorThread; // Thread to decompress depth frames from the depth file
-		Kinect::Projector projector; // Projector to render a combined depth/color frame
+		Kinect::ProjectorType projector; // Projector to render a combined depth/color frame
 		Threads::MutexCond timeStampCond; // Condition variable to signal a change in the next time stamp value
 		double readAheadTimeStamp; // Time stamp up to which to read ahead in the depth and color files
 		Threads::MutexCond frameQueueCond; // Condition variable to signal arrival of a new depth or color frame
@@ -108,10 +107,12 @@ class KinectPlayer:public Vrui::Vislet
 		int numColorFrames; // Number of color frames in queue
 		int mostRecentColorFrame; // Index of the most recently read depth frame
 		Kinect::FrameBuffer nextColorFrame; // The next color frame
-		Kinect::MeshBuffer depthFrames[2]; // The two most recently read depth frames
+		Kinect::FrameBuffer depthFrames[2]; // The two most recently read depth frames
+		Kinect::MeshBuffer meshes[2]; // The two most recently created meshes
 		int numDepthFrames; // Number of depth frames in queue
 		int mostRecentDepthFrame; // Index of the most recently read depth frame
-		Kinect::MeshBuffer nextDepthFrame; // The next depth frame
+		Kinect::FrameBuffer nextDepthFrame; // The next depth frame
+		Kinect::MeshBuffer nextMesh; // The next mesh
 		
 		/* Private methods: */
 		void* colorDecompressorThreadMethod(void); // Thread method to read color frames

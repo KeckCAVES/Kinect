@@ -1,7 +1,7 @@
 /***********************************************************************
 KinectServer - Server to stream 3D video data from one or more Kinect
 cameras to remote clients for tele-immersion.
-Copyright (c) 2010-2013 Oliver Kreylos
+Copyright (c) 2010-2016 Oliver Kreylos
 
 This file is part of the Kinect 3D Video Capture Project (Kinect).
 
@@ -39,9 +39,6 @@ Software Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA
 class libusb_device;
 namespace Misc {
 class ConfigurationFileSection;
-}
-namespace USB {
-class USBContext;
 }
 namespace Comm {
 class TCPPipe;
@@ -101,16 +98,17 @@ class KinectServer
 		void depthStreamingCallback(const Kinect::FrameBuffer& frame);
 		
 		/* Constructors and destructors: */
-		CameraState(USB::Context& usbContext,const char* serialNumber,bool sLossyDepthCompression,Threads::MutexCond& sNewColorFrameCond,Threads::MutexCond& sNewDepthFrameCond); // Creates a capture and compression state for the given Kinect camera device
+		CameraState(const char* serialNumber,bool sLossyDepthCompression,Threads::MutexCond& sNewColorFrameCond,Threads::MutexCond& sNewDepthFrameCond); // Creates a capture and compression state for the given Kinect camera device
 		~CameraState(void);
 		
 		/* Methods: */
-		void startStreaming(void); // Starts streaming from the Kinect camera
+		void startStreaming(const Kinect::FrameSource::Time& timeBase); // Starts streaming from the Kinect camera
 		void writeHeaders(IO::File& sink) const; // Writes the camera's streaming headers to the given sink
 		};
 	
 	/* Elements: */
 	private:
+	Kinect::FrameSource::Time timeBase; // Time point at which server started streaming
 	unsigned int numCameras; // Number of Kinect cameras served by the server
 	CameraState** cameraStates; // Array of pointers to camera state objects
 	Threads::MutexCond newFrameCond; // Condition variable to signal a new depth or color frame
@@ -129,7 +127,7 @@ class KinectServer
 	
 	/* Constructors and destructors: */
 	public:
-	KinectServer(USB::Context& usbContext,Misc::ConfigurationFileSection& configFileSection);
+	KinectServer(Misc::ConfigurationFileSection& configFileSection);
 	~KinectServer(void);
 	
 	/* Methods: */

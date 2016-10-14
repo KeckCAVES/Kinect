@@ -2,7 +2,7 @@
 FindBlobs - Helper function to extract all eight-connected blobs of
 pixels from a frame whose pixel values match a given value up to a given
 tolerance.
-Copyright (c) 2010-2011 Oliver Kreylos
+Copyright (c) 2010-2015 Oliver Kreylos
 
 This file is part of the Kinect 3D Video Capture Project (Kinect).
 

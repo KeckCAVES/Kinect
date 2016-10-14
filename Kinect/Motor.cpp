@@ -1,7 +1,7 @@
 /***********************************************************************
 Motor - Wrapper class to represent the motor and accelerometer interface
 aspect of the Kinect sensor.
-Copyright (c) 2010-2011 Oliver Kreylos
+Copyright (c) 2010-2015 Oliver Kreylos
 
 This file is part of the Kinect 3D Video Capture Project (Kinect).
 
@@ -24,7 +24,6 @@ Software Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA
 #include <Kinect/Motor.h>
 
 #include <Misc/ThrowStdErr.h>
-#include <USB/Context.h>
 #include <USB/DeviceList.h>
 
 namespace Kinect {
@@ -33,10 +32,10 @@ namespace Kinect {
 Methods of class Motor:
 **********************/
 
-Motor::Motor(USB::Context& usbContext,size_t index)
+Motor::Motor(size_t index)
 	{
 	/* Get the index-th Kinect motor device from the context: */
-	USB::DeviceList deviceList(usbContext);
+	USB::DeviceList deviceList;
 	USB::Device::operator=(deviceList.getDevice(0x045e,0x02b0,index));
 	if(!isValid())
 		Misc::throwStdErr("Kinect::Motor::Motor: Less than %d Kinect motor devices detected",int(index));

@@ -1,7 +1,7 @@
 /***********************************************************************
 KinectRecorder - Vislet to capture and save 3D video from one or more
 Kinect devices.
-Copyright (c) 2011-2013 Oliver Kreylos
+Copyright (c) 2011-2016 Oliver Kreylos
 
 This file is part of the Kinect 3D Video Capture Project (Kinect).
 
@@ -26,7 +26,6 @@ Software Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA
 
 #include <string>
 #include <vector>
-#include <USB/Context.h>
 #include <Sound/SoundDataFormat.h>
 #include <Kinect/Camera.h>
 #include <Vrui/Vislet.h>
@@ -102,7 +101,7 @@ class KinectRecorder:public Vrui::Vislet
 		
 		/* Constructors and destructors: */
 		public:
-		KinectStreamer(USB::Context& usbContext,const KinectRecorderFactory::KinectConfig& config); // Creates a streamer for the Kinect camera on the given USB device
+		KinectStreamer(const KinectRecorderFactory::KinectConfig& config); // Creates a streamer for the Kinect camera on the given USB device
 		~KinectStreamer(void); // Destroys the streamer
 		
 		/* Methods: */
@@ -110,13 +109,12 @@ class KinectRecorder:public Vrui::Vislet
 			{
 			return camera;
 			}
-		void startStreaming(void); // Begins streaming from the Kinect camera
+		void startStreaming(const Kinect::FrameSource::Time& timeBase); // Begins streaming from the Kinect camera
 		};
 	
 	/* Elements: */
 	private:
 	static KinectRecorderFactory* factory; // Pointer to the class' factory object
-	USB::Context usbContext; // USB device context
 	std::vector<KinectStreamer*> streamers; // List of Kinect streamers, each connected to one Kinect camera
 	Sound::SoundRecorder* soundRecorder; // Pointer to optional sound recorder
 	bool firstEnable; // Flag to indicate the first time the vislet is enabled at start-up

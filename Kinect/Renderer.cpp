@@ -1,7 +1,7 @@
 /***********************************************************************
 Renderer - Helper class to receive a 3D video stream from a frame
 source, and render it into an OpenGL context using a projector.
-Copyright (c) 2012-2013 Oliver Kreylos
+Copyright (c) 2012-2016 Oliver Kreylos
 
 This file is part of the Kinect 3D Video Capture Project (Kinect).
 
@@ -25,13 +25,8 @@ Software Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA
 
 #include <Misc/FunctionCalls.h>
 #include <Kinect/FunctionCalls.h>
-#include <Kinect/FrameSource.h>
 #include <Kinect/Camera.h>
-#if KINECT_USE_SHADERPROJECTOR
-#include <Kinect/ShaderProjector.h>
-#else
-#include <Kinect/Projector.h>
-#endif
+#include <Kinect/ProjectorHeader.h>
 
 namespace Kinect {
 
@@ -59,7 +54,7 @@ void Renderer::depthStreamingCallback(const FrameBuffer& frameBuffer)
 		/* Forward depth frame to the projector: */
 		projector->setDepthFrame(frameBuffer);
 		
-		#if KINECT_USE_SHADERPROJECTOR
+		#if KINECT_CONFIG_USE_SHADERPROJECTOR
 		
 		/* Notify interested parties: */
 		if(streamingCallback!=0)
@@ -69,7 +64,7 @@ void Renderer::depthStreamingCallback(const FrameBuffer& frameBuffer)
 		}
 	}
 
-#if !KINECT_USE_SHADERPROJECTOR
+#if !KINECT_CONFIG_USE_SHADERPROJECTOR
 
 void Renderer::meshStreamingCallback(const MeshBuffer& meshBuffer)
 	{
@@ -85,11 +80,7 @@ void Renderer::meshStreamingCallback(const MeshBuffer& meshBuffer)
 
 Renderer::Renderer(FrameSource* sSource)
 	:source(sSource),
-	 #if KINECT_USE_SHADERPROJECTOR
-	 projector(new ShaderProjector(*source)),
-	 #else
-	 projector(new Projector(*source)),
-	 #endif
+	 projector(new ProjectorType(*source)),
 	 streamingCallback(0),
 	 enabled(true)
 	{
@@ -99,7 +90,7 @@ Renderer::~Renderer(void)
 	{
 	/* Stop streaming: */
 	source->stopStreaming();
-	#if !KINECT_USE_SHADERPROJECTOR
+	#if !KINECT_CONFIG_USE_SHADERPROJECTOR
 	projector->stopStreaming();
 	#endif
 	
@@ -110,15 +101,10 @@ Renderer::~Renderer(void)
 	delete streamingCallback;
 	}
 
-void Renderer::resetFrameTimer(double newFrameTimerOffset)
+void Renderer::setTimeBase(const FrameSource::Time& newTimeBase)
 	{
-	/* Check if the frame source is a live Kinect camera: */
-	Camera* camera=dynamic_cast<Camera*>(source);
-	if(camera!=0)
-		{
-		/* Reset the camera's frame timer: */
-		camera->resetFrameTimer(newFrameTimerOffset);
-		}
+	/* Pass call through to the frame source: */
+	source->setTimeBase(newTimeBase);
 	}
 
 void Renderer::startStreaming(StreamingCallback* newStreamingCallback)
@@ -127,7 +113,7 @@ void Renderer::startStreaming(StreamingCallback* newStreamingCallback)
 	delete streamingCallback;
 	streamingCallback=newStreamingCallback;
 	
-	#if !KINECT_USE_SHADERPROJECTOR
+	#if !KINECT_CONFIG_USE_SHADERPROJECTOR
 	
 	/* Hook this renderer into the projector's mesh callback: */
 	projector->startStreaming(Misc::createFunctionCall(this,&Renderer::meshStreamingCallback));

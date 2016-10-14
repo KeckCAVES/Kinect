@@ -1,6 +1,6 @@
 /***********************************************************************
 DepthCorrectionTool - Calibration tool for RawKinectViewer.
-Copyright (c) 2012-2013 Oliver Kreylos
+Copyright (c) 2012-2015 Oliver Kreylos
 
 This file is part of the Kinect 3D Video Capture Project (Kinect).
 

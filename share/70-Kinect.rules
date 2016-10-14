@@ -1,7 +1,0 @@
-# Rules to relax permissions on USB files for Microsoft Xbox Kinect
-# This file was installed by the Kinect 3D Video Capture Project.
-# Copyright (c) 2013 Oliver Kreylos
-
-ACTION=="add", SUBSYSTEMS=="usb", ATTRS{idVendor}=="045e", ATTRS{idProduct}=="02ad", MODE="0666"
-ACTION=="add", SUBSYSTEMS=="usb", ATTRS{idVendor}=="045e", ATTRS{idProduct}=="02ae", MODE="0666"
-ACTION=="add", SUBSYSTEMS=="usb", ATTRS{idVendor}=="045e", ATTRS{idProduct}=="02b0", MODE="0666"

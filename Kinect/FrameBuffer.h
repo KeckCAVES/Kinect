@@ -1,7 +1,7 @@
 /***********************************************************************
 FrameBuffer - Class for reference-counted decoded color or depth frame
 buffers.
-Copyright (c) 2010-2012 Oliver Kreylos
+Copyright (c) 2010-2015 Oliver Kreylos
 
 This file is part of the Kinect 3D Video Capture Project (Kinect).
 
@@ -96,7 +96,7 @@ class FrameBuffer
 	FrameBuffer(void) // Creates invalid frame buffer
 		:buffer(0),timeStamp(0.0)
 		{
-		size[0]=size[1]=0;
+		size[1]=size[0]=0;
 		}
 	FrameBuffer(int sizeX,int sizeY,size_t bufferSize) // Allocates a new frame buffer of the given frame size and size in bytes
 		:buffer(0),timeStamp(0.0)
@@ -171,6 +171,10 @@ class FrameBuffer
 		}
 	
 	/* Methods: */
+	bool isValid(void) const // Returns true if the frame holds valid data
+		{
+		return buffer!=0;
+		}
 	const int* getSize(void) const // Returns the frame size
 		{
 		return size;
@@ -179,13 +183,34 @@ class FrameBuffer
 		{
 		return size[dimension];
 		}
-	const void* getBuffer(void) const // Returns the frame buffer
+	template <class ContentParam>
+	const ContentParam* getData(void) const // Returns the frame buffer as the given content type
 		{
-		return buffer;
+		return static_cast<const ContentParam*>(buffer);
 		}
-	void* getBuffer(void) // Ditto
+	template <class ContentParam>
+	ContentParam* getData(void) // Ditto
 		{
-		return buffer;
+		return static_cast<ContentParam*>(buffer);
+		}
+	void invalidate(void) // Releases the currently-held buffer
+		{
+		/* Invalidate the buffer: */
+		size[1]=size[0]=0;
+		
+		/* Unreference the current buffer: */
+		if(buffer!=0)
+			{
+			if(static_cast<BufferHeader*>(buffer)[-1].unref())
+				{
+				/* Delete the unused buffer: */
+				static_cast<BufferHeader*>(buffer)[-1].~BufferHeader();
+				delete[] (static_cast<unsigned char*>(buffer)-sizeof(BufferHeader));
+				}
+			
+			/* Drop the buffer reference: */
+			buffer=0;
+			}
 		}
 	};
 

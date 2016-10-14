@@ -1,7 +1,7 @@
 /***********************************************************************
 ColorCompressionTest - Utility to experiment with methods to compress
 color frame streams.
-Copyright (c) 2010-2011 Oliver Kreylos
+Copyright (c) 2010-2015 Oliver Kreylos
 
 This file is part of the Kinect 3D Video Capture Project (Kinect).
 
@@ -54,7 +54,7 @@ int main(int argc,char* argv[])
 		/* Read the next uncompressed color frame: */
 		Kinect::FrameBuffer frame0(size[0],size[1],size[1]*size[0]*3*sizeof(unsigned char));
 		frame0.timeStamp=colorFrameFile->read<double>();
-		unsigned char* frameBuffer0=static_cast<unsigned char*>(frame0.getBuffer());
+		unsigned char* frameBuffer0=frame0.getData<unsigned char>();
 		colorFrameFile->read(frameBuffer0,size[1]*size[0]*3);
 	
 		/* Write the compressed color frame: */

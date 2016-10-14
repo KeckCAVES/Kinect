@@ -1,7 +1,7 @@
 ########################################################################
 # Packages.Kinect - List of Kinect sub-packages that can be included/
 # linked into projects.
-# Copyright (c) 2011-2012 Oliver Kreylos
+# Copyright (c) 2011-2016 Oliver Kreylos
 #
 # This file is part of the WhyTools Build Environment.
 # 
@@ -21,8 +21,25 @@
 # 02111-1307 USA
 ########################################################################
 
+# Intel's librealsense library
+REALSENSE_BASEDIR = $(shell $(VRUI_MAKEDIR)/FindLibrary.sh librealsense/rs.h librealsense.$(DSOFILEEXT) $(INCLUDEEXT) $(LIBEXT) $(SYSTEM_PACKAGE_SEARCH_PATHS))
+REALSENSE_DEPENDS = 
+REALSENSE_INCLUDE = -I$(REALSENSE_BASEDIR)/$(INCLUDEEXT)
+REALSENSE_LIBDIR  = -L$(REALSENSE_BASEDIR)/lib
+REALSENSE_LIBS    = -lrealsense
+REALSENSE_LINKLIBFLAGS = -Wl,-rpath $(REALSENSE_BASEDIR)/lib
+
+ifneq ($(strip $(REALSENSE_BASEDIR)),)
+  SYSTEM_HAVE_REALSENSE = 1
+else
+  SYSTEM_HAVE_REALSENSE = 0
+endif
+
 MYKINECT_BASEDIR      = $(VRUI_PACKAGEROOT)
 MYKINECT_DEPENDS      = MYVIDEO MYGLGEOMETRY MYGLSUPPORT MYGEOMETRY MYMATH MYCLUSTER MYIO MYUSB MYTHREADS MYMISC GL
+ifneq ($(SYSTEM_HAVE_REALSENSE),0)
+  MYKINECT_DEPENDS    += REALSENSE
+endif
 MYKINECT_INCLUDE      = -I$(VRUI_INCLUDEDIR)
 MYKINECT_LIBDIR       = -L$(VRUI_LIBDIR)
 MYKINECT_LIBS         = -lKinect.$(LDEXT)

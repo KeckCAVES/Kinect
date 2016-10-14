@@ -1,7 +1,7 @@
 /***********************************************************************
 Motor - Wrapper class to represent the motor and accelerometer interface
 aspect of the Kinect sensor.
-Copyright (c) 2010-2011 Oliver Kreylos
+Copyright (c) 2010-2015 Oliver Kreylos
 
 This file is part of the Kinect 3D Video Capture Project (Kinect).
 
@@ -26,11 +26,6 @@ Software Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA
 
 #include <USB/Device.h>
 
-/* Forward declarations: */
-namespace USB {
-class Context;
-}
-
 namespace Kinect {
 
 class Motor:public USB::Device
@@ -47,7 +42,7 @@ class Motor:public USB::Device
 	
 	/* Constructors and destructors: */
 	public:
-	Motor(USB::Context& usbContext,size_t index =0); // Opens the index-th Kinect motor device on the given USB context
+	Motor(size_t index =0); // Opens the index-th Kinect motor device on the host's USB subsystem
 	
 	/* Methods: */
 	void setLED(LEDState newLEDState); // Sets the state of the Kinect's LED

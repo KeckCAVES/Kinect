@@ -1,7 +1,7 @@
 /***********************************************************************
 SpaceCarver - Utility to convert a set of colocated Kinect facades into
 a watertight mesh using a space carving approach.
-Copyright (c) 2011 Oliver Kreylos
+Copyright (c) 2011-2015 Oliver Kreylos
 
 This file is part of the Kinect 3D Video Capture Project (Kinect).
 
@@ -56,8 +56,8 @@ FrameBuffer open(const FrameBuffer& frame)
 	for(int dy=-1;dy<=1;++dy)
 		for(int dx=-1;dx<=1;++dx,++noffPtr)
 			*noffPtr=dy*stride+dx;
-	const unsigned short* fPtr=static_cast<const unsigned short*>(frame.getBuffer());
-	unsigned short* rPtr=static_cast<unsigned short*>(result.getBuffer());
+	const unsigned short* fPtr=frame.getTypedBuffer<unsigned short>();
+	unsigned short* rPtr=result.getTypedBuffer<unsigned short>();
 	for(int x=0;x<frame.getSize(0);++x,++fPtr,++rPtr)
 		*rPtr=*fPtr;
 	for(int y=1;y<frame.getSize(1)-1;++y)
@@ -105,8 +105,8 @@ FrameBuffer close(const FrameBuffer& frame)
 	for(int dy=-1;dy<=1;++dy)
 		for(int dx=-1;dx<=1;++dx,++noffPtr)
 			*noffPtr=dy*stride+dx;
-	const unsigned short* fPtr=static_cast<const unsigned short*>(frame.getBuffer());
-	unsigned short* rPtr=static_cast<unsigned short*>(result.getBuffer());
+	const unsigned short* fPtr=frame.getTypedBuffer<unsigned short>();
+	unsigned short* rPtr=result.getTypedBuffer<unsigned short>();
 	for(int x=0;x<frame.getSize(0);++x,++fPtr,++rPtr)
 		*rPtr=*fPtr;
 	for(int y=1;y<frame.getSize(1)-1;++y)
@@ -186,7 +186,7 @@ int main(int argc,char* argv[])
 			double fmax[2];
 			for(int i=0;i<2;++i)
 				fmax[i]=double(frame.getSize(i));
-			unsigned short* frameBuffer=static_cast<unsigned short*>(frame.getBuffer());
+			unsigned short* frameBuffer=frame.getTypedBuffer<unsigned short>();
 			Size cellSize;
 			for(int i=0;i<3;++i)
 				cellSize[i]=(gridBox.max[i]-gridBox.min[i])/double(gridSize[i]);

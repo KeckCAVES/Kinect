@@ -2,7 +2,7 @@
 Projector - Class to project a depth frame captured from a Kinect camera
 back into calibrated 3D camera space, and texture-map it with a matching
 color frame.
-Copyright (c) 2010-2013 Oliver Kreylos
+Copyright (c) 2010-2016 Oliver Kreylos
 
 This file is part of the Kinect 3D Video Capture Project (Kinect).
 
@@ -33,6 +33,7 @@ Software Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA
 #include <GL/gl.h>
 #include <GL/GLObject.h>
 #include <Kinect/FrameBuffer.h>
+#include <Kinect/LensDistortion.h>
 #include <Kinect/FrameSource.h>
 #include <Kinect/MeshBuffer.h>
 
@@ -72,9 +73,11 @@ class Projector:public GLObject
 	/* Elements: */
 	static const unsigned int quadCaseNumTriangles[16]; // Number of triangles to be generated for each quad corner validity case
 	unsigned int depthSize[2]; // Width and height of all incoming depth frames
+	LensDistortion depthLensDistortion; // Lens distortion correction parameters for the depth camera
 	PTransform depthProjection; // Projection transformation from depth image space into 3D camera space
-	PTransform colorProjection; // Projection transformation from color image space into 3D camera space
+	PTransform colorProjection; // Projection transformation from 3D camera space into color image space
 	ProjectorTransform projectorTransform; // Transformation from 3D camera space into 3D world space
+	PTransform worldDepthProjection; // Projection transformation from depth image space into 3D world space
 	PixelCorrection* depthCorrection; // Buffer of per-pixel depth correction parameters
 	Threads::MutexCond inDepthFrameCond; // Condition variable to signal arrival of a new depth frame
 	unsigned int inDepthFrameVersion; // Version number of most-recently arrived raw depth frame
@@ -105,10 +108,34 @@ class Projector:public GLObject
 	virtual void initContext(GLContextData& contextData) const;
 	
 	/* New methods: */
+	const unsigned int* getDepthFrameSize(void) const // Returns the current depth frame size
+		{
+		return depthSize;
+		}
+	unsigned int getDepthFrameSize(int index) const // Ditto
+		{
+		return depthSize[index];
+		}
+	const PixelCorrection* getDepthCorrection(void) const // Returns the array of per-pixel depth correction factors
+		{
+		return depthCorrection;
+		}
+	const LensDistortion& getDepthLensDistortion(void) const // Returns the lens distortion correction parameters for the depth camera
+		{
+		return depthLensDistortion;
+		}
+	const PTransform& getDepthProjection(void) const // Returns the depth unprojection transformation from depth image space into 3D camera space
+		{
+		return depthProjection;
+		}
+	const PTransform& getColorProjection(void) const // Returns the color unprojection transformation from color image space into 3D camera space
+		{
+		return colorProjection;
+		}
 	void setDepthFrameSize(const unsigned int newDepthFrameSize[2]); // Sets the size of all future incoming depth frames
 	void setDepthCorrection(const FrameSource::DepthCorrection* dc); // Enables per-pixel depth correction using the given depth correction parameters
-	void setIntrinsicParameters(const FrameSource::IntrinsicParameters& ips); // Sets the projectors intrinsic camera parameters
-	void setExtrinsicParameters(const FrameSource::ExtrinsicParameters& eps); // Sets the projectors extrinsic camera parameters
+	void setIntrinsicParameters(const FrameSource::IntrinsicParameters& ips); // Sets the projector's intrinsic camera parameters
+	void setExtrinsicParameters(const FrameSource::ExtrinsicParameters& eps); // Sets the projector's extrinsic camera parameters
 	const ProjectorTransform& getProjectorTransform(void) const // Returns the transformation from camera to world space
 		{
 		return projectorTransform;
@@ -130,6 +157,14 @@ class Projector:public GLObject
 	void setColorFrame(const FrameBuffer& newColorFrame); // Updates the projector's current color frame in streaming mode; can be called from any thread
 	void stopStreaming(void); // Stops background processing of depth frames
 	void updateFrames(void); // Selects the most recent depth and color frames for rendering; must be called from foreground thread
+	double getColorTimeStamp(void) const // Returns the time stamp of the color frame currently locked for rendering
+		{
+		return colorFrames.getLockedValue().timeStamp;
+		}
+	double getMeshTimeStamp(void) const // Returns the time stamp of the triangle mesh currently locked for rendering
+		{
+		return meshes.getLockedValue().timeStamp;
+		}
 	void glRenderAction(GLContextData& contextData) const; // Draws the current depth and color frames in the current model coordinate system
 	};
 

@@ -1,19 +1,19 @@
 ========================================================================
-README for Kinect 3D Video Capture Project version 2.8
-Copyright (c) 2010-2013 Oliver Kreylos
+README for Kinect 3D Video Capture Project version 3.2
+Copyright (c) 2010-2016 Oliver Kreylos
 ========================================================================
 
 Requirements
 ============
 
-This software requires the Vrui VR toolkit, version 3.1 build 001 or
+This software requires the Vrui VR toolkit, version 4.2 build 001 or
 newer. It also requires libusb version 1.0, and that Vrui was configured
 with support for libusb prior to its installation. To properly work with
 multiple Kinect-for-Xbox version 1473 and/or Kinect-for-Windows devices,
 the libusb library needs to provide USB bus topology query functions
 such as those provided by the libusbx fork. This software can optionally
 create Kinect 3D video streaming plug-ins for Vrui's collaboration
-infrastructure (version 2.6 or newer). The presence of Vrui's
+infrastructure (version 2.7 or newer). The presence of Vrui's
 collaboration infrastructure will be detected automatically during the
 build process.
 
@@ -40,8 +40,8 @@ instructions need to be changed.
 2. Change into the Kinect 3D Video Capture Project's base directory:
    > cd Kinect-<version>
 
-3. If the Vrui version installed in step 0 was not 3.1, or Vrui's
-   installation directory was changed from the default of ~/Vrui-3.1,
+3. If the Vrui version installed in step 0 was not 4.2, or Vrui's
+   installation directory was changed from the default of /usr/local,
    adapt the makefile using a text editor. Change the value of
    VRUI_MAKEDIR close to the beginning of the file as follows:
    VRUI_MAKEDIR := <Vrui install dir>/share/make
@@ -56,11 +56,11 @@ instructions need to be changed.
    > make install
 
 6. (Optional, Linux-only) Install a udev rule file to give access to all
-   Kinect devices to all users, local and remote. Read below for details
-   and security considerations.
-   > make installudevrule
+   Kinect devices to the user currently logged in to the computer's
+   physical console. Read below for details.
+   > sudo make installudevrules
    This will ask for the user's password to copy the rule file,
-   70-Kinect.rules, into the udev rule directory /etc/udev/rules.d.
+   69-Kinect.rules, into the udev rule directory /etc/udev/rules.d.
 
 Use
 ===
@@ -99,20 +99,19 @@ Installing a udev rule (Linux-only)
 By default, Kinect devices can only be accessed by the root user. This
 is inconvenient and a security risk, as all Kinect applications must be
 run as root. The Kinect package contains a udev rule file to give full
-access to any Kinect device to any user, see optional installation step
-6 above. After the rule file has been installed (and all Kinect devices
-have been unplugged and re-plugged), regular users can work with the
-devices.
+access to any Kinect device to the user currently logged in to the local
+console, see optional installation step 6 above. After the rule file has
+been installed, it needs to be activated. The recommended way is to
+restart the device manager:
 
-Security concerns: At this time, the rule file gives access to all
-connected Kinect devices to *all* users, whether logged in locally or
-remotely, e.g., via ssh. This means that a remotely logged-in user could
-turn on the camera or microphones to spy on a local user. Ideally,
-access to the Kinect device would only be granted to the single user
-currently owning the console. However, the way how this is done is
-currently somewhat in flux, with the previous way of assigning ACL
-control via udev rules being deprecated. Until a new method arises,
-users can install the global-access udev rule at their own risks.
+> sudo udevadm control --reload
+> sudo udevadm trigger --action=change
+
+Alternatively, the rule can be activated by unplugging the Kinect from
+its USB port, waiting a few seconds, and then plugging it back in, or,
+if everything else fails, by restarting the computer. After initial
+installation, the rule file will be activated automatically when the
+computer boots, or when a Kinect device is plugged into any USB port.
 
 Intrinsically Calibrating a Single Kinect
 =========================================
@@ -125,16 +124,31 @@ camera's image stream onto that point cloud or surface. After proper
 calibration, the virtual 3D objects captured by a Kinect will precisely
 match the original real objects in shape and size.
 
-Intrinsic calibration has two sub-procedures. The first, optional, one
-is to calculate per-pixel depth correction equations. Due to radial lens
-distortion in the IR pattern projector and the IR camera, a completely
-flat surface seen by the Kinect will not be reconstructed as a flat
-surface, but as a bowl shape. Depth correction will calculate a linear
-equation for each depth pixel that can rectify distance values. The
-second sub-procedure is to calculate 4x4 homogeneous depth unprojection
-and color projection matrices. The results of sub-procedure two depend
-on sub-procedure one, meaning that the second has to be performed every
-time after the first one is performed.
+The quickest way to get intrinsic calibration data for a Kinect is to
+download the factory calibration data that is stored in each Kinect's
+firmware. The Kinect package contains a utility for this purpose. In a
+terminal, run:
+
+> KinectUtil getCalib <Kinect index>
+
+where <Kinect index> is the index of the Kinect whose data you want to
+download. If you have only one Kinect connected to your computer, its
+index is 0. KinectUtil will download the data and copy it into a file
+that will later be found automatically by all Kinect applications. The
+quality of factory calibration is generally not as good as what can be
+achieved by custom calibration, see below, especially for Xbox 360
+Kinects.
+
+Custom intrinsic calibration has two sub-procedures. The first,
+optional, one is to calculate per-pixel depth correction equations. Due
+to radial lens distortion in the IR pattern projector and the IR camera,
+a completely flat surface seen by the Kinect will not be reconstructed
+as a flat surface, but as a bowl shape. Depth correction will calculate
+a linear equation for each depth pixel that can rectify distance values.
+The second sub-procedure is to calculate 4x4 homogeneous depth
+unprojection and color projection matrices. The results of sub-procedure
+two depend on sub-procedure one, meaning that the second has to be
+performed every time after the first one is performed.
 
 Per-pixel Depth Correction
 --------------------------
@@ -180,7 +194,12 @@ calibration procedure's steps:
 7. Press the "2" key to calculate per-pixel depth correction equations.
    When the calculation is complete, the correction parameters will
    automatically be written to a DepthCorrection-<serial number>.dat
-   file in the Kinect package's configuration directory.
+   file in the Kinect package's configuration directory. The correction
+   calculation may fail if there are too many depth pixels that don't
+   have valid depth data, i.e., show up in black, in too many depth
+   images. If an error message appears after pressing "2", capture
+   additional depth images within the desired depth range as in step 4,
+   and press "2" again.
 
 8. Exit from RawKinectViewer.
 
@@ -229,14 +248,14 @@ These are the steps:
    calibration target does not have the default layout, specify the
    layout using the -gridSize and -tileSize command line options.
 
-2. Create a "Draw Grids" tool by binding it to five (5) buttons
-   (keyboard keys or mouse buttons). Here, we will use the keys "1"
-   through "5". This will create two green grids, one in the depth and
-   one in the color image stream. The grid can be deformed by grabbing
-   any grid intersection using the mouse and the "1" key, or translated
-   by grabbing the dot in the center of the grid, or rotated around
-   the center by grabbing the dot slightly outside the right edge of
-   the grid, again using the "1" key.
+2. Create a "Draw Grids" tool by binding it to six (6) buttons
+   (keyboard keys or mouse buttons). Here, we will use the keys "1",
+   "W", "2", "3", "4", "5", in that order. This will create two green
+   grids, one in the depth and one in the color image stream. The grid
+   can be deformed by grabbing any grid intersection using the mouse and
+   the "1" key, or translated by grabbing the dot in the center of the
+   grid, or rotated around the center by grabbing the dot slightly
+   outside the right edge of the grid, all using the "1" key.
 
 3. Place the calibration target in front of the Kinect at the next
    position and orientation. The target should be placed in a range of

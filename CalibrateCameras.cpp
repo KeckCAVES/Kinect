@@ -2,7 +2,7 @@
 CalibrateCameras - Simple utility to read calibration tie points between
 a depth camera and a color camera, and calculate the optimal projective
 transformation mapping color to depth.
-Copyright (c) 2010 Oliver Kreylos
+Copyright (c) 2010-2015 Oliver Kreylos
 
 This file is part of the Kinect 3D Video Capture Project (Kinect).
 
@@ -80,6 +80,9 @@ int main(int argc,char* argv[])
 		double s=data.readField<double>()/double(imgSize[0]);
 		double t=data.readField<double>()/double(imgSize[1]);
 		
+		// s=1.0-s;
+		t=1.0-t;
+		
 		/* Insert the entry's two linear equations into the linear system: */
 		double eq[2][12];
 		eq[0][0]=x;
@@ -145,6 +148,8 @@ int main(int argc,char* argv[])
 	IO::CSVSource data(IO::openFile(tiePointFileName));
 	
 	/* Test the homography on all calibration data entries: */
+	double rms=0.0;
+	size_t numTiePoints=0;
 	while(!data.eof())
 		{
 		/* Read a calibration entry from the data file: */
@@ -153,19 +158,33 @@ int main(int argc,char* argv[])
 			world.set(i,data.readField<double>());
 		world.set(3,1.0);
 		
-		/* Skip s and t: */
-		data.readField<double>();
-		data.readField<double>();
+		/* Read s and t: */
+		double s=data.readField<double>();
+		double t=data.readField<double>();
 		
 		/* Apply the homography: */
 		Math::Matrix str=hom*world;
-		std::cout<<"Result: s = "<<str(0)/str(2)<<", t = "<<str(1)/str(2)<<std::endl;
+		double sp=str(0)/str(2);
+		double tp=str(1)/str(2);
+		
+		// sp=1.0-sp;
+		tp=1.0-tp;
+		
+		// std::cout<<"Result: s = "<<sp*double(imgSize[0])<<", t = "<<tp*double(imgSize[1])<<std::endl;
+		// std::cout<<world(0)<<", "<<world(1)<<", "<<world(2)<<", "<<sp*double(imgSize[0])<<", "<<tp*double(imgSize[1])<<std::endl;
+		
+		rms+=Math::sqr(s-sp*double(imgSize[0]))+Math::sqr(t-tp*double(imgSize[1]));
+		++numTiePoints;
 		}
+	
+	std::cout<<"Reprojection residual: "<<Math::sqrt(rms/double(numTiePoints))<<" pixel RMS"<<std::endl;
 	}
 	
 	/* Open the calibration file: */
 	IO::FilePtr matrixFile(IO::openFile(matrixFileName,IO::File::WriteOnly));
 	matrixFile->setEndianness(Misc::LittleEndian);
+	
+	#if 0
 	
 	/* Create the depth projection matrix: */
 	Math::Matrix depthProjection(4,4,0.0);
@@ -188,6 +207,8 @@ int main(int argc,char* argv[])
 		for(unsigned int j=0;j<4;++j)
 			matrixFile->write<double>(depthProjection(i,j));
 	
+	#endif
+	
 	/* Create the color projection matrix by extending the homography: */
 	Math::Matrix colorProjection(4,4);
 	for(unsigned int i=0;i<2;++i)
@@ -199,7 +220,17 @@ int main(int argc,char* argv[])
 		colorProjection(3,j)=hom(2,j);
 	
 	/* Modify the color projection matrix by the depth projection matrix: */
-	colorProjection*=depthProjection;
+	// colorProjection*=depthProjection;
+	
+	/* Print the color projection matrix: */
+	std::cout<<std::endl;
+	for(unsigned int i=0;i<4;++i)
+		{
+		std::cout<<colorProjection(i,0);
+		for(unsigned int j=1;j<4;++j)
+			std::cout<<", "<<colorProjection(i,j);
+		std::cout<<std::endl;
+		}
 	
 	/* Save the color projection matrix: */
 	for(unsigned int i=0;i<4;++i)

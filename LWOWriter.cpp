@@ -1,7 +1,7 @@
 /***********************************************************************
 LWOWriter - Utility to convert a stream of depth and color frames into
 a sequence of 3D triangle meshes in Lightwave Object file format.
-Copyright (c) 2012 Oliver Kreylos
+Copyright (c) 2012-2015 Oliver Kreylos
 
 This file is part of the Kinect 3D Video Capture Project (Kinect).
 
@@ -50,7 +50,7 @@ void writeFrames(const Kinect::FrameSource::IntrinsicParameters& ip,const Kinect
 	{
 	Images::RGBImage texImage(color.getSize(0),color.getSize(1));
 	Images::RGBImage::Color* tiPtr=texImage.modifyPixels();
-	const unsigned char* cfPtr=reinterpret_cast<const unsigned char*>(color.getBuffer());
+	const unsigned char* cfPtr=color.getTypedBuffer<unsigned char>();
 	for(int y=0;y<color.getSize(1);++y)
 		for(int x=0;x<color.getSize(0);++x,++tiPtr,cfPtr+=3)
 			*tiPtr=Images::RGBImage::Color(cfPtr);
@@ -214,7 +214,8 @@ void writeFrames(const Kinect::FrameSource::IntrinsicParameters& ip,const Kinect
 	/* Create the COLR subchunk: */
 	{
 	IFFChunkWriter colr(&surf,"COLR",true);
-	colr.writeColor(1.0f,1.0f,1.0f);
+	// colr.writeColor(1.0f,1.0f,1.0f);
+	colr.writeColor(0.5f,0.6f,0.8f);
 	colr.writeVarIndex(0U);
 	colr.writeChunk();
 	}
@@ -301,7 +302,7 @@ int main(int argc,char* argv[])
 	
 	/* Create a 3D video projector: */
 	Kinect::Projector projector(frameSource);
-	projector.setFilterDepthFrames(true);
+	projector.setFilterDepthFrames(true,false);
 	
 	/* Read pairs of frames from the source and export them to a sequence of Lightwave Object files: */
 	unsigned int minIndex=argc>3?atoi(argv[3]):0;
@@ -322,7 +323,8 @@ int main(int argc,char* argv[])
 		if(frameIndex>=minIndex&&frameIndex<maxIndex)
 			{
 			/* Convert the depth frame to a mesh: */
-			const Kinect::MeshBuffer& mesh=projector.processDepthFrame(depth);
+			Kinect::MeshBuffer mesh;
+			projector.processDepthFrame(depth,mesh);
 			
 			/* Export the frame pair to an LWO file: */
 			char lwoFileName[1024];

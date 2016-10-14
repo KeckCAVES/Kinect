@@ -1,7 +1,7 @@
 /***********************************************************************
 FileFrameSource - Class to stream depth and color frames from a pair of
 time-stamped depth and color stream files.
-Copyright (c) 2010-2013 Oliver Kreylos
+Copyright (c) 2010-2016 Oliver Kreylos
 
 This file is part of the Kinect 3D Video Capture Project (Kinect).
 
@@ -24,8 +24,8 @@ Software Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA
 #ifndef KINECT_FILEFRAMESOURCE_INCLUDED
 #define KINECT_FILEFRAMESOURCE_INCLUDED
 
-#include <Misc/Timer.h>
 #include <IO/File.h>
+#include <IO/Directory.h>
 #include <Threads/Thread.h>
 #include <Geometry/OrthogonalTransformation.h>
 #include <Kinect/FrameBuffer.h>
@@ -42,7 +42,6 @@ class FileFrameSource:public FrameSource
 	{
 	/* Elements: */
 	private:
-	Misc::Timer frameTimer; // Free-running timer to synchronize playback of depth and color frames
 	IO::FilePtr colorFrameFile; // File containing color frames
 	IO::FilePtr depthFrameFile; // File containing depth frames
 	unsigned int fileFormatVersions[2]; // Format version numbers of the color and depth files, respectively
@@ -52,20 +51,25 @@ class FileFrameSource:public FrameSource
 	DepthCorrection* depthCorrection; // Depth correction parameters read from the depth file
 	IntrinsicParameters intrinsicParameters; // Intrinsic parameters read from the color and depth files
 	ExtrinsicParameters extrinsicParameters; // Extrinsic parameters read from the color and depth files
+	volatile bool runStreamingThreads; // Flag to shut down the streaming threads
 	StreamingCallback* colorStreamingCallback; // Callback to be called when a new color frame has been loaded
+	Threads::Thread colorStreamingThread; // Thread streaming color frames
 	StreamingCallback* depthStreamingCallback; // Callback to be called when a new depth frame has been loaded
-	Threads::Thread playbackThread; // Thread playing back depth and color frames
+	Threads::Thread depthStreamingThread; // Thread streaming depth frames
 	unsigned int numBackgroundFrames; // Number of background frames left to capture
 	DepthPixel* backgroundFrame; // Frame containing minimal depth values for a captured background
 	bool removeBackground; // Flag whether to remove background information during frame processing
 	
 	/* Private methods: */
 	void initialize(void);
-	void* playbackThreadMethod(void); // Thread method playing back depth and color frames
+	void* colorStreamingThreadMethod(void); // Thread method streaming color frames
+	void processBackground(FrameBuffer& depthFrame); // Runs a depth frame through background capture or removal
+	void* depthStreamingThreadMethod(void); // Thread method streaming depth frames
 	
 	/* Constructors and destructors: */
 	public:
 	FileFrameSource(const char* colorFrameFileName,const char* depthFrameFileName); // Creates frame source for given color and depth frame files
+	FileFrameSource(IO::DirectoryPtr directory,const char* fileNamePrefix); // Ditto, for a directory and a common prefix for the color and depth file
 	FileFrameSource(IO::FilePtr sColorFrameFile,IO::FilePtr sDepthFrameFile); // Ditto, for the two already opened files
 	~FileFrameSource(void);
 	
@@ -80,7 +84,6 @@ class FileFrameSource:public FrameSource
 	/* New methods: */
 	FrameBuffer readNextColorFrame(void); // Immediately reads, decompresses, and returns the next frame from the color file
 	FrameBuffer readNextDepthFrame(void); // Immediately reads, decompresses, and returns the next frame from the depth file
-	void resetFrameTimer(void); // Resets the internal frame timer
 	void captureBackground(unsigned int newNumBackgroundFrames); // Captures the given number of frames to create a background removal buffer
 	void setRemoveBackground(bool newRemoveBackground); // Enables or disables background removal
 	bool getRemoveBackground(void) const // Returns the current background removal flag

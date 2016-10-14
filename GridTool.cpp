@@ -1,6 +1,6 @@
 /***********************************************************************
 GridTool - Calibration tool for RawKinectViewer.
-Copyright (c) 2010-2013 Oliver Kreylos
+Copyright (c) 2010-2015 Oliver Kreylos
 
 This file is part of the Kinect 3D Video Capture Project (Kinect).
 
@@ -35,6 +35,7 @@ Software Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA
 #include <Vrui/Vrui.h>
 #include <Vrui/DisplayState.h>
 #include <Vrui/OpenFile.h>
+#include <Kinect/Internal/Config.h>
 #include <Kinect/Camera.h>
 
 #include "RawKinectViewer.h"
@@ -88,10 +89,10 @@ void GridTool::initHoms(void)
 	lastDraggedPoints[2]=Point(0.0,double(gridSize[1]));
 	lastDraggedPoints[3]=Point(double(gridSize[0]),double(gridSize[1]));
 	Point imagePoints[4];
-	imagePoints[0]=Point(-double(application->depthFrameSize[0])+100.0,100.0);
-	imagePoints[1]=Point(-100.0,100.0);
-	imagePoints[2]=Point(-double(application->depthFrameSize[0])+100.0,double(application->depthFrameSize[1])-100.0);
-	imagePoints[3]=Point(-100.0,double(application->depthFrameSize[1])-100.0);
+	imagePoints[0]=Point(100.0-application->depthImageOffset,100.0);
+	imagePoints[1]=Point(double(application->depthFrameSize[0])-100.0-application->depthImageOffset,100.0);
+	imagePoints[2]=Point(100.0-application->depthImageOffset,double(application->depthFrameSize[1])-100.0);
+	imagePoints[3]=Point(double(application->depthFrameSize[0])-100.0-application->depthImageOffset,double(application->depthFrameSize[1])-100.0);
 	homs[0]=calcHomography(lastDraggedPoints,imagePoints);
 	imagePoints[0]=Point(100.0,100.0);
 	imagePoints[1]=Point(double(application->colorFrameSize[0])-100.0,100.0);
@@ -236,27 +237,22 @@ void GridTool::createTiePoint(void)
 	/* Calculate the grid's plane equation in depth image space: */
 	Geometry::PCACalculator<3> pca;
 	
-	const float* afdPtr=application->averageFrameDepth;
-	const float* affPtr=application->averageFrameForeground;
-	float foregroundCutoff=float(application->averageNumFrames)*0.5f;
-	const RawKinectViewer::PixelCorrection* dcPtr=application->depthCorrection;
 	for(unsigned int y=0;y<application->depthFrameSize[1];++y)
 		{
-		double dy=double(y)+0.5;
-		for(unsigned int x=0;x<application->depthFrameSize[0];++x,++afdPtr,++affPtr,++dcPtr)
+		for(unsigned int x=0;x<application->depthFrameSize[0];++x)
 			{
-			double dx=double(x)-double(application->depthFrameSize[0])+0.5;
-			if(*affPtr>=foregroundCutoff)
+			RawKinectViewer::CPoint p=application->getDepthImagePoint(x,y);
+			if(p[2]>=RawKinectViewer::CPoint::Scalar(0))
 				{
 				/* Determine the pixel's grid position: */
-				Point gp=homs[0].inverseTransform(Point(dx,dy));
+				Point gp=homs[0].inverseTransform(Point(p[0],p[1]));
 				if(gp[0]>=0.0&&gp[0]<double(gridSize[0])&&gp[1]>=0.0&&gp[1]<double(gridSize[1]))
 					if((int(gp[0])+int(gp[1]))%2==0)
 						{
 						double gx=gp[0]-Math::floor(gp[0]);
 						double gy=gp[1]-Math::floor(gp[1]);
 						if(gx>=0.2&&gx<0.8&&gy>=0.2&&gy<0.8)
-							pca.accumulatePoint(Geometry::PCACalculator<3>::Point(dx,dy,dcPtr->correct((*afdPtr)/(*affPtr))));
+							pca.accumulatePoint(Geometry::PCACalculator<3>::Point(p));
 						}
 				}
 			}
@@ -569,9 +565,9 @@ void GridTool::calibrate(void)
 	colorProj*=depthProj;
 	
 	/* Write the calibration file: */
-	std::string calibFileName=KINECT_CONFIG_DIR;
+	std::string calibFileName=KINECT_INTERNAL_CONFIG_CONFIGDIR;
 	calibFileName.push_back('/');
-	calibFileName.append(KINECT_CAMERA_INTRINSICPARAMETERSFILENAMEPREFIX);
+	calibFileName.append(KINECT_INTERNAL_CONFIG_CAMERA_INTRINSICPARAMETERSFILENAMEPREFIX);
 	calibFileName.push_back('-');
 	calibFileName.append(application->camera->getSerialNumber());
 	calibFileName.append(".dat");

@@ -1,6 +1,6 @@
 /***********************************************************************
 ColorFrameWriter - Class to write compressed color frames to a sink.
-Copyright (c) 2010-2013 Oliver Kreylos
+Copyright (c) 2010-2015 Oliver Kreylos
 
 This file is part of the Kinect 3D Video Capture Project (Kinect).
 
@@ -119,7 +119,7 @@ size_t ColorFrameWriter::writeFrame(const FrameBuffer& frame)
 	
 	/* Convert the new raw RGB frame to Y'CbCr 4:2:0: */
 	Video::FrameBuffer tempFrame;
-	tempFrame.start=const_cast<FrameSource::ColorComponent*>(static_cast<const FrameSource::ColorComponent*>(frame.getBuffer())); // It's OK
+	tempFrame.start=const_cast<FrameSource::ColorComponent*>(frame.getData<FrameSource::ColorComponent>()); // It's OK; Theora won't touch the frame, but has an API failure
 	imageExtractor->extractYpCbCr420(&tempFrame,theoraFrame.planes[0].data,theoraFrame.planes[0].stride,theoraFrame.planes[1].data,theoraFrame.planes[1].stride,theoraFrame.planes[2].data,theoraFrame.planes[2].stride);
 	
 	/* Feed the converted Y'CbCr 4:2:0 frame to the Theora encoder: */

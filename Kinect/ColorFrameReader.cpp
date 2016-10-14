@@ -1,6 +1,6 @@
 /***********************************************************************
 ColorFrameReader - Class to read compressed color frames from a source.
-Copyright (c) 2010-2013 Oliver Kreylos
+Copyright (c) 2010-2015 Oliver Kreylos
 
 This file is part of the Kinect 3D Video Capture Project (Kinect).
 
@@ -122,7 +122,7 @@ FrameBuffer ColorFrameReader::readNextFrame(void)
 		theoraDecoder.decodeFrame(theoraFrame);
 		
 		/* Convert the decompressed frame from Y'CbCr 4:2:0 to RGB: */
-		FrameSource::ColorPixel* resultRowPtr=static_cast<FrameSource::ColorPixel*>(result.getBuffer())+(size[1]-1)*size[0];
+		FrameSource::ColorPixel* resultRowPtr=result.getData<FrameSource::ColorPixel>()+(size[1]-1)*size[0];
 		ptrdiff_t resultStride=size[0];
 		const unsigned char* ypRowPtr=static_cast<const unsigned char*>(theoraFrame.planes[0].data)+theoraFrame.offsets[0];
 		const unsigned char* cbRowPtr=static_cast<const unsigned char*>(theoraFrame.planes[1].data)+theoraFrame.offsets[1];
@@ -182,7 +182,7 @@ FrameBuffer ColorFrameReader::readNextFrame(void)
 		source.skip<Misc::UInt8>(packetSize);
 		
 		/* Initialize the frame to 50% grey (why not?): */
-		FrameSource::ColorPixel* resultPtr=static_cast<FrameSource::ColorPixel*>(result.getBuffer());
+		FrameSource::ColorPixel* resultPtr=result.getData<FrameSource::ColorPixel>();
 		for(unsigned int y=0;y<size[1];++y)
 			for(unsigned int x=0;x<size[0];++x,++resultPtr)
 				resultPtr->rgb[0]=resultPtr->rgb[1]=resultPtr->rgb[2]=FrameSource::ColorComponent(128U);
@@ -192,7 +192,7 @@ FrameBuffer ColorFrameReader::readNextFrame(void)
 	else
 		{
 		/* Initialize the frame to 50% grey (why not?): */
-		FrameSource::ColorPixel* resultPtr=static_cast<FrameSource::ColorPixel*>(result.getBuffer());
+		FrameSource::ColorPixel* resultPtr=result.getData<FrameSource::ColorPixel>();
 		for(unsigned int y=0;y<size[1];++y)
 			for(unsigned int x=0;x<size[0];++x,++resultPtr)
 				resultPtr->rgb[0]=resultPtr->rgb[1]=resultPtr->rgb[2]=FrameSource::ColorComponent(128U);

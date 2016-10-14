@@ -1,7 +1,7 @@
 /***********************************************************************
 DepthCompressionTest - Utility to check the results of compressing a
 depth frame file.
-Copyright (c) 2010-2011 Oliver Kreylos
+Copyright (c) 2010-2015 Oliver Kreylos
 
 This file is part of the Kinect 3D Video Capture Project (Kinect).
 
@@ -62,7 +62,7 @@ int main(int argc,char* argv[])
 		/* Read the next uncompressed depth frame: */
 		Kinect::FrameBuffer frame0(size[0],size[1],size[1]*size[0]*sizeof(unsigned short));
 		frame0.timeStamp=depthFrameFile->read<double>();
-		unsigned short* frameBuffer0=static_cast<unsigned short*>(frame0.getBuffer());
+		unsigned short* frameBuffer0=frame0.getData<unsigned short>();
 		depthFrameFile->read(frameBuffer0,size[1]*size[0]);
 		
 		if(numCaptureFrames>0)
@@ -104,7 +104,7 @@ int main(int argc,char* argv[])
 		/* Compare the two frames: */
 		unsigned int numPixels=size[0]*size[1];
 		const unsigned short* f0Ptr=frameBuffer0;
-		const unsigned short* f1Ptr=static_cast<const unsigned short*>(frame1.getBuffer());
+		const unsigned short* f1Ptr=frame1.getData<unsigned short>();
 		while(numPixels>0)
 			{
 			if(*f0Ptr!=*f1Ptr)

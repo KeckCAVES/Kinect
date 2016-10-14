@@ -1,6 +1,6 @@
 /***********************************************************************
 DepthFrameWriter - Class to write compressed depth frames to a sink.
-Copyright (c) 2010-2013 Oliver Kreylos
+Copyright (c) 2010-2015 Oliver Kreylos
 
 This file is part of the Kinect 3D Video Capture Project (Kinect).
 
