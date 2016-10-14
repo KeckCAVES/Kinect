@@ -1,6 +1,6 @@
 /***********************************************************************
 PlaneTool - Calibration tool for RawKinectViewer.
-Copyright (c) 2012-2013 Oliver Kreylos
+Copyright (c) 2012-2015 Oliver Kreylos
 
 This file is part of the Kinect 3D Video Capture Project (Kinect).
 
@@ -26,6 +26,7 @@ Software Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA
 #include <Math/Math.h>
 #include <Geometry/Point.h>
 #include <Geometry/Vector.h>
+#include <Geometry/Box.h>
 #include <Geometry/ProjectiveTransformation.h>
 #include <Geometry/PCACalculator.h>
 #include <Geometry/OutputOperators.h>
@@ -87,21 +88,56 @@ void PlaneTool::buttonCallback(int buttonSlotIndex,Vrui::InputDevice::ButtonCall
 		}
 	else
 		{
-		/* Stop dragging and extract the plane equation best fitting the currently selected depth pixels: */
-		dragging=false;
+		/* Find the bounding box of the selected rectangle in distortion-corrected depth image space: */
+		Geometry::Box<double,2> rect=Geometry::Box<double,2>::empty;
+		Geometry::Box<double,2> imgRect=Geometry::Box<double,2>::empty;
+		if(application->intrinsicParameters.depthLensDistortion.isIdentity())
+			{
+			/* No lens distortion correction needed; build rectangle from corner points: */
+			rect.addPoint(Point(application->calcDepthImagePoint(p0).getComponents()));
+			rect.addPoint(Point(application->calcDepthImagePoint(p1).getComponents()));
+			}
+		else
+			{
+			/* Get the selected rectangle in image space: */
+			imgRect.addPoint(p0);
+			imgRect.addPoint(p1);
+			
+			/* Calculate the lens distortion-corrected extents of the selected rectangle: */
+			Point::Vector vx=imgRect.max-imgRect.min;
+			vx[1]=0.0;
+			for(int x=0;x<64;++x)
+				{
+				/* A point along the bottom edge: */
+				Point b0=imgRect.min+vx*(double(x)/64.0);
+				rect.addPoint(Point(application->calcDepthImagePoint(b0).getComponents()));
+				
+				/* A point along the top edge: */
+				Point b1=imgRect.max-vx*(double(x)/64.0);
+				rect.addPoint(Point(application->calcDepthImagePoint(b1).getComponents()));
+				}
+			Point::Vector vy=imgRect.max-imgRect.min;
+			vy[0]=0.0;
+			for(int y=0;y<64;++y)
+				{
+				/* A point along the left edge: */
+				Point b0=imgRect.min+vy*(double(y+1)/64.0);
+				rect.addPoint(Point(application->calcDepthImagePoint(b0).getComponents()));
+				
+				/* A point along the right edge: */
+				Point b1=imgRect.max-vy*(double(y+1)/64.0);
+				rect.addPoint(Point(application->calcDepthImagePoint(b1).getComponents()));
+				}
+			}
+		
+		/* Calculate the rectangle's pixel boundaries: */
 		int min[2],max[2];
 		for(int i=0;i<2;++i)
 			{
-			double minp=p0[i]<=p1[i]?p0[i]:p1[1];
-			min[i]=Math::floor(minp);
-			if(i==0)
-				min[i]+=application->depthFrameSize[0];
+			min[i]=Math::floor(rect.min[i]);
 			if(min[i]<0)
 				min[i]=0;
-			double maxp=p0[i]<=p1[i]?p1[i]:p0[1];
-			max[i]=Math::floor(maxp)+1;
-			if(i==0)
-				max[i]+=application->depthFrameSize[0];
+			max[i]=Math::floor(rect.max[i])+1;
 			if(max[i]>int(application->depthFrameSize[i]))
 				max[i]=int(application->depthFrameSize[i]);
 			}
@@ -114,18 +150,84 @@ void PlaneTool::buttonCallback(int buttonSlotIndex,Vrui::InputDevice::ButtonCall
 		const float* afdRow=application->averageFrameDepth+min[1]*application->depthFrameSize[0];
 		const float* affRow=application->averageFrameForeground+min[1]*application->depthFrameSize[0];
 		float foregroundCutoff=float(application->averageNumFrames)*0.5f;
-		const RawKinectViewer::PixelCorrection* dcRow=application->depthCorrection+min[1]*application->depthFrameSize[0];
-		for(int y=min[1];y<max[1];++y,afdRow+=application->depthFrameSize[0],affRow+=application->depthFrameSize[0],dcRow+=application->depthFrameSize[0])
+		if(application->intrinsicParameters.depthLensDistortion.isIdentity())
 			{
-			double dy=double(y)+0.5;
-			const float* afdPtr=afdRow+min[0];
-			const float* affPtr=affRow+min[0];
-			const RawKinectViewer::PixelCorrection* dcPtr=dcRow+min[0];
-			for(int x=min[0];x<max[0];++x,++afdPtr,++affPtr,++dcPtr)
+			/* No lens distortion correction required: */
+			if(application->depthCorrection!=0)
 				{
-				double dx=double(x)+0.5;
-				if(*affPtr>=foregroundCutoff)
-					pca.accumulatePoint(PPoint(dx,dy,dcPtr->correct((*afdPtr)/(*affPtr))));
+				const RawKinectViewer::PixelCorrection* dcRow=application->depthCorrection+min[1]*application->depthFrameSize[0];
+				for(int y=min[1];y<max[1];++y,afdRow+=application->depthFrameSize[0],affRow+=application->depthFrameSize[0],dcRow+=application->depthFrameSize[0])
+					{
+					double dy=double(y)+0.5;
+					const float* afdPtr=afdRow+min[0];
+					const float* affPtr=affRow+min[0];
+					const RawKinectViewer::PixelCorrection* dcPtr=dcRow+min[0];
+					for(int x=min[0];x<max[0];++x,++afdPtr,++affPtr,++dcPtr)
+						{
+						double dx=double(x)+0.5;
+						if(*affPtr>=foregroundCutoff)
+							pca.accumulatePoint(PPoint(dx,dy,dcPtr->correct((*afdPtr)/(*affPtr))));
+						}
+					}
+				}
+			else
+				{
+				for(int y=min[1];y<max[1];++y,afdRow+=application->depthFrameSize[0],affRow+=application->depthFrameSize[0])
+					{
+					double dy=double(y)+0.5;
+					const float* afdPtr=afdRow+min[0];
+					const float* affPtr=affRow+min[0];
+					for(int x=min[0];x<max[0];++x,++afdPtr,++affPtr)
+						{
+						double dx=double(x)+0.5;
+						if(*affPtr>=foregroundCutoff)
+							pca.accumulatePoint(PPoint(dx,dy,(*afdPtr)/(*affPtr)));
+						}
+					}
+				}
+			}
+		else
+			{
+			/* Account for lens distortion correction by checking every pixel against the selected rectangle: */
+			if(application->depthCorrection!=0)
+				{
+				const RawKinectViewer::PixelCorrection* dcRow=application->depthCorrection+min[1]*application->depthFrameSize[0];
+				for(int y=min[1];y<max[1];++y,afdRow+=application->depthFrameSize[0],affRow+=application->depthFrameSize[0],dcRow+=application->depthFrameSize[0])
+					{
+					double dy=double(y)+0.5;
+					const float* afdPtr=afdRow+min[0];
+					const float* affPtr=affRow+min[0];
+					const RawKinectViewer::PixelCorrection* dcPtr=dcRow+min[0];
+					for(int x=min[0];x<max[0];++x,++afdPtr,++affPtr,++dcPtr)
+						{
+						double dx=double(x)+0.5;
+						if(*affPtr>=foregroundCutoff)
+							{
+							/* Check if the pixel is inside the selected rectangle: */
+							if(imgRect.contains(Point(application->getDepthImagePoint(x,y).getComponents())))
+								pca.accumulatePoint(PPoint(dx,dy,dcPtr->correct((*afdPtr)/(*affPtr))));
+							}
+						}
+					}
+				}
+			else
+				{
+				for(int y=min[1];y<max[1];++y,afdRow+=application->depthFrameSize[0],affRow+=application->depthFrameSize[0])
+					{
+					double dy=double(y)+0.5;
+					const float* afdPtr=afdRow+min[0];
+					const float* affPtr=affRow+min[0];
+					for(int x=min[0];x<max[0];++x,++afdPtr,++affPtr)
+						{
+						double dx=double(x)+0.5;
+						if(*affPtr>=foregroundCutoff)
+							{
+							/* Check if the pixel is inside the selected rectangle: */
+							if(imgRect.contains(Point(application->getDepthImagePoint(x,y).getComponents())))
+								pca.accumulatePoint(PPoint(dx,dy,(*afdPtr)/(*affPtr)));
+							}
+						}
+					}
 				}
 			}
 		
@@ -146,6 +248,9 @@ void PlaneTool::buttonCallback(int buttonSlotIndex,Vrui::InputDevice::ButtonCall
 		
 		if(allFinite)
 			{
+			/* Print the approximation residual: */
+			std::cout<<"Approximation residual: "<<evs[2]<<std::endl;
+			
 			/* Print the plane equation in depth image space: */
 			std::cout<<"Depth-space plane equation: x * "<<normal<<" = "<<centroid*normal<<std::endl;
 			
@@ -163,11 +268,114 @@ void PlaneTool::buttonCallback(int buttonSlotIndex,Vrui::InputDevice::ButtonCall
 			PVector cNormal=(cP0-cCentroid)^(cP1-cCentroid);
 			cNormal.normalize();
 			
+			double rms2=0.0;
+			unsigned int numPoints=0;
+			{
+			const float* afdRow=application->averageFrameDepth+min[1]*application->depthFrameSize[0];
+			const float* affRow=application->averageFrameForeground+min[1]*application->depthFrameSize[0];
+			float foregroundCutoff=float(application->averageNumFrames)*0.5f;
+			if(application->intrinsicParameters.depthLensDistortion.isIdentity())
+				{
+				/* No lens distortion correction required: */
+				if(application->depthCorrection!=0)
+					{
+					const RawKinectViewer::PixelCorrection* dcRow=application->depthCorrection+min[1]*application->depthFrameSize[0];
+					for(int y=min[1];y<max[1];++y,afdRow+=application->depthFrameSize[0],affRow+=application->depthFrameSize[0],dcRow+=application->depthFrameSize[0])
+						{
+						double dy=double(y)+0.5;
+						const float* afdPtr=afdRow+min[0];
+						const float* affPtr=affRow+min[0];
+						const RawKinectViewer::PixelCorrection* dcPtr=dcRow+min[0];
+						for(int x=min[0];x<max[0];++x,++afdPtr,++affPtr,++dcPtr)
+							{
+							double dx=double(x)+0.5;
+							if(*affPtr>=foregroundCutoff)
+								{
+								/* Check if the pixel is inside the selected rectangle: */
+								if(imgRect.contains(Point(application->getDepthImagePoint(x,y).getComponents())))
+									{
+									rms2+=Math::sqr((ips.depthProjection.transform(PPoint(dx,dy,dcPtr->correct((*afdPtr)/(*affPtr))))-cCentroid)*cNormal);
+									++numPoints;
+									}
+								}
+							}
+						}
+					}
+				else
+					{
+					for(int y=min[1];y<max[1];++y,afdRow+=application->depthFrameSize[0],affRow+=application->depthFrameSize[0])
+						{
+						double dy=double(y)+0.5;
+						const float* afdPtr=afdRow+min[0];
+						const float* affPtr=affRow+min[0];
+						for(int x=min[0];x<max[0];++x,++afdPtr,++affPtr)
+							{
+							double dx=double(x)+0.5;
+							if(*affPtr>=foregroundCutoff)
+								{
+								/* Check if the pixel is inside the selected rectangle: */
+								if(imgRect.contains(Point(application->getDepthImagePoint(x,y).getComponents())))
+									{
+									rms2+=Math::sqr((ips.depthProjection.transform(PPoint(dx,dy,(*afdPtr)/(*affPtr)))-cCentroid)*cNormal);
+									++numPoints;
+									}
+								}
+							}
+						}
+					}
+				}
+			else
+				{
+				/* Account for lens distortion correction by checking every pixel against the selected rectangle: */
+				if(application->depthCorrection!=0)
+					{
+					const RawKinectViewer::PixelCorrection* dcRow=application->depthCorrection+min[1]*application->depthFrameSize[0];
+					for(int y=min[1];y<max[1];++y,afdRow+=application->depthFrameSize[0],affRow+=application->depthFrameSize[0],dcRow+=application->depthFrameSize[0])
+						{
+						double dy=double(y)+0.5;
+						const float* afdPtr=afdRow+min[0];
+						const float* affPtr=affRow+min[0];
+						const RawKinectViewer::PixelCorrection* dcPtr=dcRow+min[0];
+						for(int x=min[0];x<max[0];++x,++afdPtr,++affPtr,++dcPtr)
+							{
+							double dx=double(x)+0.5;
+							if(*affPtr>=foregroundCutoff)
+								{
+								rms2+=Math::sqr((ips.depthProjection.transform(PPoint(dx,dy,dcPtr->correct((*afdPtr)/(*affPtr))))-cCentroid)*cNormal);
+								++numPoints;
+								}
+							}
+						}
+					}
+				else
+					{
+					for(int y=min[1];y<max[1];++y,afdRow+=application->depthFrameSize[0],affRow+=application->depthFrameSize[0])
+						{
+						double dy=double(y)+0.5;
+						const float* afdPtr=afdRow+min[0];
+						const float* affPtr=affRow+min[0];
+						for(int x=min[0];x<max[0];++x,++afdPtr,++affPtr)
+							{
+							double dx=double(x)+0.5;
+							if(*affPtr>=foregroundCutoff)
+								{
+								rms2+=Math::sqr((ips.depthProjection.transform(PPoint(dx,dy,(*afdPtr)/(*affPtr)))-cCentroid)*cNormal);
+								++numPoints;
+								}
+							}
+						}
+					}
+				}
+			}
+			std::cout<<"Camera-space approximation RMS: "<<Math::sqrt(rms2/double(numPoints))<<std::endl;
+			
 			/* Print the plane equation in camera space: */
 			std::cout<<"Camera-space plane equation: x * "<<cNormal<<" = "<<cCentroid*cNormal<<std::endl;
 			}
 		else
 			Vrui::showErrorMessage("PlaneTool","Could not extract plane equation");
+		
+		dragging=false;
 		}
 	}
 

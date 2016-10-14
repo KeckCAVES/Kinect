@@ -1,7 +1,7 @@
 /***********************************************************************
 FrameSource - Base class for objects that create streams of depth and
 color frames.
-Copyright (c) 2011-2013 Oliver Kreylos
+Copyright (c) 2011-2016 Oliver Kreylos
 
 This file is part of the Kinect 3D Video Capture Project (Kinect).
 
@@ -239,11 +239,23 @@ FrameSource::~FrameSource(void)
 	{
 	}
 
+void FrameSource::setTimeBase(const FrameSource::Time& newTimeBase)
+	{
+	/* Just override the old time base: */
+	timeBase=newTimeBase;
+	}
+
 FrameSource::DepthCorrection* FrameSource::getDepthCorrectionParameters(void)
 	{
 	/* Create and return a dummy depth correction object: */
 	int numSegments[2]={1,1};
 	return new DepthCorrection(0,numSegments);
+	}
+
+FrameSource::DepthRange FrameSource::getDepthRange(void) const
+	{
+	/* Return the full range of theoretically valid depth values: */
+	return DepthRange(0,invalidDepth-1);
 	}
 
 }

@@ -2,7 +2,7 @@
 Projector - Class to project a depth frame captured from a Kinect camera
 back into calibrated 3D camera space, and texture-map it with a matching
 color frame.
-Copyright (c) 2010-2013 Oliver Kreylos
+Copyright (c) 2010-2015 Oliver Kreylos
 
 This file is part of the Kinect 3D Video Capture Project (Kinect).
 
@@ -25,8 +25,6 @@ Software Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA
 #include <Kinect/Projector.h>
 
 #include <Misc/FunctionCalls.h>
-#include <IO/File.h>
-#include <IO/OpenFile.h>
 #include <GL/gl.h>
 #include <GL/GLVertexArrayParts.h>
 #include <GL/GLContextData.h>
@@ -145,9 +143,12 @@ Projector::Projector(FrameSource& frameSource)
 	
 	/* Query the source's intrinsic and extrinsic parameters: */
 	FrameSource::IntrinsicParameters ips=frameSource.getIntrinsicParameters();
-	colorProjection=ips.colorProjection;
+	depthLensDistortion=ips.depthLensDistortion;
 	depthProjection=ips.depthProjection;
+	colorProjection=ips.colorProjection;
 	projectorTransform=frameSource.getExtrinsicParameters();
+	worldDepthProjection=projectorTransform;
+	worldDepthProjection*=depthProjection;
 	
 	GLObject::init();
 	}
@@ -224,19 +225,33 @@ void Projector::setDepthFrameSize(const unsigned int newDepthFrameSize[2])
 
 void Projector::setDepthCorrection(const FrameSource::DepthCorrection* dc)
 	{
-	/* Evaluate the depth correction parameters to create a per-pixel depth value offset buffer: */
-	depthCorrection=dc->getPixelCorrection(depthSize);
+	if(dc!=0)
+		{
+		/* Evaluate the depth correction parameters to create a per-pixel depth value offset buffer: */
+		depthCorrection=dc->getPixelCorrection(depthSize);
+		}
 	}
 
 void Projector::setIntrinsicParameters(const FrameSource::IntrinsicParameters& ips)
 	{
-	colorProjection=ips.colorProjection;
+	/* Get the depth camera's lens distortion correction parameters: */
+	depthLensDistortion=ips.depthLensDistortion;
+	
+	/* Set the color and depth projection matrices: */
 	depthProjection=ips.depthProjection;
+	colorProjection=ips.colorProjection;
+	
+	/* Calculate the combined world-space depth projection matrix: */
+	worldDepthProjection=projectorTransform;
+	worldDepthProjection*=depthProjection;
 	}
 
 void Projector::setExtrinsicParameters(const FrameSource::ExtrinsicParameters& eps)
 	{
 	projectorTransform=eps;
+	
+	worldDepthProjection=projectorTransform;
+	worldDepthProjection*=depthProjection;
 	}
 
 void Projector::setFilterDepthFrames(bool newFilterDepthFrames,bool newLowpassDepthFrames)
@@ -262,12 +277,46 @@ void Projector::processDepthFrame(const FrameBuffer& depthFrame,MeshBuffer& mesh
 		
 		/* Initialize the x and y positions of all vertices: */
 		MeshBuffer::Vertex* vPtr=meshBuffer.getVertices();
-		for(unsigned int y=0;y<depthSize[1];++y)
-			for(unsigned int x=0;x<depthSize[0];++x,++vPtr)
-				{
-				vPtr->position[0]=GLfloat(x)+0.5f;
-				vPtr->position[1]=GLfloat(y)+0.5f;
-				}
+		
+		/* Check if the depth camera requires lens distortion correction: */
+		if(!depthLensDistortion.isIdentity())
+			{
+			/* Extract the depth camera's 2D intrinsic parameters from the depth unprojection matrix: */
+			const PTransform::Matrix& dpMat=depthProjection.getMatrix();
+			double fxfy=-dpMat(2,3);
+			double fy=fxfy/dpMat(1,1);
+			double cy=-dpMat(1,3)*fy/fxfy;
+			double fx=fxfy/dpMat(0,0);
+			double sk=-dpMat(0,1)*fx*fy/fxfy;
+			double cx=(-dpMat(0,3)/fxfy+sk*cy/(fx*fy))*fx;
+			
+			/* Create a grid of undistorted pixel positions: */
+			for(unsigned int y=0;y<depthSize[1];++y)
+				for(unsigned int x=0;x<depthSize[0];++x,++vPtr)
+					{
+					/* Calculate the distorted pixel position in normalized camera space: */
+					LensDistortion::Point dp;
+					dp[1]=(double(y)+0.5-cy)/fy;
+					dp[0]=(double(x)+0.5-cx-sk*dp[1])/fx;
+					
+					/* Calculate the undistorted pixel position in normalized camera space: */
+					LensDistortion::Point up=depthLensDistortion.undistort(dp);
+					
+					/* Calculate the undistorted pixel position in pixel space: */
+					vPtr->position[0]=GLfloat(fx*up[0]+sk*up[1]+cx);
+					vPtr->position[1]=GLfloat(fy*up[1]+cy);
+					}
+			}
+		else
+			{
+			/* Create a regular grid of pixel positions: */
+			for(unsigned int y=0;y<depthSize[1];++y)
+				for(unsigned int x=0;x<depthSize[0];++x,++vPtr)
+					{
+					vPtr->position[0]=GLfloat(x)+0.5f;
+					vPtr->position[1]=GLfloat(y)+0.5f;
+					}
+			}
 		}
 	
 	if(filterDepthFrames)
@@ -281,36 +330,68 @@ void Projector::processDepthFrame(const FrameBuffer& depthFrame,MeshBuffer& mesh
 			{
 			/* Update the filtered frame buffer with the new raw frame and update the vertex array: */
 			GLfloat* fdfPtr=filteredDepthFrame;
-			const FrameSource::DepthPixel* dfPtr=static_cast<const FrameSource::DepthPixel*>(depthFrame.getBuffer());
+			const FrameSource::DepthPixel* dfPtr=depthFrame.getData<FrameSource::DepthPixel>();
 			const PixelCorrection* dcPtr=depthCorrection;
-			for(unsigned int y=0;y<depthSize[1];++y)
-				for(unsigned int x=0;x<depthSize[0];++x,++fdfPtr,++dfPtr,++dcPtr)
-					{
-					GLfloat newDepth=dcPtr->correct(*dfPtr);
-					
-					/* If the new depth value is dissimilar, replace the old; otherwise, filter the old: */
-					if(Math::abs(newDepth-*fdfPtr)>=3.0f)
+			if(dcPtr!=0)
+				{
+				for(unsigned int y=0;y<depthSize[1];++y)
+					for(unsigned int x=0;x<depthSize[0];++x,++fdfPtr,++dfPtr,++dcPtr)
 						{
-						/* Replace the old value: */
-						*fdfPtr=newDepth;
+						GLfloat newDepth=dcPtr->correct(*dfPtr);
+						
+						/* If the new depth value is dissimilar, replace the old; otherwise, filter the old: */
+						if(Math::abs(newDepth-*fdfPtr)>=3.0f)
+							{
+							/* Replace the old value: */
+							*fdfPtr=newDepth;
+							}
+						else
+							{
+							/* Merge the old and new values: */
+							*fdfPtr=(*fdfPtr*15.0f+newDepth*1.0f)/16.0f;
+							}
 						}
-					else
+				}
+			else
+				{
+				for(unsigned int y=0;y<depthSize[1];++y)
+					for(unsigned int x=0;x<depthSize[0];++x,++fdfPtr,++dfPtr,++dcPtr)
 						{
-						/* Merge the old and new values: */
-						*fdfPtr=(*fdfPtr*15.0f+newDepth*1.0f)/16.0f;
+						GLfloat newDepth=*dfPtr;
+						
+						/* If the new depth value is dissimilar, replace the old; otherwise, filter the old: */
+						if(Math::abs(newDepth-*fdfPtr)>=3.0f)
+							{
+							/* Replace the old value: */
+							*fdfPtr=newDepth;
+							}
+						else
+							{
+							/* Merge the old and new values: */
+							*fdfPtr=(*fdfPtr*15.0f+newDepth*1.0f)/16.0f;
+							}
 						}
-					}
+				}
 			}
 		else
 			{
 			/* Initialize the filtered frame buffer with the new raw frame and update the vertex array: */
 			filteredDepthFrame=new GLfloat[depthSize[1]*depthSize[0]];
 			GLfloat* fdfPtr=filteredDepthFrame;
-			const FrameSource::DepthPixel* dfPtr=static_cast<const FrameSource::DepthPixel*>(depthFrame.getBuffer());
+			const FrameSource::DepthPixel* dfPtr=depthFrame.getData<FrameSource::DepthPixel>();
 			const PixelCorrection* dcPtr=depthCorrection;
-			for(unsigned int y=0;y<depthSize[1];++y)
-				for(unsigned int x=0;x<depthSize[0];++x,++fdfPtr,++dfPtr,++dcPtr)
-					*fdfPtr=dcPtr->correct(*dfPtr);
+			if(dcPtr!=0)
+				{
+				for(unsigned int y=0;y<depthSize[1];++y)
+					for(unsigned int x=0;x<depthSize[0];++x,++fdfPtr,++dfPtr,++dcPtr)
+						*fdfPtr=dcPtr->correct(*dfPtr);
+				}
+			else
+				{
+				for(unsigned int y=0;y<depthSize[1];++y)
+					for(unsigned int x=0;x<depthSize[0];++x,++fdfPtr,++dfPtr,++dcPtr)
+						*fdfPtr=*dfPtr;
+				}
 			}
 		
 		if(lowpassDepthFrames)
@@ -327,7 +408,7 @@ void Projector::processDepthFrame(const FrameBuffer& depthFrame,MeshBuffer& mesh
 			int stride=depthSize[0];
 			for(unsigned int x=0;x<depthSize[0];++x)
 				{
-				// const FrameSource::DepthPixel* sCol=static_cast<const FrameSource::DepthPixel*>(depthFrame.getBuffer())+x;
+				// const FrameSource::DepthPixel* sCol=depthFrame.getData<FrameSource::DepthPixel>()+x;
 				GLfloat* sCol=filteredDepthFrame+x;
 				GLfloat* dCol=spatialFilterBuffer+x;
 				// unsigned int sum=0;
@@ -474,12 +555,21 @@ void Projector::processDepthFrame(const FrameBuffer& depthFrame,MeshBuffer& mesh
 			}
 		
 		/* Update the vertex array: */
-		const FrameSource::DepthPixel* dfPtr=static_cast<const FrameSource::DepthPixel*>(depthFrame.getBuffer());
+		const FrameSource::DepthPixel* dfPtr=depthFrame.getData<FrameSource::DepthPixel>();
 		MeshBuffer::Vertex* vPtr=meshBuffer.getVertices();
 		const PixelCorrection* dcPtr=depthCorrection;
-		for(unsigned int y=0;y<depthSize[1];++y)
-			for(unsigned int x=0;x<depthSize[0];++x,++dfPtr,++dcPtr,++vPtr)
-				vPtr->position[2]=dcPtr->correct(*dfPtr);
+		if(dcPtr!=0)
+			{
+			for(unsigned int y=0;y<depthSize[1];++y)
+				for(unsigned int x=0;x<depthSize[0];++x,++dfPtr,++dcPtr,++vPtr)
+					vPtr->position[2]=dcPtr->correct(*dfPtr);
+			}
+		else
+			{
+			for(unsigned int y=0;y<depthSize[1];++y)
+				for(unsigned int x=0;x<depthSize[0];++x,++dfPtr,++dcPtr,++vPtr)
+					vPtr->position[2]=*dfPtr;
+			}
 		}
 	
 	/* Store the number of generated vertices: */
@@ -494,7 +584,7 @@ void Projector::processDepthFrame(const FrameBuffer& depthFrame,MeshBuffer& mesh
 	FrameSource::DepthPixel tdr=triangleDepthRange; // Get the currently set triangle depth range
 	meshBuffer.numTriangles=0;
 	MeshBuffer::Index* tiPtr=meshBuffer.getTriangleIndices();
-	const FrameSource::DepthPixel* dfRowPtr=static_cast<const FrameSource::DepthPixel*>(depthFrame.getBuffer());
+	const FrameSource::DepthPixel* dfRowPtr=depthFrame.getData<FrameSource::DepthPixel>();
 	GLuint rowIndex=0;
 	for(unsigned int y=1;y<depthSize[1];++y,dfRowPtr+=depthSize[0],rowIndex+=depthSize[0])
 		{
@@ -612,8 +702,7 @@ void Projector::glRenderAction(GLContextData& contextData) const
 	
 	/* Load the transformation projecting depth images into 3D world space: */
 	glPushMatrix();
-	glMultMatrix(projectorTransform);
-	glMultMatrix(depthProjection);
+	glMultMatrix(worldDepthProjection);
 	
 	/* Get the currently locked mesh: */
 	const MeshBuffer& mesh=meshes.getLockedValue();
@@ -647,7 +736,7 @@ void Projector::glRenderAction(GLContextData& contextData) const
 		/* Upload the color frame into the texture object: */
 		unsigned int width=colorFrame.getSize(0);
 		unsigned int height=colorFrame.getSize(1);
-		const GLubyte* framePtr=static_cast<const GLubyte*>(colorFrame.getBuffer());
+		const GLubyte* framePtr=colorFrame.getData<GLubyte>();
 		
 		/* Set up the texture parameters: */
 		glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MIN_FILTER,GL_LINEAR);

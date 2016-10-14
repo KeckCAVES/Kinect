@@ -1,7 +1,7 @@
 /***********************************************************************
 Camera - Wrapper class to represent the color and depth camera interface
 aspects of the Kinect sensor.
-Copyright (c) 2010-2013 Oliver Kreylos
+Copyright (c) 2010-2016 Oliver Kreylos
 
 This file is part of the Kinect 3D Video Capture Project (Kinect).
 
@@ -29,20 +29,26 @@ Software Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA
 #include <string>
 #include <iostream>
 #include <Misc/ThrowStdErr.h>
+#include <Misc/MessageLogger.h>
 #include <Misc/FunctionCalls.h>
 #include <Misc/FileTests.h>
-#include <USB/Context.h>
+#include <Misc/StandardValueCoders.h>
+#include <Misc/ConfigurationFile.h>
 #include <USB/DeviceList.h>
 #include <IO/File.h>
-#include <IO/OpenFile.h>
+#include <IO/Directory.h>
 #include <IO/FixedMemoryFile.h>
-#include <Geometry/OrthogonalTransformation.h>
-#include <Geometry/ProjectiveTransformation.h>
-#include <Geometry/GeometryValueCoders.h>
+#include <Math/Math.h>
+#include <GLMotif/StyleSheet.h>
+#include <GLMotif/Margin.h>
+#include <GLMotif/RowColumn.h>
+#include <GLMotif/Button.h>
+#include <GLMotif/ToggleButton.h>
+#include <GLMotif/TextFieldSlider.h>
+#include <Kinect/Internal/Config.h>
 #include <Kinect/FrameBuffer.h>
 
 #define KINECT_CAMERA_DUMP_INIT 0
-#define KINECT_CAMERA_STREAMER_USE_CAMERA_TIMESTAMP 0
 
 namespace Kinect {
 
@@ -159,8 +165,8 @@ void Camera::CalibrationParameters::write(IO::File& file) const
 Methods of class Camera::StreamingState:
 ***************************************/
 
-Camera::StreamingState::StreamingState(libusb_device_handle* handle,unsigned int endpoint,Misc::Timer& sFrameTimer,double& sFrameTimerOffset,int sPacketFlagBase,int sPacketSize,const unsigned int sFrameSize[2],size_t sRawFrameSize,Camera::StreamingCallback* sStreamingCallback)
-	:frameTimer(sFrameTimer),frameTimerOffset(sFrameTimerOffset),
+Camera::StreamingState::StreamingState(libusb_device_handle* handle,unsigned int endpoint,Camera* sCamera,int sPacketFlagBase,int sPacketSize,const unsigned int sFrameSize[2],size_t sRawFrameSize,Camera::StreamingCallback* sStreamingCallback)
+	:camera(sCamera),
 	 packetFlagBase(sPacketFlagBase),
 	 packetSize(sPacketSize),numPackets(16),numTransfers(32),
 	 transferBuffers(0),transfers(0),numActiveTransfers(0),
@@ -189,16 +195,17 @@ Camera::StreamingState::StreamingState(libusb_device_handle* handle,unsigned int
 			if(libusb_submit_transfer(transfers[i])==0)
 				++numActiveTransfers;
 			else
-				std::cerr<<"Error submitting transfer "<<i<<std::endl;
+				Misc::formattedConsoleError("Kinect::Camera: Error submitting USB transfer %d",i);
 			}
 		else
-			std::cerr<<"Error allocating transfer "<<i<<std::endl;
+			Misc::formattedConsoleError("Kinect::Camera: Error allocating USB transfer %d",i);
 		}
 	}
 
 Camera::StreamingState::~StreamingState(void)
 	{
 	/* Cancel all transfers: */
+	cancelDecoding=true;
 	for(int i=0;i<numTransfers;++i)
 		libusb_cancel_transfer(transfers[i]);
 	
@@ -208,7 +215,6 @@ Camera::StreamingState::~StreamingState(void)
 	#else
 	{
 	Threads::MutexCond::Lock frameReadyLock(frameReadyCond);
-	cancelDecoding=true;
 	frameReadyCond.signal();
 	}
 	#endif
@@ -264,20 +270,21 @@ void Camera::StreamingState::transferCallback(libusb_transfer* transfer)
 				/* Check if this is the beginning of a new frame: */
 				if(packetType==0x01)
 					{
+					/* Sample the timer: */
+					Time now;
+					
 					/* Activate the next double buffer half: */
 					thisPtr->activeBuffer=1-thisPtr->activeBuffer;
 					thisPtr->writePtr=thisPtr->rawFrameBuffer+thisPtr->rawFrameSize*thisPtr->activeBuffer;
 					thisPtr->bufferSpace=thisPtr->rawFrameSize;
 					
+					/*************************************************************
+					This is where we would synchronize clocks to account for
+					random OS delays, subtract expected hardware latency, etc. pp.
+					*************************************************************/
+					
 					/* Time-stamp the new frame: */
-					#if KINECT_CAMERA_STREAMER_USE_CAMERA_TIMESTAMP
-					unsigned int timeStamp=(unsigned int)packetPtr[11];
-					for(int j=10;j>=8;--j)
-						timeStamp=(timeStamp<<8)|(unsigned int)packetPtr[j];
-					thisPtr->activeFrameTimeStamp=double(timeStamp)/2000000.0;
-					#else
-					thisPtr->activeFrameTimeStamp=thisPtr->frameTimer.peekTime()+thisPtr->frameTimerOffset;
-					#endif
+					thisPtr->activeFrameTimeStamp=double(now-thisPtr->camera->timeBase);
 					}
 				
 				/* Check for a data packet: */
@@ -313,8 +320,16 @@ void Camera::StreamingState::transferCallback(libusb_transfer* transfer)
 			packetPtr+=thisPtr->packetSize;
 			}
 		
-		/* Resubmit the transfer: */
-		libusb_submit_transfer(transfer);
+		/* Resubmit the transfer if not shutting down: */
+		if(thisPtr->cancelDecoding||libusb_submit_transfer(transfer)!=0)
+			{
+			/* Mark this transfer as inactive: */
+			--thisPtr->numActiveTransfers;
+			
+			/* Check if submitting the transfer failed due to an error: */
+			if(!thisPtr->cancelDecoding)
+				Misc::consoleError("Kinect::Camera: Error submitting USB transfer; camera may stop working soon");
+			}
 		}
 	else if(transfer->status==LIBUSB_TRANSFER_CANCELLED)
 		{
@@ -468,7 +483,7 @@ void* Camera::colorDecodingThreadMethod(void)
 		/* Decode the raw color buffer (which is in Bayer GRBG pattern): */
 		int stride=width;
 		const ColorComponent* rRowPtr=framePtr;
-		ColorComponent* cRowPtr=static_cast<ColorComponent*>(decodedFrame.getBuffer());
+		ColorComponent* cRowPtr=decodedFrame.getData<ColorComponent>();
 		cRowPtr+=(height-1)*stride*3; // Flip the color image vertically
 		
 		/* Convert the first row: */
@@ -618,48 +633,6 @@ void* Camera::colorDecodingThreadMethod(void)
 	return 0;
 	}
 
-namespace {
-
-/****************
-Helper functions:
-****************/
-
-void openBackgroundFrame(int width,int height,FrameSource::DepthPixel* backgroundFrame)
-	{
-	/* Open the background frame: */
-	FrameSource::DepthPixel* tempFrame=new FrameSource::DepthPixel[height*width];
-	
-	/* Open the background frame in the y direction: */
-	for(int x=0;x<width;++x)
-		{
-		FrameSource::DepthPixel* bgPtr=backgroundFrame+x;
-		FrameSource::DepthPixel* tPtr=tempFrame+x;
-		*tPtr=bgPtr[0]<=bgPtr[width]?bgPtr[0]:bgPtr[width];
-		bgPtr+=width;
-		tPtr+=width;
-		for(int y=1;y<height-1;++y,bgPtr+=width,tPtr+=width)
-			*tPtr=bgPtr[-width]<=bgPtr[0]?(bgPtr[-width]<=bgPtr[width]?bgPtr[-width]:bgPtr[width]):(bgPtr[0]<=bgPtr[width]?bgPtr[0]:bgPtr[width]);
-		*tPtr=bgPtr[-width]<=bgPtr[0]?bgPtr[-width]:bgPtr[0];
-		}
-	
-	/* Open the temporary frame in the x direction: */
-	for(int y=0;y<height;++y)
-		{
-		FrameSource::DepthPixel* tPtr=tempFrame+y*width;
-		FrameSource::DepthPixel* bgPtr=backgroundFrame+y*width;
-		*bgPtr=tPtr[0]<=tPtr[1]?tPtr[0]:tPtr[1];
-		++bgPtr;
-		++tPtr;
-		for(int x=1;x<width-1;++x,++bgPtr,++tPtr)
-			*bgPtr=tPtr[-1]<=tPtr[0]?(tPtr[-1]<=tPtr[1]?tPtr[-1]:tPtr[1]):(tPtr[0]<=tPtr[1]?tPtr[0]:tPtr[1]);
-		*bgPtr=tPtr[-1]<=tPtr[0]?tPtr[-1]:tPtr[0];
-		}
-	
-	delete[] tempFrame;
-	}
-
-}
-
 void* Camera::depthDecodingThreadMethod(void)
 	{
 	Threads::Thread::setCancelState(Threads::Thread::CANCEL_ENABLE);
@@ -691,17 +664,16 @@ void* Camera::depthDecodingThreadMethod(void)
 		
 		/* Decode the raw depth buffer: */
 		Byte* sPtr=framePtr;
-		DepthPixel* dRowPtr=static_cast<DepthPixel*>(decodedFrame.getBuffer());
+		DepthPixel* dRowPtr=decodedFrame.getData<DepthPixel>();
 		dRowPtr+=width*(height-1);
 		
 		/* Process rows: */
-		DepthPixel* bfPtr=backgroundFrame;
 		for(int y=0;y<height;++y,dRowPtr-=width) // Flip the depth image vertically
 			{
 			DepthPixel* dPtr=dRowPtr;
 			
 			/* Process pixels in groups of eight: */
-			for(int x=0;x<width;x+=8,sPtr+=11,dPtr+=8,bfPtr+=8)
+			for(int x=0;x<width;x+=8,sPtr+=11,dPtr+=8)
 				{
 				/* Convert a run of 11 8-bit bytes into 8 11-bit pixels: */
 				dPtr[0]=(DepthPixel(sPtr[0])<<3)|(DepthPixel(sPtr[1])>>5);
@@ -712,44 +684,11 @@ void* Camera::depthDecodingThreadMethod(void)
 				dPtr[5]=((DepthPixel(sPtr[6])&0x01U)<<10)|(DepthPixel(sPtr[7])<<2)|(DepthPixel(sPtr[8])>>6);
 				dPtr[6]=((DepthPixel(sPtr[8])&0x3fU)<<5)|(DepthPixel(sPtr[9])>>3);
 				dPtr[7]=((DepthPixel(sPtr[9])&0x07U)<<8)|DepthPixel(sPtr[10]);
-				
-				/* Check if we're in the middle of capturing a background frame: */
-				if(numBackgroundFrames>0)
-					{
-					/* Update the pixels' background depth values: */
-					for(int i=0;i<8;++i)
-						if(bfPtr[i]>dPtr[i])
-							bfPtr[i]=dPtr[i];
-					}
-				
-				if(removeBackground)
-					{
-					/* Remove background pixels: */
-					for(int i=0;i<8;++i)
-						if(dPtr[i]+backgroundRemovalFuzz>=bfPtr[i])
-							dPtr[i]=invalidDepth; // Mark the pixel as really far away
-					}
 				}
 			}
 		
-		if(numBackgroundFrames>0)
-			{
-			--numBackgroundFrames;
-			
-			/* Check if this was the last captured background frame, and whether to call a callback function: */
-			if(numBackgroundFrames==0&&backgroundCaptureCallback!=0)
-				{
-				/* Open the background frame: */
-				openBackgroundFrame(width,height,backgroundFrame);
-				
-				/* Call the callback: */
-				(*backgroundCaptureCallback)(*this);
-				
-				/* Remove the callback object: */
-				delete backgroundCaptureCallback;
-				backgroundCaptureCallback=0;
-				}
-			}
+		/* Handle background capture and removal: */
+		processDepthFrameBackground(decodedFrame);
 		
 		/* Pass the decoded depth buffer to the streaming callback function: */
 		(*streamers[DEPTH]->streamingCallback)(decodedFrame);
@@ -818,11 +757,10 @@ void* Camera::compressedDepthDecodingThreadMethod(void)
 		/* Decode the raw depth buffer: */
 		Byte* sPtr=framePtr;
 		bool sFull=true;
-		DepthPixel* dRowPtr=static_cast<DepthPixel*>(decodedFrame.getBuffer());
+		DepthPixel* dRowPtr=decodedFrame.getData<DepthPixel>();
 		dRowPtr+=width*(height-1);
 		
 		/* Process rows: */
-		DepthPixel* bfPtr=backgroundFrame;
 		for(int y=0;y<height;++y,dRowPtr-=width) // Flip the depth image vertically
 			{
 			DepthPixel* dPtr=dRowPtr;
@@ -882,93 +820,8 @@ void* Camera::compressedDepthDecodingThreadMethod(void)
 				}
 			}
 		
-		#if 0
-		
-		/* Open the depth frame to fill holes: */
-		FrameBuffer openedFrame(width,height,width*height*sizeof(DepthPixel));
-		openedFrame.timeStamp=frameTimeStamp;
-		ptrdiff_t offsets[9];
-		for(int y=0;y<3;++y)
-			for(int x=0;x<3;++x)
-				offsets[y*3+x]=(y-1)*width+(x-1);
-		DepthPixel* sRowPtr=static_cast<DepthPixel*>(decodedFrame.getBuffer())+width;
-		dRowPtr=static_cast<DepthPixel*>(openedFrame.getBuffer())+width;
-		for(int y=1;y<height-1;++y,sRowPtr+=width,dRowPtr+=width)
-			{
-			DepthPixel* sPtr=sRowPtr+1;
-			DepthPixel* dPtr=dRowPtr+1;
-			for(int x=1;x<width-1;++x,++sPtr,++dPtr)
-				{
-				if(*sPtr!=invalidDepth)
-					*dPtr=*sPtr;
-				else
-					{
-					/* Gather depth values from the surrounding pixels: */
-					unsigned int sum=0;
-					unsigned int num=0;
-					for(int i=0;i<9;++i)
-						if(sPtr[offsets[i]]!=invalidDepth)
-							{
-							sum+=sPtr[offsets[i]];
-							++num;
-							}
-					
-					/* Calculate the average depth value: */
-					if(num!=0)
-						*dPtr=(sum+(num/2))/num;
-					else
-						*dPtr=invalidDepth;
-					}
-				}
-			}
-		decodedFrame=openedFrame;
-		
-		#endif
-		
-		/* Check if we're in the middle of capturing a background frame: */
-		if(numBackgroundFrames>0)
-			{
-			/* Update the pixels' background depth values: */
-			DepthPixel* dPtr=static_cast<DepthPixel*>(decodedFrame.getBuffer());
-			bfPtr=backgroundFrame;
-			for(int i=width*height;i>0;--i,++dPtr,++bfPtr)
-				{
-				if(*bfPtr>*dPtr)
-					*bfPtr=*dPtr;
-				}
-			}
-		
-		/* Check if we're removing background: */
-		if(removeBackground)
-			{
-			/* Remove background pixels: */
-			DepthPixel* dPtr=static_cast<DepthPixel*>(decodedFrame.getBuffer());
-			bfPtr=backgroundFrame;
-			for(int i=width*height;i>0;--i,++dPtr,++bfPtr)
-				{
-				if(*dPtr+backgroundRemovalFuzz>=*bfPtr)
-					*dPtr=invalidDepth; // Mark the pixel as invalid
-				}
-			}
-		
-		if(numBackgroundFrames>0)
-			{
-			--numBackgroundFrames;
-			
-			/* Check if this was the last captured background frame, and whether to call a callback function: */
-			if(numBackgroundFrames==0&&backgroundCaptureCallback!=0)
-				{
-				/* Open the background frame: */
-				openBackgroundFrame(width,height,backgroundFrame);
-				
-				/* Call the callback: */
-				(*backgroundCaptureCallback)(*this);
-				
-				/* Remove the callback object: */
-				delete backgroundCaptureCallback;
-				backgroundCaptureCallback=0;
-				}
-			}
+		/* Handle background capture and removal: */
+		processDepthFrameBackground(decodedFrame);
 		
 		/* Pass the decoded depth buffer to the streaming callback function: */
 		(*streamers[DEPTH]->streamingCallback)(decodedFrame);
@@ -983,7 +836,7 @@ namespace {
 Helper functions:
 ****************/
 
-std::string getKinectSerialNumber(USB::Context& usbContext,libusb_device* device,USB::DeviceList* deviceList)
+std::string getKinectSerialNumber(libusb_device* device,USB::DeviceList* deviceList)
 	{
 	/* Determine the Kinect's model number: */
 	USB::Device camera(device);
@@ -1002,7 +855,7 @@ std::string getKinectSerialNumber(USB::Context& usbContext,libusb_device* device
 		/* Enumerate all USB devices to find the audio sub-device sharing the same internal hub as the camera sub-device: */
 		USB::DeviceList* myDeviceList=0;
 		if(deviceList==0)
-			deviceList=myDeviceList=new USB::DeviceList(usbContext);
+			deviceList=myDeviceList=new USB::DeviceList;
 		
 		/* Get the Kinect camera device's parent device, i.e., the Kinect's internal USB hub: */
 		libusb_device* hub=deviceList->getParent(device);
@@ -1032,13 +885,13 @@ std::string getKinectSerialNumber(USB::Context& usbContext,libusb_device* device
 
 }
 
-void Camera::initialize(USB::Context& usbContext,USB::DeviceList* deviceList)
+void Camera::initialize(USB::DeviceList* deviceList)
 	{
 	/* Determine the Kinect's model number: */
 	libusb_device_descriptor dd=device.getDeviceDescriptor();
 	
 	/* Get the Kinect's serial number: */
-	serialNumber=getKinectSerialNumber(usbContext,device.getDevice(),deviceList);
+	serialNumber=getKinectSerialNumber(device.getDevice(),deviceList);
 	
 	/* Initialize calibration parameter reply sizes (fourth reply's size depends on Kinect model): */
 	calibrationParameterReplySizes[0]=126;
@@ -1048,6 +901,7 @@ void Camera::initialize(USB::Context& usbContext,USB::DeviceList* deviceList)
 	
 	/* Check whether the camera requires alternative interface settings: */
 	needAltInterface=dd.idProduct==0x02bfU; // Behavior change in Kinect-for-Windows
+	hasNearMode=dd.idProduct==0x02bfU; // New feature in Kinect-for-Windows
 	
 	/* Initialize the camera and streamer states: */
 	frameSizes[0]=FS_640_480;
@@ -1059,20 +913,22 @@ void Camera::initialize(USB::Context& usbContext,USB::DeviceList* deviceList)
 	streamers[1]=0;
 	}
 
-Camera::Camera(USB::Context& usbContext,libusb_device* sDevice)
-	:device(sDevice),
-	 messageSequenceNumber(0x2000U),
-	 frameTimerOffset(0.0),
-	 compressDepthFrames(true),smoothDepthFrames(true),
-	 numBackgroundFrames(0),backgroundFrame(0),
-	 backgroundCaptureCallback(0),
-	 removeBackground(false),backgroundRemovalFuzz(5)
-	 #if KINECT_CAMERA_DUMP_HEADERS
-	 ,headerFile(0)
-	 #endif
+void Camera::nearModeToggleCallback(GLMotif::ToggleButton::ValueChangedCallbackData* cbData)
 	{
-	/* Initialize the camera: */
-	initialize(usbContext,0);
+	/* Set near mode flag: */
+	setNearMode(cbData->set);
+	}
+
+void Camera::irIntensitySliderCallback(GLMotif::TextFieldSlider::ValueChangedCallbackData* cbData)
+	{
+	/* Set IR intensity value: */
+	setIrIntensity(int(Math::floor(cbData->value+0.5)));
+	}
+
+void Camera::colorSharpeningSliderCallback(GLMotif::TextFieldSlider::ValueChangedCallbackData* cbData)
+	{
+	/* Set color sharpening value: */
+	setSharpening(int(Math::floor(cbData->value+0.5)));
 	}
 
 namespace {
@@ -1094,40 +950,56 @@ class KinectCameraMatcher // Class to match a Kinect camera device
 
 }
 
-Camera::Camera(USB::Context& usbContext,size_t index)
-	:messageSequenceNumber(0x2000U),
-	 frameTimerOffset(0.0),
-	 compressDepthFrames(true),smoothDepthFrames(true),
-	 numBackgroundFrames(0),backgroundFrame(0),
-	 backgroundCaptureCallback(0),
-	 removeBackground(false),backgroundRemovalFuzz(5)
+size_t Camera::getNumDevices(void)
+	{
+	/* Get the list of devices on all local USB buses: */
+	USB::DeviceList deviceList;
+	
+	/* Return the number of Kinect cameras: */
+	return deviceList.getNumDevices(KinectCameraMatcher());
+	}
+
+Camera::Camera(libusb_device* sDevice)
+	:device(sDevice),
+	 needAltInterface(false),hasNearMode(false),
+	 messageSequenceNumber(0x2000U),
+	 compressDepthFrames(true),smoothDepthFrames(true),irIntensity(30U),nearMode(false),sharpening(0)
+	 #if KINECT_CAMERA_DUMP_HEADERS
+	 ,headerFile(0)
+	 #endif
+	{
+	/* Initialize the camera: */
+	initialize(0);
+	}
+
+Camera::Camera(size_t index)
+	:needAltInterface(false),hasNearMode(false),
+	 messageSequenceNumber(0x2000U),
+	 compressDepthFrames(true),smoothDepthFrames(true),irIntensity(30U),nearMode(false),sharpening(0)
 	 #if KINECT_CAMERA_DUMP_HEADERS
 	 ,headerFile(0)
 	 #endif
 	{
 	/* Get the index-th Kinect camera device from the context: */
-	USB::DeviceList deviceList(usbContext);
+	USB::DeviceList deviceList;
 	device=deviceList.getDevice(KinectCameraMatcher(),index);
 	if(!device.isValid())
 		Misc::throwStdErr("Kinect::Camera::Camera: Less than %d Kinect camera devices detected",int(index));
 	
 	/* Initialize the camera: */
-	initialize(usbContext,&deviceList);
+	initialize(&deviceList);
 	}
 
-Camera::Camera(USB::Context& usbContext,const char* serialNumber)
-	:messageSequenceNumber(0x2000U),
-	 frameTimerOffset(0.0),
-	 compressDepthFrames(true),smoothDepthFrames(true),
-	 numBackgroundFrames(0),backgroundFrame(0),
-	 backgroundCaptureCallback(0),
-	 removeBackground(false),backgroundRemovalFuzz(5)
+Camera::Camera(const char* serialNumber)
+	:needAltInterface(false),hasNearMode(false),
+	 messageSequenceNumber(0x2000U),
+	 compressDepthFrames(true),smoothDepthFrames(true),irIntensity(30U),nearMode(false),sharpening(0)
 	 #if KINECT_CAMERA_DUMP_HEADERS
 	 ,headerFile(0)
 	 #endif
 	{
 	/* Enumerate all Kinect cameras on the USB bus: */
-	USB::DeviceList deviceList(usbContext);
+	USB::DeviceList deviceList;
 	
 	/* Search for all Kinect cameras: */
 	libusb_device* dev=0;
@@ -1139,7 +1011,7 @@ Camera::Camera(USB::Context& usbContext,const char* serialNumber)
 		if(kcm(deviceList.getDeviceDescriptor(i,dd)))
 			{
 			/* Get the device's serial number: */
-			std::string devSerialNumber=getKinectSerialNumber(usbContext,deviceList.getDevice(i),&deviceList);
+			std::string devSerialNumber=getKinectSerialNumber(deviceList.getDevice(i),&deviceList);
 			if(devSerialNumber==serialNumber)
 				dev=deviceList.getDevice(i);
 			}
@@ -1149,41 +1021,46 @@ Camera::Camera(USB::Context& usbContext,const char* serialNumber)
 	
 	/* Initialize the camera: */
 	device=dev;
-	initialize(usbContext,&deviceList);
+	initialize(&deviceList);
 	}
 
 Camera::~Camera(void)
 	{
-	delete streamers[0];
-	delete streamers[1];
-	delete[] backgroundFrame;
-	delete backgroundCaptureCallback;
-	
-	/* Release the interface and re-attach the kernel driver: */
-	device.releaseInterface(0);
-	// device.setConfiguration(1); // This seems to confuse the device
-	// device.reset(); // This seems to confuse the device
+	/* Stop streaming if necessary: */
+	if(streamers[0]!=0||streamers[1]!=0)
+		stopStreaming();
 	}
 
 FrameSource::DepthCorrection* Camera::getDepthCorrectionParameters(void)
 	{
 	/* Assemble the name of the depth correction parameters file: */
-	std::string depthCorrectionFileName=KINECT_CONFIG_DIR;
+	std::string depthCorrectionFileName=KINECT_INTERNAL_CONFIG_CONFIGDIR;
 	depthCorrectionFileName.push_back('/');
-	depthCorrectionFileName.append(KINECT_CAMERA_DEPTHCORRECTIONFILENAMEPREFIX);
+	depthCorrectionFileName.append(KINECT_INTERNAL_CONFIG_CAMERA_DEPTHCORRECTIONFILENAMEPREFIX);
 	depthCorrectionFileName.push_back('-');
 	depthCorrectionFileName.append(serialNumber);
 	depthCorrectionFileName.append(".dat");
 	
 	/* Check if a file of the given name exists and is readable: */
-	if(Misc::getPathType(depthCorrectionFileName.c_str())==Misc::PATHTYPE_FILE)
+	if(IO::Directory::getCurrent()->getPathType(depthCorrectionFileName.c_str())==Misc::PATHTYPE_FILE)
 		{
-		/* Open the depth correction file: */
-		IO::FilePtr depthCorrectionFile(IO::openFile(depthCorrectionFileName.c_str()));
-		depthCorrectionFile->setEndianness(Misc::LittleEndian);
-		
-		/* Read and return a depth correction object: */
-		return new DepthCorrection(*depthCorrectionFile);
+		try
+			{
+			/* Open the depth correction file: */
+			IO::FilePtr depthCorrectionFile(IO::Directory::getCurrent()->openFile(depthCorrectionFileName.c_str()));
+			depthCorrectionFile->setEndianness(Misc::LittleEndian);
+			
+			/* Read and return a depth correction object: */
+			return new DepthCorrection(*depthCorrectionFile);
+			}
+		catch(std::runtime_error err)
+			{
+			/* Log an error: */
+			Misc::formattedConsoleError("Kinect::Camera::getDepthCorrectionParameters: Could not load depth correction file %s due to exception %s",depthCorrectionFileName.c_str(),err.what());
+			
+			/* Return a default depth correction object: */
+			return FrameSource::getDepthCorrectionParameters();
+			}
 		}
 	else
 		{
@@ -1195,9 +1072,9 @@ FrameSource::DepthCorrection* Camera::getDepthCorrectionParameters(void)
 FrameSource::IntrinsicParameters Camera::getIntrinsicParameters(void)
 	{
 	/* Assemble the name of the intrinsic parameter file: */
-	std::string intrinsicParameterFileName=KINECT_CONFIG_DIR;
+	std::string intrinsicParameterFileName=KINECT_INTERNAL_CONFIG_CONFIGDIR;
 	intrinsicParameterFileName.push_back('/');
-	intrinsicParameterFileName.append(KINECT_CAMERA_INTRINSICPARAMETERSFILENAMEPREFIX);
+	intrinsicParameterFileName.append(KINECT_INTERNAL_CONFIG_CAMERA_INTRINSICPARAMETERSFILENAMEPREFIX);
 	intrinsicParameterFileName.push_back('-');
 	intrinsicParameterFileName.append(serialNumber);
 	if(frameSizes[COLOR]==FS_1280_1024)
@@ -1208,7 +1085,7 @@ FrameSource::IntrinsicParameters Camera::getIntrinsicParameters(void)
 	try
 		{
 		/* Open the parameter file: */
-		IO::FilePtr parameterFile(IO::openFile(intrinsicParameterFileName.c_str()));
+		IO::FilePtr parameterFile(IO::Directory::getCurrent()->openFile(intrinsicParameterFileName.c_str()));
 		parameterFile->setEndianness(Misc::LittleEndian);
 		
 		/* Read the parameter file: */
@@ -1219,8 +1096,11 @@ FrameSource::IntrinsicParameters Camera::getIntrinsicParameters(void)
 		parameterFile->read(colorMatrix,4*4);
 		result.colorProjection=IntrinsicParameters::PTransform::fromRowMajor(colorMatrix);
 		}
-	catch(std::runtime_error)
+	catch(std::runtime_error err)
 		{
+		/* Log an error: */
+		Misc::formattedConsoleError("Kinect::Camera::getIntrinsicParameters: Could not load intrinsic parameter file %s due to exception %s",intrinsicParameterFileName.c_str(),err.what());
+		
 		/* Extract intrinsic parameters from the Kinect's factory calibration data: */
 		CalibrationParameters calib;
 		getCalibrationParameters(calib);
@@ -1250,38 +1130,15 @@ FrameSource::IntrinsicParameters Camera::getIntrinsicParameters(void)
 	return result;
 	}
 
-FrameSource::ExtrinsicParameters Camera::getExtrinsicParameters(void)
-	{
-	/* Assemble the name of the extrinsic parameter file: */
-	std::string extrinsicParameterFileName=KINECT_CONFIG_DIR;
-	extrinsicParameterFileName.push_back('/');
-	extrinsicParameterFileName.append(KINECT_CAMERA_EXTRINSICPARAMETERSFILENAMEPREFIX);
-	extrinsicParameterFileName.push_back('-');
-	extrinsicParameterFileName.append(serialNumber);
-	extrinsicParameterFileName.append(".txt");
-	
-	try
-		{
-		/* Open the parameter file: */
-		IO::FilePtr parameterFile(IO::openFile(extrinsicParameterFileName.c_str()));
-		
-		/* Read the camera transformation: */
-		std::string transformation;
-		while(!parameterFile->eof())
-			transformation.push_back(parameterFile->getChar());
-		return Misc::ValueCoder<ExtrinsicParameters>::decode(transformation.c_str(),transformation.c_str()+transformation.length(),0);
-		}
-	catch(std::runtime_error)
-		{
-		/* Ignore the error and return a default set of extrinsic parameters: */
-		return ExtrinsicParameters::identity;
-		}
-	}
-
 const unsigned int* Camera::getActualFrameSize(int camera) const
 	{
 	static const unsigned int actualFrameSizes[2][2]={{640,480},{1280,1024}};
 	return actualFrameSizes[frameSizes[camera]];
+	}
+
+FrameSource::DepthRange Camera::getDepthRange(void) const
+	{
+	return DepthRange(300,1100);
 	}
 
 void Camera::startStreaming(FrameSource::StreamingCallback* newColorStreamingCallback,FrameSource::StreamingCallback* newDepthStreamingCallback)
@@ -1300,10 +1157,21 @@ void Camera::startStreaming(FrameSource::StreamingCallback* newColorStreamingCal
 	Query the device's serial number(?) and firmware version(?):
 	***********************************************************/
 	
-	/* This seems to wake up the device: */
+	/* This seems to wake up the device; try it a few times: */
 	USBWord replyBuffer[64];
-	sendMessage(0x0000U,0,0,replyBuffer,sizeof(replyBuffer));
-	sendMessage(0x0005U,0,0,replyBuffer,sizeof(replyBuffer));
+	for(int i=0;i<5;++i)
+		{
+		try
+			{
+			sendMessage(0x0000U,0,0,replyBuffer,sizeof(replyBuffer));
+			sendMessage(0x0005U,0,0,replyBuffer,sizeof(replyBuffer));
+			}
+		catch(std::runtime_error err)
+			{
+			Misc::formattedConsoleWarning("Kinect::Camera::startStreaming: Caught exception %s; retrying to wake up Kinect camera %s",err.what(),getSerialNumber().c_str());
+			usleep(100000);
+			}
+		}
 	
 	/***********************************
 	Disable the color and depth cameras:
@@ -1329,7 +1197,7 @@ void Camera::startStreaming(FrameSource::StreamingCallback* newColorStreamingCal
 		/* Create the color streaming state: */
 		const unsigned int* colorFrameSize=getActualFrameSize(COLOR);
 		size_t rawFrameSize=colorFrameSize[0]*colorFrameSize[1]; // Bayer pattern; one byte per pixel
-		streamers[COLOR]=new StreamingState(device.getDeviceHandle(),0x81U,frameTimer,frameTimerOffset,0x80U,1920,colorFrameSize,rawFrameSize,newColorStreamingCallback);
+		streamers[COLOR]=new StreamingState(device.getDeviceHandle(),0x81U,this,0x80U,1920,colorFrameSize,rawFrameSize,newColorStreamingCallback);
 		
 		#if KINECT_CAMERA_DUMP_HEADERS
 		streamers[COLOR]->headerFile=headerFile;
@@ -1345,7 +1213,7 @@ void Camera::startStreaming(FrameSource::StreamingCallback* newColorStreamingCal
 		/* Create the depth streaming state: */
 		const unsigned int* depthFrameSize=getActualFrameSize(DEPTH);
 		size_t rawFrameSize=(depthFrameSize[0]*depthFrameSize[1]*11+7)/8; // Packed bitstream; 11 bits per pixel
-		streamers[DEPTH]=new StreamingState(device.getDeviceHandle(),0x82U,frameTimer,frameTimerOffset,0x70U,1760,depthFrameSize,rawFrameSize,newDepthStreamingCallback);
+		streamers[DEPTH]=new StreamingState(device.getDeviceHandle(),0x82U,this,0x70U,1760,depthFrameSize,rawFrameSize,newDepthStreamingCallback);
 		
 		#if KINECT_CAMERA_DUMP_HEADERS
 		streamers[DEPTH]->headerFile=headerFile;
@@ -1394,6 +1262,7 @@ void Camera::startStreaming(FrameSource::StreamingCallback* newColorStreamingCal
 			break;
 		}
 	sequenceOk=sequenceOk&&sendCommand(0x0014U,getActualFrameRate(DEPTH)); // Request selected depth image frame rate
+	sequenceOk=sequenceOk&&sendCommand(0x0015U,irIntensity); // Select the IR projector's intensity
 	if(smoothDepthFrames)
 		sequenceOk=sequenceOk&&sendCommand(0x0016U,0x0001U); // Enable depth smoothing
 	else
@@ -1408,20 +1277,54 @@ void Camera::startStreaming(FrameSource::StreamingCallback* newColorStreamingCal
 		{
 		sequenceOk=sequenceOk&&sendCommand(0x0006U,0x0002U); // Enable depth streaming
 		sequenceOk=sequenceOk&&sendCommand(0x0017U,0x0000U); // Request normal orientation of depth images
+		sequenceOk=sequenceOk&&sendCommand(0x0015U,irIntensity); // Set IR intensity
+		
+		if(hasNearMode)
+			{
+			/* Switch between near mode and regular mode on Kinect-for-Windows: */
+			sequenceOk=sequenceOk&&sendCommand(0x02efU,nearMode?0x0000U:0x0190U);
+			}
 		}
 	
 	if(streamers[COLOR]!=0)
 		{
 		sequenceOk=sequenceOk&&sendCommand(0x0005U,0x0001U); // Enable color streaming
 		sequenceOk=sequenceOk&&sendCommand(0x0047U,0x0000U); // Request normal orientation of color images
+		
+		#if 0
+		/* Set the color camera's sharpening value: */
+		if(sequenceOk)
+			{
+			try
+				{
+				writeRegister(0x0105U,sharpening);
+				}
+			catch(std::runtime_error)
+				{
+				sequenceOk=false;
+				}
+			}
+		#endif
 		}
 	
 	if(!sequenceOk)
+		{
+		/* Reset camera device to non-streaming state and clean up: */
+		stopStreaming();
+		
+		/* Signal an error: */
 		Misc::throwStdErr("Kinect::Camera::startStreaming: Failed to initialize streaming mode");
+		}
 	}
 
 void Camera::stopStreaming(void)
 	{
+	if(streamers[DEPTH]!=0&&hasNearMode&&nearMode)
+		{
+		/* Reset to far mode: */
+		sendCommand(0x02efU,0x0190U);
+		}
+	
 	/* Send commands to stop streaming: */
 	sendCommand(0x0005U,0x0000U); // Disable color streaming
 	sendCommand(0x0006U,0x0000U); // Disable depth streaming (and turn off IR projector)
@@ -1434,7 +1337,7 @@ void Camera::stopStreaming(void)
 		}
 	
 	/* Destroy the background removal buffer: */
-	numBackgroundFrames=0;
+	backgroundCaptureNumFrames=0;
 	delete[] backgroundFrame;
 	backgroundFrame=0;
 	removeBackground=false;
@@ -1442,6 +1345,101 @@ void Camera::stopStreaming(void)
 	#if KINECT_CAMERA_DUMP_HEADERS
 	headerFile=0;
 	#endif
+	
+	/* Release the interface and re-attach the kernel driver: */
+	if(needAltInterface)
+		{
+		/* Switch the camera back to the original interface setting: */
+		device.setAlternateSetting(0,0);
+		}
+	device.releaseInterface(0);
+	// device.setConfiguration(1); // This seems to confuse the device
+	// device.reset(); // This seems to confuse the device
+	device.close();
+	}
+
+std::string Camera::getSerialNumber(void)
+	{
+	return serialNumber;
+	}
+
+void Camera::configure(Misc::ConfigurationFileSection& configFileSection)
+	{
+	/* Call the base class method: */
+	DirectFrameSource::configure(configFileSection);
+	
+	/* Select the color frame resolution: */
+	setFrameSize(COLOR,configFileSection.retrieveValue<bool>("./colorHiRes",getFrameSize(COLOR)==FS_1280_1024)?FS_1280_1024:FS_640_480);
+	
+	/* Select the frame rate: */
+	unsigned int frameRate=configFileSection.retrieveValue<unsigned int>("./frameRate",getFrameRate(COLOR)==FR_30_HZ?30:15);
+	setFrameRate(COLOR,frameRate>=23?FR_30_HZ:FR_15_HZ);
+	setFrameRate(DEPTH,frameRate>=23?FR_30_HZ:FR_15_HZ);
+	
+	/* Select depth compression: */
+	setCompressDepthFrames(configFileSection.retrieveValue<bool>("./compressDepth",compressDepthFrames));
+	
+	/* Select depth smoothing: */
+	setSmoothDepthFrames(configFileSection.retrieveValue<bool>("./smoothDepth",smoothDepthFrames));
+	
+	/* Select IR intensity: */
+	setIrIntensity(configFileSection.retrieveValue<unsigned int>("./irIntensity",irIntensity));
+	
+	/* Select near mode: */
+	if(hasNearMode)
+		setNearMode(configFileSection.retrieveValue<bool>("./nearMode",nearMode));
+	
+	/* Set color camera sharpening value: */
+	setSharpening(configFileSection.retrieveValue<unsigned int>("./colorSharpening",getSharpening()));
+	}
+
+void Camera::buildSettingsDialog(GLMotif::RowColumn* settingsDialog)
+	{
+	/* Create the base class settings dialog: */
+	DirectFrameSource::buildSettingsDialog(settingsDialog);
+	
+	const GLMotif::StyleSheet& ss=*settingsDialog->getStyleSheet();
+	
+	if(hasNearMode)
+		{
+		/* Create a button to toggle near mode: */
+		GLMotif::Margin* nearModeMargin=new GLMotif::Margin("NearModeMargin",settingsDialog,false);
+		nearModeMargin->setAlignment(GLMotif::Alignment::LEFT);
+		
+		GLMotif::ToggleButton* nearModeToggle=new GLMotif::ToggleButton("NearModeToggle",nearModeMargin,"Near Mode");
+		nearModeToggle->setBorderWidth(0.0f);
+		nearModeToggle->setBorderType(GLMotif::Widget::PLAIN);
+		nearModeToggle->setToggle(nearMode);
+		nearModeToggle->getValueChangedCallbacks().add(this,&Camera::nearModeToggleCallback);
+		
+		nearModeMargin->manageChild();
+		}
+	
+	/* Create a panel of sliders to set IR intensity and color sharpening: */
+	GLMotif::RowColumn* sliderBox=new GLMotif::RowColumn("SliderBox",settingsDialog,false);
+	sliderBox->setOrientation(GLMotif::RowColumn::HORIZONTAL);
+	sliderBox->setPacking(GLMotif::RowColumn::PACK_TIGHT);
+	sliderBox->setNumMinorWidgets(1);
+	
+	new GLMotif::Label("IRIntensityLabel",sliderBox,"IR Intensity");
+	
+	GLMotif::TextFieldSlider* irIntensitySlider=new GLMotif::TextFieldSlider("IRIntensitySlider",sliderBox,3,ss.fontHeight*5.0f);
+	irIntensitySlider->setSliderMapping(GLMotif::TextFieldSlider::LINEAR);
+	irIntensitySlider->setValueType(GLMotif::TextFieldSlider::UINT);
+	irIntensitySlider->setValueRange(1,50,1);
+	irIntensitySlider->setValue(irIntensity);
+	irIntensitySlider->getValueChangedCallbacks().add(this,&Camera::irIntensitySliderCallback);
+	
+	new GLMotif::Label("ColorSharpeningLabel",sliderBox,"Color Sharpening");
+	
+	GLMotif::TextFieldSlider* colorSharpeningSlider=new GLMotif::TextFieldSlider("ColorSharpeningSlider",sliderBox,2,ss.fontHeight*4.0f);
+	colorSharpeningSlider->setSliderMapping(GLMotif::TextFieldSlider::LINEAR);
+	colorSharpeningSlider->setValueType(GLMotif::TextFieldSlider::UINT);
+	colorSharpeningSlider->setValueRange(0,7,1);
+	colorSharpeningSlider->setValue(sharpening);
+	colorSharpeningSlider->getValueChangedCallbacks().add(this,&Camera::colorSharpeningSliderCallback);
+	
+	sliderBox->manageChild();
 	}
 
 void Camera::getCalibrationParameters(Camera::CalibrationParameters& calib)
@@ -1531,12 +1529,6 @@ unsigned int Camera::getActualFrameRate(int camera) const
 	return actualFrameRates[frameRates[camera]];
 	}
 
-void Camera::resetFrameTimer(double newFrameTimerOffset)
-	{
-	frameTimer.elapse();
-	frameTimerOffset=newFrameTimerOffset;
-	}
-
 void Camera::setCompressDepthFrames(bool newCompressDepthFrames)
 	{
 	compressDepthFrames=newCompressDepthFrames; 
@@ -1547,179 +1539,49 @@ void Camera::setSmoothDepthFrames(bool newSmoothDepthFrames)
 	smoothDepthFrames=newSmoothDepthFrames; 
 	}
 
-void Camera::captureBackground(unsigned int newNumBackgroundFrames,bool replace,Camera::BackgroundCaptureCallback* newBackgroundCaptureCallback)
+void Camera::setIrIntensity(unsigned short newIrIntensity)
 	{
-	/* Remember the background capture callback: */
-	delete backgroundCaptureCallback;
-	backgroundCaptureCallback=newBackgroundCaptureCallback;
+	/* Clamp requested IR intensity to the valid range: */
+	irIntensity=Math::clamp(newIrIntensity,(unsigned short)1,(unsigned short)50);
 	
-	/* Initialize the background frame buffer: */
-	const unsigned int* depthFrameSize=getActualFrameSize(DEPTH);
-	if(backgroundFrame==0)
-		{
-		backgroundFrame=new DepthPixel[depthFrameSize[0]*depthFrameSize[1]];
-		replace=true;
-		}
-	
-	if(replace)
-		{
-		/* Initialize the background frame to "empty:" */
-		DepthPixel* bfPtr=backgroundFrame;
-		for(unsigned int y=0;y<depthFrameSize[1];++y)
-			for(unsigned int x=0;x<depthFrameSize[0];++x,++bfPtr)
-				*bfPtr=invalidDepth;
-		}
-	
-	/* Start capturing background frames: */
-	numBackgroundFrames=newNumBackgroundFrames;
+	/* Change the IR intensity live if depth streaming is active: */
+	if(streamers[DEPTH]!=0)
+		sendCommand(0x0015U,irIntensity);
 	}
 
-bool Camera::loadDefaultBackground(void)
+void Camera::setNearMode(bool newNearMode)
 	{
-	/* Construct the full name of this camera's default background image: */
-	std::string backgroundFileName=KINECT_CONFIG_DIR;
-	backgroundFileName.push_back('/');
-	backgroundFileName.append(KINECT_CAMERA_DEFAULTBACKGROUNDFILENAMEPREFIX);
-	backgroundFileName.push_back('-');
-	backgroundFileName.append(serialNumber);
-	backgroundFileName.append(".background");
-	
-	/* Check if the default background file exists: */
-	if(Misc::isFileReadable(backgroundFileName.c_str()))
+	if(hasNearMode)
 		{
-		/* Open and read the background file: */
-		IO::FilePtr file(IO::openFile(backgroundFileName.c_str()));
-		file->setEndianness(Misc::LittleEndian);
-		loadBackground(*file);
+		nearMode=newNearMode;
 		
-		return true;
+		/* Select near mode or regular mode on Kinect-for-Windows if depth streaming is active: */
+		if(streamers[DEPTH]!=0)
+			sendCommand(0x02efU,nearMode?0x0000U:0x0190U);
 		}
-	
-	return false;
-	}
-
-void Camera::loadBackground(const char* fileNamePrefix)
-	{
-	/* Construct the full background file name: */
-	std::string fileName=fileNamePrefix;
-	fileName.push_back('-');
-	fileName.append(getSerialNumber());
-	fileName.append(".background");
-	
-	/* Open and read the background file: */
-	IO::FilePtr file(IO::openFile(fileName.c_str()));
-	file->setEndianness(Misc::LittleEndian);
-	loadBackground(*file);
-	}
-
-void Camera::loadBackground(IO::File& file)
-	{
-	/* Read the frame header: */
-	Misc::UInt32 fileFrameSize[2];
-	file.read<Misc::UInt32>(fileFrameSize,2);
-	
-	/* Check if the file matches the current depth buffer size: */
-	const unsigned int* depthFrameSize=getActualFrameSize(DEPTH);
-	if(fileFrameSize[0]!=depthFrameSize[0]||fileFrameSize[1]!=depthFrameSize[1])
-		Misc::throwStdErr("Kinect::Camera::loadBackground: Background file's size does not match camera's");
-	
-	/* Create the background frame buffer: */
-	if(backgroundFrame==0)
-		backgroundFrame=new DepthPixel[depthFrameSize[0]*depthFrameSize[1]];
-	
-	/* Read the background file: */
-	file.read<DepthPixel>(backgroundFrame,depthFrameSize[0]*depthFrameSize[1]);
-	}
-
-void Camera::setMaxDepth(unsigned int newMaxDepth,bool replace)
-	{
-	/* Limit the depth value to the valid range: */
-	if(newMaxDepth>invalidDepth)
-		newMaxDepth=invalidDepth;
-	DepthPixel nmd=DepthPixel(newMaxDepth);
-	
-	const unsigned int* depthFrameSize=getActualFrameSize(DEPTH);
-	if(backgroundFrame==0)
-		{
-		/* Create the background frame buffer: */
-		backgroundFrame=new DepthPixel[depthFrameSize[0]*depthFrameSize[1]];
-		replace=true;
-		}
-	
-	if(replace)
-		{
-		/* Initialize the background frame to the max depth value */
-		DepthPixel* bfPtr=backgroundFrame;
-		for(unsigned int y=0;y<depthFrameSize[1];++y)
-			for(unsigned int x=0;x<depthFrameSize[0];++x,++bfPtr)
-				*bfPtr=nmd;
-		}
-	else
-		{
-		/* Modify the existing background frame buffer: */
-		DepthPixel* bfPtr=backgroundFrame;
-		for(unsigned int y=0;y<depthFrameSize[1];++y)
-			for(unsigned int x=0;x<depthFrameSize[0];++x,++bfPtr)
-				if(*bfPtr>nmd)
-					*bfPtr=nmd;
-		}
-	}
-
-void Camera::saveBackground(const char* fileNamePrefix)
-	{
-	/* Bail out if there is no background frame: */
-	if(backgroundFrame==0)
-		return;
-	
-	/* Construct the full background file name: */
-	std::string fileName=fileNamePrefix;
-	fileName.push_back('-');
-	fileName.append(getSerialNumber());
-	fileName.append(".background");
-	
-	/* Save the background file: */
-	IO::FilePtr file(IO::openFile(fileName.c_str(),IO::File::WriteOnly));
-	file->setEndianness(Misc::LittleEndian);
-	saveBackground(*file);
-	}
-
-void Camera::saveBackground(IO::File& file)
-	{
-	/* Bail out if there is no background frame: */
-	if(backgroundFrame==0)
-		return;
-	
-	const unsigned int* depthFrameSize=getActualFrameSize(DEPTH);
-	for(int i=0;i<2;++i)
-		file.write<Misc::UInt32>(depthFrameSize[i]);
-	file.write<DepthPixel>(backgroundFrame,depthFrameSize[0]*depthFrameSize[1]);
-	}
-
-void Camera::setRemoveBackground(bool newRemoveBackground)
-	{
-	/* Bail out if there is no background frame buffer: */
-	if(backgroundFrame==0)
-		return;
-	
-	/* Set the background removal flag: */
-	removeBackground=newRemoveBackground;
-	}
-
-void Camera::setBackgroundRemovalFuzz(int newBackgroundRemovalFuzz)
-	{
-	backgroundRemovalFuzz=Misc::SInt16(newBackgroundRemovalFuzz);
 	}
 
 unsigned int Camera::getSharpening(void)
 	{
-	/* Return the sharpening register value: */
-	return readRegister(0x0105U);
+	if(streamers[COLOR]!=0)
+		{
+		/* Query the sharpening register value: */
+		sharpening=readRegister(0x0105U);
+		}
+	
+	return sharpening;
 	}
 
 void Camera::setSharpening(unsigned int newSharpening)
 	{
-	/* Limit and set the sharpening value: */
-	writeRegister(0x0105U,newSharpening&0x0007U);
+	/* Limit the sharpening value: */
+	sharpening=Math::clamp(newSharpening,0U,7U);
+	
+	if(streamers[COLOR]!=0)
+		{
+		/* Set the sharpening value: */
+		writeRegister(0x0105U,sharpening);
+		}
 	}
 
 }

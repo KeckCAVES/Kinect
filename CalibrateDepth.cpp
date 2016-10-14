@@ -1,6 +1,6 @@
 /***********************************************************************
 Depth distortion calibration utility.
-Copyright (c) 2012 Oliver Kreylos
+Copyright (c) 2012-2015 Oliver Kreylos
 
 This file is part of the Kinect 3D Video Capture Project (Kinect).
 
@@ -63,7 +63,7 @@ int main(int argc,char* argv[])
 			/* Read the depth frame: */
 			DepthFrame depthFrame;
 			depthFrame.frame=Kinect::FrameBuffer(frameSize[0],frameSize[1],frameSize[1]*frameSize[0]*sizeof(float));
-			float* dfPtr=static_cast<float*>(depthFrame.frame.getBuffer());
+			float* dfPtr=depthFrame.frame.getData<float>();
 			depthFile->read(dfPtr,frameSize[1]*frameSize[0]);
 			
 			/* Calculate the best-fitting plane: */
@@ -100,7 +100,7 @@ int main(int argc,char* argv[])
 			unsigned int numFrames=0;
 			for(std::vector<DepthFrame>::iterator dfIt=depthFrames.begin();dfIt!=depthFrames.end();++dfIt)
 				{
-				double actual=double(static_cast<float*>(dfIt->frame.getBuffer())[y*frameSize[0]+x]);
+				double actual=double(dfIt->frame.getData<float>()[y*frameSize[0]+x]);
 				if(actual!=2047.0)
 					{
 					ata(0,0)+=actual*actual;
@@ -137,7 +137,7 @@ int main(int argc,char* argv[])
 		/* Calculate the best-fitting plane: */
 		typedef Geometry::PCACalculator<3>::Point PPoint;
 		Geometry::PCACalculator<3> pca;
-		float* dfPtr=static_cast<float*>(dfIt->frame.getBuffer());
+		float* dfPtr=dfIt->frame.getData<float>();
 		float* cPtr=coefficients;
 		for(unsigned int y=0;y<frameSize[1];++y)
 			for(unsigned int x=0;x<frameSize[0];++x,++dfPtr,cPtr+=2)

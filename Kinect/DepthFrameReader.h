@@ -1,7 +1,7 @@
 /***********************************************************************
 DepthFrameReader - Class to read compressed depth frames from a source,
 and pass decompressed time-stamped depth frames to a client.
-Copyright (c) 2010-2013 Oliver Kreylos
+Copyright (c) 2010-2015 Oliver Kreylos
 
 This file is part of the Kinect 3D Video Capture Project (Kinect).
 

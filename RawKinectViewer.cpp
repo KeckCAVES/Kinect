@@ -1,7 +1,7 @@
 /***********************************************************************
 RawKinectViewer - Simple application to view color and depth images
 captured from a Kinect device.
-Copyright (c) 2010-2013 Oliver Kreylos
+Copyright (c) 2010-2016 Oliver Kreylos
 
 This file is part of the Kinect 3D Video Capture Project (Kinect).
 
@@ -43,9 +43,14 @@ Software Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA
 #include <Vrui/Vrui.h>
 #include <Vrui/ToolManager.h>
 #include <Vrui/OpenFile.h>
+#include <Kinect/Config.h>
 #include <Kinect/Camera.h>
-
+#include <Kinect/CameraV2.h>
+#if KINECT_CONFIG_HAVE_LIBREALSENSE
+#include <Kinect/CameraRealSense.h>
+#endif
 #include "PauseTool.h"
+#include "MeasurementTool.h"
 #include "TiePointTool.h"
 #include "LineTool.h"
 #include "DepthCorrectionTool.h"
@@ -137,6 +142,8 @@ Vrui::Point RawKinectViewer::calcImagePoint(const Vrui::Ray& physicalRay) const
 	/* Transform the ray to navigational space: */
 	Vrui::Ray navRay=physicalRay;
 	navRay.transform(Vrui::getInverseNavigationTransformation());
+	
+	/* Intersect the ray with the z=0 plane in navigational space: */
 	if(navRay.getDirection()[2]!=Vrui::Scalar(0))
 		{
 		Vrui::Scalar lambda=-navRay.getOrigin()[2]/navRay.getDirection()[2];
@@ -144,6 +151,173 @@ Vrui::Point RawKinectViewer::calcImagePoint(const Vrui::Ray& physicalRay) const
 		}
 	else
 		return Vrui::Point::origin;
+	}
+
+RawKinectViewer::CPoint RawKinectViewer::calcDepthImagePoint(const Vrui::Point& imagePoint) const
+	{
+	/* Apply lens distortion correction: */
+	CPoint diPoint;
+	if(intrinsicParameters.depthLensDistortion.isIdentity())
+		diPoint=CPoint(CPoint::Scalar(imagePoint[0])+depthImageOffset,CPoint::Scalar(imagePoint[1]),CPoint::Scalar(0));
+	else
+		{
+		/* Transform the image point to undistorted depth image space: */
+		Kinect::LensDistortion::Point up;
+		up[1]=(imagePoint[1]-cy)/fy;
+		up[0]=(imagePoint[0]+depthImageOffset-cx-sk*up[1])/fx;
+		
+		/* Distort the image point: */
+		Kinect::LensDistortion::Point dp=intrinsicParameters.depthLensDistortion.distort(up);
+		
+		/* Transform the distorted point back to depth image pixel space: */
+		diPoint[0]=CPoint::Scalar(dp[0]*fx+dp[1]*sk+cx);
+		diPoint[1]=CPoint::Scalar(dp[1]*fy+cy);
+		diPoint[2]=CPoint::Scalar(0);
+		}
+	
+	return diPoint;
+	}
+
+float RawKinectViewer::getDepthImagePixel(unsigned int x,unsigned int y) const
+	{
+	unsigned int index=y*depthFrameSize[0]+x;
+	
+	if(averageFrameValid)
+		{
+		/* Get the average depth value of the selected pixel: */
+		if(averageFrameForeground[index]>=float(averageNumFrames)*0.5f)
+			{
+			float result=averageFrameDepth[index]/averageFrameForeground[index];
+			if(depthCorrection!=0)
+				result=depthCorrection[index].correct(result);
+			
+			return result;
+			}
+		else
+			return -1.0f;
+		}
+	else
+		{
+		/* Get the currently locked depth value of the selected pixel: */
+		const Kinect::FrameBuffer& fb=depthFrames.getLockedValue();
+		const DepthPixel* depthImage=fb.getData<DepthPixel>();
+		if(depthImage[index]!=0x7ffU)
+			return float(depthImage[index]);
+		else
+			return -1.0f;
+		}
+	}
+
+RawKinectViewer::CPoint RawKinectViewer::getDepthImagePoint(unsigned int x,unsigned int y) const
+	{
+	CPoint result;
+	
+	if(intrinsicParameters.depthLensDistortion.isIdentity())
+		{
+		result[0]=CPoint::Scalar(x)+CPoint::Scalar(0.5);
+		result[1]=CPoint::Scalar(y)+CPoint::Scalar(0.5)-depthImageOffset;
+		}
+	else
+		{
+		/* Convert the pixel position to distorted normalized projection space: */
+		Kinect::LensDistortion::Point dp;
+		dp[1]=(double(y)+0.5-cy)/fy;
+		dp[0]=(double(x)+0.5-cx-sk*dp[1])/fx;
+		
+		/* Undistort the image point: */
+		Kinect::LensDistortion::Point up=intrinsicParameters.depthLensDistortion.undistort(dp);
+		
+		/* Transform the undistorted point back to depth image pixel space: */
+		result[0]=CPoint::Scalar(up[0]*fx+up[1]*sk+cx-depthImageOffset);
+		result[1]=CPoint::Scalar(up[1]*fy+cy);
+		}
+	
+	/* Get the depth value of the given pixel: */
+	result[2]=CPoint::Scalar(getDepthImagePixel(x,y));
+	
+	return result;
+	}
+
+RawKinectViewer::CPoint RawKinectViewer::getDepthImagePoint(const Vrui::Point& imagePoint) const
+	{
+	/* Transform the image-plane point to depth image space: */
+	CPoint diPoint;
+	if(intrinsicParameters.depthLensDistortion.isIdentity())
+		diPoint=CPoint(CPoint::Scalar(imagePoint[0])+depthImageOffset,CPoint::Scalar(imagePoint[1]),CPoint::Scalar(0));
+	else
+		{
+		/* Transform the image point to undistorted depth image space: */
+		Kinect::LensDistortion::Point up;
+		up[1]=(imagePoint[1]-cy)/fy;
+		up[0]=(imagePoint[0]+depthImageOffset-cx-sk*up[1])/fx;
+		
+		/* Distort the image point: */
+		Kinect::LensDistortion::Point dp=intrinsicParameters.depthLensDistortion.distort(up);
+		
+		/* Transform the distorted point back to depth image pixel space: */
+		diPoint[0]=CPoint::Scalar(dp[0]*fx+dp[1]*sk+cx);
+		diPoint[1]=CPoint::Scalar(dp[1]*fy+cy);
+		diPoint[2]=CPoint::Scalar(0);
+		}
+	
+	/* Check if the depth image point is inside the depth image: */
+	if(diPoint[0]>=CPoint::Scalar(0)&&diPoint[0]<CPoint::Scalar(depthFrameSize[0])&&
+	   diPoint[1]>=CPoint::Scalar(0)&&diPoint[1]<CPoint::Scalar(depthFrameSize[1]))
+		{
+		/* Calculate the depth image point's pixel coordinates: */
+		unsigned int diX=(unsigned int)diPoint[0];
+		unsigned int diY=(unsigned int)diPoint[1];
+		
+		/* Create the result point in undistorted depth image space: */
+		CPoint result;
+		result[0]=CPoint::Scalar(imagePoint[0])+depthImageOffset;
+		result[1]=CPoint::Scalar(imagePoint[1]);
+		result[2]=CPoint::Scalar(getDepthImagePixel(diX,diY));
+		
+		return result;
+		}
+	else
+		return CPoint(0,0,-1);
+	}
+
+void RawKinectViewer::registerColorCallback(RawKinectViewer::FrameStreamingCallback* newCallback)
+	{
+	Threads::Spinlock::Lock frameCallbacksLock(frameCallbacksMutex);
+	colorFrameCallbacks.push_back(newCallback);
+	}
+
+void RawKinectViewer::unregisterColorCallback(RawKinectViewer::FrameStreamingCallback* callback)
+	{
+	Threads::Spinlock::Lock frameCallbacksLock(frameCallbacksMutex);
+	
+	/* Find the callback in the list: */
+	for(std::vector<FrameStreamingCallback*>::iterator cbIt=colorFrameCallbacks.begin();cbIt!=colorFrameCallbacks.end();++cbIt)
+		if(*cbIt==callback)
+			{
+			*cbIt=colorFrameCallbacks.back();
+			colorFrameCallbacks.pop_back();
+			break;
+			}
+	}
+
+void RawKinectViewer::registerDepthCallback(RawKinectViewer::FrameStreamingCallback* newCallback)
+	{
+	Threads::Spinlock::Lock frameCallbacksLock(frameCallbacksMutex);
+	depthFrameCallbacks.push_back(newCallback);
+	}
+
+void RawKinectViewer::unregisterDepthCallback(RawKinectViewer::FrameStreamingCallback* callback)
+	{
+	Threads::Spinlock::Lock frameCallbacksLock(frameCallbacksMutex);
+	
+	/* Find the callback in the list: */
+	for(std::vector<FrameStreamingCallback*>::iterator cbIt=depthFrameCallbacks.begin();cbIt!=depthFrameCallbacks.end();++cbIt)
+		if(*cbIt==callback)
+			{
+			*cbIt=depthFrameCallbacks.back();
+			depthFrameCallbacks.pop_back();
+			break;
+			}
 	}
 
 void RawKinectViewer::colorStreamingCallback(const Kinect::FrameBuffer& frameBuffer)
@@ -154,8 +328,8 @@ void RawKinectViewer::colorStreamingCallback(const Kinect::FrameBuffer& frameBuf
 		
 		/* Normalize the color frame: */
 		Kinect::FrameBuffer normalizedFrame(frameBuffer.getSize(0),frameBuffer.getSize(1),frameBuffer.getSize(1)*frameBuffer.getSize(0)*sizeof(ColorPixel));
-		const ColorPixel* fPtr=static_cast<const ColorPixel*>(frameBuffer.getBuffer());
-		ColorPixel* nfPtr=static_cast<ColorPixel*>(normalizedFrame.getBuffer());
+		const ColorPixel* fPtr=frameBuffer.getData<ColorPixel>();
+		ColorPixel* nfPtr=normalizedFrame.getData<ColorPixel>();
 		for(int y=0;y<frameBuffer.getSize(1);++y)
 			for(int x=0;x<frameBuffer.getSize(0);++x,++fPtr,++nfPtr)
 				{
@@ -191,10 +365,65 @@ void RawKinectViewer::colorStreamingCallback(const Kinect::FrameBuffer& frameBuf
 		
 		#else
 		
-		/* Post the new frame into the color frame triple buffer: */
-		colorFrames.postNewValue(frameBuffer);
+		if(backgroundCaptureNumFrames>0)
+			{
+			/* Enter the new color frame into the background removal buffer: */
+			const Kinect::FrameSource::ColorPixel* fPtr=frameBuffer.getData<ColorPixel>();
+			Kinect::FrameSource::ColorPixel* bPtr=colorBackground;
+			for(unsigned int y=0;y<colorFrameSize[1];++y)
+				for(unsigned int x=0;x<colorFrameSize[0];++x,++fPtr,bPtr+=2)
+					for(int i=0;i<3;++i)
+						{
+						if(bPtr[0][i]>(*fPtr)[i])
+							bPtr[0][i]=(*fPtr)[i];
+						if(bPtr[1][i]<(*fPtr)[i])
+							bPtr[1][i]=(*fPtr)[i];
+						}
+			
+			--backgroundCaptureNumFrames;
+			}
+		
+		if(colorBackground!=0)
+			{
+			/* Remove background pixels from the new color frame: */
+			Kinect::FrameBuffer backgroundRemovedFrame(frameBuffer.getSize(0),frameBuffer.getSize(1),frameBuffer.getSize(1)*frameBuffer.getSize(0)*sizeof(ColorPixel));
+			const Kinect::FrameSource::ColorPixel* fPtr=frameBuffer.getData<ColorPixel>();
+			Kinect::FrameSource::ColorPixel* bPtr=colorBackground;
+			Kinect::FrameSource::ColorPixel* bfPtr=backgroundRemovedFrame.getData<ColorPixel>();
+			for(unsigned int y=0;y<colorFrameSize[1];++y)
+				for(unsigned int x=0;x<colorFrameSize[0];++x,++fPtr,bPtr+=2,++bfPtr)
+					{
+					bool isBackground=true;
+					for(int i=0;i<3&&isBackground;++i)
+						isBackground=bPtr[0][i]<=(*fPtr)[i]&&(*fPtr)[i]<=bPtr[1][i];
+					
+					if(isBackground)
+						(*bfPtr)[2]=(*bfPtr)[1]=(*bfPtr)[0]=0;
+					else
+						{
+						for(int i=0;i<3;++i)
+							(*bfPtr)[i]=(*fPtr)[i];
+						}
+					}
+			
+			/* Post the new frame into the color frame triple buffer: */
+			colorFrames.postNewValue(backgroundRemovedFrame);
+			}
+		else
+			{
+			/* Post the new frame into the color frame triple buffer: */
+			colorFrames.postNewValue(frameBuffer);
+			}
+		
 		
 		#endif
+		
+		/* Call all color streaming callbacks: */
+		{
+		Threads::Spinlock::Lock frameCallbacksLock(frameCallbacksMutex);
+		for(std::vector<FrameStreamingCallback*>::iterator cbIt=colorFrameCallbacks.begin();cbIt!=colorFrameCallbacks.end();++cbIt)
+			(**cbIt)(frameBuffer);
+		}
 		
 		/* Update application state: */
 		Vrui::requestUpdate();
@@ -207,6 +436,13 @@ void RawKinectViewer::depthStreamingCallback(const Kinect::FrameBuffer& frameBuf
 		{
 		/* Post the new frame into the depth frame triple buffer: */
 		depthFrames.postNewValue(frameBuffer);
+		
+		/* Call all depth streaming callbacks: */
+		{
+		Threads::Spinlock::Lock frameCallbacksLock(frameCallbacksMutex);
+		for(std::vector<FrameStreamingCallback*>::iterator cbIt=depthFrameCallbacks.begin();cbIt!=depthFrameCallbacks.end();++cbIt)
+			(**cbIt)(frameBuffer);
+		}
 		
 		/* Update application state: */
 		Vrui::requestUpdate();
@@ -262,7 +498,7 @@ void RawKinectViewer::locatorButtonPressCallback(Vrui::LocatorTool::ButtonPressC
 		
 		/* Start the selected pixel's EKG: */
 		selectedPixelCurrentIndex=0;
-		const DepthPixel* dfPtr=static_cast<const DepthPixel*>(depthFrames.getLockedValue().getBuffer());
+		const DepthPixel* dfPtr=depthFrames.getLockedValue().getData<DepthPixel>();
 		selectedPixelPulse[0]=dfPtr[selectedPixel[1]*depthFrames.getLockedValue().getSize(0)+selectedPixel[0]];
 		for(int i=1;i<128;++i)
 			selectedPixelPulse[i]=0;
@@ -274,15 +510,21 @@ void RawKinectViewer::locatorButtonPressCallback(Vrui::LocatorTool::ButtonPressC
 		}
 	}
 
-void RawKinectViewer::resetNavigationCallback(Misc::CallbackData* cbData)
-	{
-	/* Reset the navigation transformation: */
-	Vrui::setNavigationTransformation(Vrui::Point::origin,Vrui::Scalar(1024),Vrui::Vector(0,1,0));
-	}
-
 void RawKinectViewer::captureBackgroundCallback(Misc::CallbackData* cbData)
 	{
 	/* Capture five seconds worth of background frames: */
+	if(colorBackground==0)
+		colorBackground=new Kinect::FrameSource::ColorPixel[colorFrameSize[1]*colorFrameSize[0]*2];
+	Kinect::FrameSource::ColorPixel* bPtr=colorBackground;
+	for(unsigned int y=0;y<colorFrameSize[1];++y)
+		for(unsigned int x=0;x<colorFrameSize[0];++x,bPtr+=2)
+			{
+			/* Initialize the pixel's background interval to "empty": */
+			bPtr[0][2]=bPtr[0][1]=bPtr[0][0]=255U;
+			bPtr[1][2]=bPtr[1][1]=bPtr[1][0]=0U;
+			}
+	backgroundCaptureNumFrames=150;
+	
 	camera->captureBackground(150,true);
 	}
 
@@ -290,6 +532,11 @@ void RawKinectViewer::removeBackgroundCallback(GLMotif::ToggleButton::ValueChang
 	{
 	/* Set the background removal flag: */
 	camera->setRemoveBackground(cbData->set);
+	if(!cbData->set)
+		{
+		delete[] colorBackground;
+		colorBackground=0;
+		}
 	
 	/* Set the toggle button's state to the actual new flag value: */
 	cbData->toggle->setToggle(camera->getRemoveBackground());
@@ -324,10 +571,19 @@ void RawKinectViewer::saveAverageFrameOKCallback(GLMotif::FileSelectionDialog::O
 		float cutoff=float(averageNumFrames)*0.5f;
 		float* afdPtr=averageFrameDepth;
 		float* affPtr=averageFrameForeground;
-		const PixelCorrection* dcPtr=depthCorrection;
-		for(unsigned int y=0;y<depthFrameSize[1];++y)
-			for(unsigned int x=0;x<depthFrameSize[0];++x,++afdPtr,++affPtr,++dcPtr)
-				frameFile->write<Misc::Float32>(*affPtr>=cutoff?dcPtr->correct((*afdPtr)/(*affPtr)):2047.0f);
+		if(depthCorrection!=0)
+			{
+			const PixelCorrection* dcPtr=depthCorrection;
+			for(unsigned int y=0;y<depthFrameSize[1];++y)
+				for(unsigned int x=0;x<depthFrameSize[0];++x,++afdPtr,++affPtr,++dcPtr)
+					frameFile->write<Misc::Float32>(*affPtr>=cutoff?dcPtr->correct((*afdPtr)/(*affPtr)):2047.0f);
+			}
+		else
+			{
+			for(unsigned int y=0;y<depthFrameSize[1];++y)
+				for(unsigned int x=0;x<depthFrameSize[0];++x,++afdPtr,++affPtr)
+					frameFile->write<Misc::Float32>(*affPtr>=cutoff?(*afdPtr)/(*affPtr):2047.0f);
+			}
 		}
 	catch(std::runtime_error err)
 		{
@@ -373,17 +629,28 @@ void RawKinectViewer::saveColorFrameOKCallback(GLMotif::FileSelectionDialog::OKC
 	{
 	try
 		{
+		#if 0 // Quick shortcut
+		
 		/* Convert the current color frame into an RGB image: */
-		const ColorPixel* sPtr=static_cast<const ColorPixel*>(colorFrames.getLockedValue().getBuffer());
+		const ColorPixel* sPtr=colorFrames.getLockedValue().getData<ColorPixel>();
 		Images::RGBImage colorImage(colorFrameSize[0],colorFrameSize[1]);
 		Images::RGBImage::Color* dPtr=colorImage.modifyPixels();
 		for(unsigned int y=0;y<colorFrameSize[1];++y)
-			for(unsigned int x=0;x<colorFrameSize[0];++x,sPtr+=3,++dPtr)
+			for(unsigned int x=0;x<colorFrameSize[0];++x,++sPtr,++dPtr)
 				for(int i=0;i<3;++i)
 					(*dPtr)[i]=sPtr->rgb[i];
 		
 		/* Write the RGB image to the file: */
-		Images::writeImageFile(colorImage,cbData->selectedFileName);
+		Images::writeImageFile(colorImage,cbData->getSelectedPath().c_str());
+		
+		#else
+		
+		/* Write the current depth frame to a raw image: */
+		IO::FilePtr depthFile=cbData->selectedDirectory->openFile(cbData->selectedFileName,IO::File::WriteOnly);
+		depthFile->setEndianness(Misc::LittleEndian);
+		depthFile->write<DepthPixel>(depthFrames.getLockedValue().getData<DepthPixel>(),depthFrameSize[1]*depthFrameSize[0]);
+		
+		#endif
 		}
 	catch(std::runtime_error err)
 		{
@@ -427,10 +694,6 @@ GLMotif::PopupMenu* RawKinectViewer::createMainMenu(void)
 	/* Create the main menu itself: */
 	GLMotif::Menu* mainMenu=new GLMotif::Menu("MainMenu",mainMenuPopup,false);
 	
-	/* Create a button to reset navigation: */
-	GLMotif::Button* resetNavigationButton=new GLMotif::Button("ResetNavigationButton",mainMenu,"Reset Navigation");
-	resetNavigationButton->getSelectCallbacks().add(this,&RawKinectViewer::resetNavigationCallback);
-	
 	/* Create a button to capture a background frame: */
 	GLMotif::Button* captureBackgroundButton=new GLMotif::Button("CaptureBackgroundButton",mainMenu,"Capture Background");
 	captureBackgroundButton->getSelectCallbacks().add(this,&RawKinectViewer::captureBackgroundCallback);
@@ -471,7 +734,9 @@ GLMotif::PopupWindow* RawKinectViewer::createAverageDepthFrameDialog(void)
 RawKinectViewer::RawKinectViewer(int& argc,char**& argv,char**& appDefaults)
 	:Vrui::Application(argc,argv,appDefaults),
 	 camera(0),
-	 colorFrameSize(0),colorFrameVersion(0),
+	 colorFrameSize(0),
+	 backgroundCaptureNumFrames(0),colorBackground(0),
+	 colorFrameVersion(0),
 	 depthFrameSize(0),depthCorrection(0),depthPlaneDistMax(10.0),depthFrameVersion(0),
 	 paused(false),
 	 averageNumFrames(150),averageFrameCounter(0),
@@ -485,6 +750,7 @@ RawKinectViewer::RawKinectViewer(int& argc,char**& argv,char**& appDefaults)
 	*********************************************************************/
 	
 	PauseTool::initClass(*Vrui::getToolManager());
+	MeasurementTool::initClass(*Vrui::getToolManager());
 	TiePointTool::initClass(*Vrui::getToolManager());
 	LineTool::initClass(*Vrui::getToolManager());
 	DepthCorrectionTool::initClass(*Vrui::getToolManager());
@@ -495,18 +761,24 @@ RawKinectViewer::RawKinectViewer(int& argc,char**& argv,char**& appDefaults)
 	
 	/* Parse the command line: */
 	bool printHelp=false;
+	int cameraType=0; // Default to first-generation Kinect camera
 	int cameraIndex=0; // Use first Kinect camera device on USB bus
 	Kinect::Camera::FrameSize selectedColorFrameSize=Kinect::Camera::FS_640_480;
 	Kinect::Camera::FrameSize selectedDepthFrameSize=Kinect::Camera::FS_640_480;
 	bool compressDepthFrames=false;
-	depthValueRange[0]=300.0f;
-	depthValueRange[1]=1100.0f; // float(Kinect::FrameSource::invalidDepth);
+	bool depthValueRangeRequested=false;
+	depthValueRange[0]=0.0f;
+	depthValueRange[1]=float(Kinect::FrameSource::invalidDepth-1);
 	for(int i=1;i<argc;++i)
 		{
 		if(argv[i][0]=='-')
 			{
 			if(strcasecmp(argv[i]+1,"h")==0)
 				printHelp=true;
+			else if(strcasecmp(argv[i]+1,"v2")==0)
+				cameraType=1; // Use Kinect V2
+			else if(strcasecmp(argv[i]+1,"rs")==0)
+				cameraType=2; // Use RealSense camera
 			else if(strcasecmp(argv[i]+1,"high")==0)
 				{
 				selectedColorFrameSize=Kinect::Camera::FS_1280_1024;
@@ -526,6 +798,7 @@ RawKinectViewer::RawKinectViewer(int& argc,char**& argv,char**& appDefaults)
 				}
 			else if(strcasecmp(argv[i]+1,"depthRange")==0)
 				{
+				depthValueRangeRequested=true;
 				for(int j=0;j<2;++j)
 					depthValueRange[j]=float(atof(argv[i+1+j]));
 				i+=2;
@@ -544,6 +817,10 @@ RawKinectViewer::RawKinectViewer(int& argc,char**& argv,char**& appDefaults)
 		std::cout<<"  Options:"<<std::endl;
 		std::cout<<"  -h"<<std::endl;
 		std::cout<<"     Prints this help message"<<std::endl;
+		std::cout<<"  -v2"<<std::endl;
+		std::cout<<"    Connect to a second-generation Kinect device"<<std::endl;
+		std::cout<<"  -rs"<<std::endl;
+		std::cout<<"    Connect to an Intel RealSense device"<<std::endl;
 		std::cout<<"  -high"<<std::endl;
 		std::cout<<"    Sets color frame size for the selected Kinect camera to 1280x1024 @ 15Hz"<<std::endl;
 		std::cout<<"  -compress"<<std::endl;
@@ -559,38 +836,81 @@ RawKinectViewer::RawKinectViewer(int& argc,char**& argv,char**& appDefaults)
 		std::cout<<"     Default: 300 1100"<<std::endl;
 		}
 	
-	/* Enable background USB event handling: */
-	usbContext.startEventHandling();
-	
-	/* Connect to the given Kinect camera device on the host: */
-	camera=new Kinect::Camera(usbContext,cameraIndex);
-	
-	/* Set the color camera's frame size: */
-	camera->setFrameSize(Kinect::FrameSource::COLOR,selectedColorFrameSize);
-	camera->setFrameSize(Kinect::FrameSource::DEPTH,selectedDepthFrameSize);
+	if(cameraType==0)
+		{
+		/* Connect to the given first-generation Kinect camera device on the host: */
+		Kinect::Camera* realCamera=new Kinect::Camera(cameraIndex);
+		camera=realCamera;
+		
+		/* Set the color camera's frame size: */
+		realCamera->setFrameSize(Kinect::FrameSource::COLOR,selectedColorFrameSize);
+		realCamera->setFrameSize(Kinect::FrameSource::DEPTH,selectedDepthFrameSize);
+		
+		/* Set depth frame compression: */
+		realCamera->setCompressDepthFrames(compressDepthFrames);
+		}
+	else if(cameraType==1)
+		{
+		/* Connect to the given second-generation Kinect camera device on the host: */
+		Kinect::CameraV2* realCamera=new Kinect::CameraV2(cameraIndex);
+		camera=realCamera;
+		}
+	else if(cameraType==2)
+		{
+		#if KINECT_CONFIG_HAVE_LIBREALSENSE
+		/* Connect to the given RealSense device: */
+		Kinect::CameraRealSense* realCamera=new Kinect::CameraRealSense(cameraIndex);
+		camera=realCamera;
+		#else
+		throw std::runtime_error("RawKinectViewer: Intel RealSense cameras not supported");
+		#endif
+		}
 	
 	/* Get the cameras' actual frame sizes: */
 	colorFrameSize=camera->getActualFrameSize(Kinect::FrameSource::COLOR);
 	depthFrameSize=camera->getActualFrameSize(Kinect::FrameSource::DEPTH);
 	
+	if(!depthValueRangeRequested)
+		{
+		/* Get the camera's raw depth value range: */
+		Kinect::FrameSource::DepthRange dr=camera->getDepthRange();
+		depthValueRange[0]=float(dr.getMin());
+		depthValueRange[1]=float(dr.getMax());
+		}
+	
 	/* Get the camera's depth correction parameters: */
 	Kinect::FrameSource::DepthCorrection* dc=camera->getDepthCorrectionParameters();
 	
-	/* Evaluate the camera's depth correction parameters into a per-pixel offset array: */
-	depthCorrection=dc->getPixelCorrection(depthFrameSize);
-	
-	/* Clean up: */
-	delete dc;
+	if(dc!=0)
+		{
+		/* Evaluate the camera's depth correction parameters into a per-pixel offset array: */
+		depthCorrection=dc->getPixelCorrection(depthFrameSize);
+		delete dc;
+		}
+	else
+		depthCorrection=0;
 	
 	/* Get the camera's intrinsic parameters: */
 	intrinsicParameters=camera->getIntrinsicParameters();
 	
+	/* Derive depth camera's 2D intrinsic parameters for lens distortion correction: */
+	const IntrinsicParameters::PTransform::Matrix& dpMat=intrinsicParameters.depthProjection.getMatrix();
+	double fxfy=-dpMat(2,3);
+	fy=fxfy/dpMat(1,1);
+	cy=-dpMat(1,3)*fy/fxfy;
+	fx=fxfy/dpMat(0,0);
+	sk=-dpMat(0,1)*fx*fy/fxfy;
+	cx=(-dpMat(0,3)/fxfy+sk*cy/(fx*fy))*fx;
+	
+	/* Calculate the depth image offset: */
+	if(intrinsicParameters.depthLensDistortion.isIdentity())
+		depthImageOffset=double(depthFrameSize[0]);
+	else
+		depthImageOffset=double((depthFrameSize[0]*5U)/4U);
+	
 	/* Allocate the average depth frame buffer: */
 	averageFrameDepth=new float[depthFrameSize[0]*depthFrameSize[1]];
 	averageFrameForeground=new float[depthFrameSize[0]*depthFrameSize[1]];
-	
-	/* Set depth frame compression: */
-	camera->setCompressDepthFrames(compressDepthFrames);
 	
 	/* Create the main menu: */
 	mainMenu=createMainMenu();
@@ -603,20 +923,19 @@ RawKinectViewer::RawKinectViewer(int& argc,char**& argv,char**& appDefaults)
 	
 	/* Select an invalid pixel: */
 	selectedPixel[0]=selectedPixel[1]=~0x0U;
-	
-	/* Initialize navigation transformation: */
-	resetNavigationCallback(0);
 	}
 
 RawKinectViewer::~RawKinectViewer(void)
 	{
 	delete mainMenu;
 	delete averageDepthFrameDialog;
-	delete[] averageFrameDepth;
-	delete[] averageFrameForeground;
 	
 	/* Stop streaming: */
 	camera->stopStreaming();
+	
+	delete[] averageFrameDepth;
+	delete[] averageFrameForeground;
+	delete[] colorBackground;
 	
 	/* Disconnect from the Kinect camera device: */
 	delete camera;
@@ -653,14 +972,14 @@ void RawKinectViewer::frame(void)
 			++selectedPixelCurrentIndex;
 			if(selectedPixelCurrentIndex==128)
 				selectedPixelCurrentIndex=0;
-			const DepthPixel* dfPtr=static_cast<const DepthPixel*>(depthFrames.getLockedValue().getBuffer());
+			const DepthPixel* dfPtr=depthFrames.getLockedValue().getData<DepthPixel>();
 			selectedPixelPulse[selectedPixelCurrentIndex]=dfPtr[selectedPixel[1]*depthFrames.getLockedValue().getSize(0)+selectedPixel[0]];
 			}
 		
 		if(averageFrameCounter>0)
 			{
 			/* Accumulate the new depth frame into the averaging buffer: */
-			const DepthPixel* dfPtr=static_cast<const DepthPixel*>(depthFrames.getLockedValue().getBuffer());
+			const DepthPixel* dfPtr=depthFrames.getLockedValue().getData<DepthPixel>();
 			float* afdPtr=averageFrameDepth;
 			float* affPtr=averageFrameForeground;
 			for(unsigned int y=0;y<depthFrameSize[1];++y)
@@ -721,19 +1040,36 @@ void RawKinectViewer::display(GLContextData& contextData) const
 		const float* afdPtr=averageFrameDepth;
 		const float* affPtr=averageFrameForeground;
 		float foregroundCutoff=float(averageNumFrames)*0.5f;
-		const PixelCorrection* dcPtr=depthCorrection;
 		GLubyte* bfPtr=byteFrame;
-		for(unsigned int y=0;y<height;++y)
-			for(unsigned int x=0;x<width;++x,++afdPtr,++affPtr,++dcPtr,bfPtr+=3)
-				{
-				if(*affPtr>=foregroundCutoff)
+		if(depthCorrection!=0)
+			{
+			const PixelCorrection* dcPtr=depthCorrection;
+			for(unsigned int y=0;y<height;++y)
+				for(unsigned int x=0;x<width;++x,++afdPtr,++affPtr,++dcPtr,bfPtr+=3)
 					{
-					float d=dcPtr->correct((*afdPtr)/(*affPtr));
-					mapDepth(x,y,d,bfPtr);
+					if(*affPtr>=foregroundCutoff)
+						{
+						float d=dcPtr->correct((*afdPtr)/(*affPtr));
+						mapDepth(x,y,d,bfPtr);
+						}
+					else
+						bfPtr[0]=bfPtr[1]=bfPtr[2]=GLubyte(0);
 					}
-				else
-					bfPtr[0]=bfPtr[1]=bfPtr[2]=GLubyte(0);
-				}
+			}
+		else
+			{
+			for(unsigned int y=0;y<height;++y)
+				for(unsigned int x=0;x<width;++x,++afdPtr,++affPtr,bfPtr+=3)
+					{
+					if(*affPtr>=foregroundCutoff)
+						{
+						float d=(*afdPtr)/(*affPtr);
+						mapDepth(x,y,d,bfPtr);
+						}
+					else
+						bfPtr[0]=bfPtr[1]=bfPtr[2]=GLubyte(0);
+					}
+			}
 		
 		/* Set up the texture parameters: */
 		glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MIN_FILTER,GL_NEAREST);
@@ -756,24 +1092,38 @@ void RawKinectViewer::display(GLContextData& contextData) const
 			const Kinect::FrameBuffer& depthFrame=depthFrames.getLockedValue();
 			unsigned int width=depthFrameSize[0];
 			unsigned int height=depthFrameSize[1];
-			const GLushort* framePtr=static_cast<const GLushort*>(depthFrame.getBuffer());
+			const GLushort* framePtr=depthFrame.getData<GLushort>();
 			
 			/* Convert the depth image to unsigned byte: */
 			GLubyte* byteFrame=new GLubyte[height*width*3];
 			const GLushort* fPtr=framePtr;
-			const PixelCorrection* dcPtr=depthCorrection;
 			GLubyte* bfPtr=byteFrame;
-			for(unsigned int y=0;y<height;++y)
-				for(unsigned int x=0;x<width;++x,++fPtr,++dcPtr,bfPtr+=3)
-					{
-					if(*fPtr!=Kinect::FrameSource::invalidDepth)
+			if(depthCorrection!=0)
+				{
+				const PixelCorrection* dcPtr=depthCorrection;
+				for(unsigned int y=0;y<height;++y)
+					for(unsigned int x=0;x<width;++x,++fPtr,++dcPtr,bfPtr+=3)
 						{
-						float d=dcPtr->correct(*fPtr);
-						mapDepth(x,y,d,bfPtr);
+						if(*fPtr!=Kinect::FrameSource::invalidDepth)
+							{
+							float d=dcPtr->correct(*fPtr);
+							mapDepth(x,y,d,bfPtr);
+							}
+						else
+							bfPtr[0]=bfPtr[1]=bfPtr[2]=GLubyte(0);
 						}
-					else
-						bfPtr[0]=bfPtr[1]=bfPtr[2]=GLubyte(0);
-					}
+				}
+			else
+				{
+				for(unsigned int y=0;y<height;++y)
+					for(unsigned int x=0;x<width;++x,++fPtr,bfPtr+=3)
+						{
+						if(*fPtr!=Kinect::FrameSource::invalidDepth)
+							mapDepth(x,y,*fPtr,bfPtr);
+						else
+							bfPtr[0]=bfPtr[1]=bfPtr[2]=GLubyte(0);
+						}
+				}
 			
 			/* Set up the texture parameters: */
 			glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MIN_FILTER,GL_NEAREST);
@@ -794,16 +1144,57 @@ void RawKinectViewer::display(GLContextData& contextData) const
 		}
 	
 	/* Draw the depth image: */
-	glBegin(GL_QUADS);
-	glTexCoord2f(0.0f,0.0f);
-	glVertex2f(-GLfloat(depthFrameSize[0]),0.0f);
-	glTexCoord2f(GLfloat(depthFrameSize[0])/GLfloat(dataItem->depthTextureSize[0]),0.0f);
-	glVertex2f(0.0f,0.0f);
-	glTexCoord2f(GLfloat(depthFrameSize[0])/GLfloat(dataItem->depthTextureSize[0]),GLfloat(depthFrameSize[1])/GLfloat(dataItem->depthTextureSize[1]));
-	glVertex2f(0.0f,GLfloat(depthFrameSize[1]));
-	glTexCoord2f(0.0f,GLfloat(depthFrameSize[1])/GLfloat(dataItem->depthTextureSize[1]));
-	glVertex2f(-GLfloat(depthFrameSize[0]),GLfloat(depthFrameSize[1]));
-	glEnd();
+	if(!intrinsicParameters.depthLensDistortion.isIdentity())
+		{
+		/* Create a grid of undistorted pixel positions: */
+		unsigned int gridSizeX=(depthFrameSize[0]+15U)/16U;
+		unsigned int gridSizeY=(depthFrameSize[1]+15U)/16U;
+		for(unsigned int y=1;y<=gridSizeY;++y)
+			{
+			glBegin(GL_QUAD_STRIP);
+			for(unsigned int x=0;x<=gridSizeX;++x)
+				{
+				/* Calculate the distorted pixel position in normalized camera space: */
+				Kinect::LensDistortion::Point dp0;
+				dp0[0]=(double(x)*double(depthFrameSize[0])/double(gridSizeX)-cx)/fx;
+				dp0[1]=(double(y-1)*double(depthFrameSize[1])/double(gridSizeY)-cy)/fy;
+				Kinect::LensDistortion::Point dp1;
+				dp1[0]=(double(x)*double(depthFrameSize[0])/double(gridSizeX)-cx)/fx;
+				dp1[1]=(double(y)*double(depthFrameSize[1])/double(gridSizeY)-cy)/fy;
+				
+				/* Calculate the undistorted pixel position in normalized camera space: */
+				Kinect::LensDistortion::Point up0=intrinsicParameters.depthLensDistortion.undistort(dp0);
+				Kinect::LensDistortion::Point up1=intrinsicParameters.depthLensDistortion.undistort(dp1);
+				
+				/* Calculate the undistorted pixel position in pixel space: */
+				up0[0]=fx*up0[0]+cx;
+				up0[1]=fy*up0[1]+cy;
+				up1[0]=fx*up1[0]+cx;
+				up1[1]=fy*up1[1]+cy;
+				
+				/* Draw the next quad: */
+				glTexCoord2f(float(x)*float(depthFrameSize[0])/float(gridSizeX*float(dataItem->depthTextureSize[0])),float(y)*float(depthFrameSize[1])/float(gridSizeY*float(dataItem->depthTextureSize[1])));
+				glVertex2d(up1[0]-depthImageOffset,up1[1]);
+				glTexCoord2f(float(x)*float(depthFrameSize[0])/float(gridSizeX*float(dataItem->depthTextureSize[0])),float(y-1)*float(depthFrameSize[1])/float(gridSizeY*float(dataItem->depthTextureSize[1])));
+				glVertex2d(up0[0]-depthImageOffset,up0[1]);
+				}
+			glEnd();
+			}
+		}
+	else
+		{
+		/* Draw an undistorted depth image: */
+		glBegin(GL_QUADS);
+		glTexCoord2f(0.0f,0.0f);
+		glVertex2f(-GLfloat(depthFrameSize[0]),0.0f);
+		glTexCoord2f(GLfloat(depthFrameSize[0])/GLfloat(dataItem->depthTextureSize[0]),0.0f);
+		glVertex2f(0.0f,0.0f);
+		glTexCoord2f(GLfloat(depthFrameSize[0])/GLfloat(dataItem->depthTextureSize[0]),GLfloat(depthFrameSize[1])/GLfloat(dataItem->depthTextureSize[1]));
+		glVertex2f(0.0f,GLfloat(depthFrameSize[1]));
+		glTexCoord2f(0.0f,GLfloat(depthFrameSize[1])/GLfloat(dataItem->depthTextureSize[1]));
+		glVertex2f(-GLfloat(depthFrameSize[0]),GLfloat(depthFrameSize[1]));
+		glEnd();
+		}
 	
 	/* Bind the color texture object: */
 	glBindTexture(GL_TEXTURE_2D,dataItem->colorTextureId);
@@ -815,7 +1206,7 @@ void RawKinectViewer::display(GLContextData& contextData) const
 		const Kinect::FrameBuffer& colorFrame=colorFrames.getLockedValue();
 		unsigned int width=colorFrameSize[0];
 		unsigned int height=colorFrameSize[1];
-		const GLubyte* framePtr=static_cast<const GLubyte*>(colorFrame.getBuffer());
+		const GLubyte* framePtr=colorFrame.getData<GLubyte>();
 		
 		/* Set up the texture parameters: */
 		glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MIN_FILTER,GL_NEAREST);
@@ -872,6 +1263,12 @@ void RawKinectViewer::display(GLContextData& contextData) const
 	
 	/* Restore OpenGL state: */
 	glPopAttrib();
+	}
+
+void RawKinectViewer::resetNavigation(void)
+	{
+	/* Reset the navigation transformation: */
+	Vrui::setNavigationTransformation(Vrui::Point::origin,Vrui::Scalar(1024),Vrui::Vector(0,1,0));
 	}
 
 void RawKinectViewer::initContext(GLContextData& contextData) const

@@ -1,7 +1,7 @@
 /***********************************************************************
 MultiplexedFrameSource - Class to stream several pairs of color and
 depth frames from a single source file or pipe.
-Copyright (c) 2010-2013 Oliver Kreylos
+Copyright (c) 2010-2016 Oliver Kreylos
 
 This file is part of the Kinect 3D Video Capture Project (Kinect).
 
@@ -79,6 +79,8 @@ class MultiplexedFrameSource
 	/* Elements: */
 	private:
 	Comm::PipePtr pipe; // The multiplexed source stream
+	unsigned int serverProtocolVersion; // Version number of the server's streaming protocol
+	double timeStampOffset; // Offset between server's and client's frame time stamps
 	unsigned int numStreams; // Number of streams in the multiplexer
 	FrameReader** colorFrameReaders; // Array of color stream readers for the component streams
 	FrameReader** depthFrameReaders; // Array of depth stream readers for the component streams

@@ -147,3 +147,53 @@ Kinect-2.8:
   directory.
   - Factory calibration data appears to be broken (shift in color
     texture mapping) on Kinect-for-Xbox 1473 and Kinect-for-Windows.
+
+Kinect-2.9:
+- Bumped Vrui version requirement to 3.2-001.
+- Bumped Collaboration infrastructure version requirement to 2.7.
+- Fixed dependencies of install: target in makefile.
+- Added 3D measurement tool for raw depth stream in RawKinectViewer.
+- Moved SphereExtractorTool outside of KinectViewer class.
+- Added recovery from number format errors to AlignPoints.
+- Replaced private version of Levenberg-Marquardt minimizer with one
+  from Geometry library.
+- Added non-linear fixed-radius sphere fitting to SphereExtractor.
+- API change: Replaced setParameters method in Kinect::ShaderProjector
+  with setIntrinsicParameters and setExtrinsicParameters methods.
+- Added option in KinectViewer to align all 3D projectors in a single
+  column for easier extrinsic calibration.
+- Added visualization of collected calibration tie points to
+  KinectViewer's SphereExtractorTool.
+- Added full depth image to world space projection matrix to
+  Kinect::Projector to simplify matrix setup.
+- Fixed behavior of "Save Background..." button in KinectViewer's
+  streamer dialogs. Now defaults to proper background directory and
+  background file name.
+- Moved compiler-flag #defines from makefile to
+  Kinect/Internal/Config.h.
+
+Kinect-3.0:
+- Bumped Vrui version requirement to 4.0-001.
+- Initial support for Kinect v2 (Kinect-for-Xbox-One).
+
+Kinect-3.1:
+- Bumped Vrui version requirement to 4.1-001.
+- Added support for Intel RealSense cameras through the librealsense
+  library.
+- Created new namespace-global functions openDirectFrameSource to open
+  3D cameras without knowing their exact types.
+
+Kinect-3.2:
+- Added rendering mode to illuminate surfaces instead of mapping images
+  onto them.
+- Bumped Vrui version requirement to 4.2-001.
+- Renamed Kinect udev rules file to 69-Kinect.rules to guarantee it is
+  loaded before the rule file processing uaccess rules in level 70.
+  - Added rules for Kinect v2 to udev rules file.
+- Changed makefile targets to install/remove device permission rules
+  to bring package in line with Vrui-4.2.
+  - Rule names changed to installudevrules and uninstalludevrules.
+  - Removed sudo commands from makefile; must now be invoked as
+    "sudo make installudevrules" / "sudo make uninstalludevrules".
+- Lotsa other things I forgot to write down while working on the
+  SARndbox package with a gun to my head. :)

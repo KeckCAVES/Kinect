@@ -1,7 +1,7 @@
 /***********************************************************************
 KinectPlayer - Vislet to play back 3D video previously captured from one
 or more Kinect devices.
-Copyright (c) 2011-2013 Oliver Kreylos
+Copyright (c) 2011-2016 Oliver Kreylos
 
 This file is part of the Kinect 3D Video Capture Project (Kinect).
 
@@ -193,7 +193,8 @@ void* KinectPlayer::KinectStreamer::depthDecompressorThreadMethod(void)
 		while(numDepthFrames==2)
 			frameQueueCond.wait(frameQueueLock);
 		mostRecentDepthFrame=1-mostRecentDepthFrame;
-		depthFrames[mostRecentDepthFrame]=nextMesh;
+		depthFrames[mostRecentDepthFrame]=nextFrame;
+		meshes[mostRecentDepthFrame]=nextMesh;
 		++numDepthFrames;
 		if(numDepthFrames==1)
 			frameQueueCond.broadcast();
@@ -309,7 +310,8 @@ void KinectPlayer::KinectStreamer::updateFrames(double currentTimeStamp)
 	{
 	/* Wait until the next frame is newer than the new time step: */
 	Kinect::FrameBuffer currentColorFrame;
-	Kinect::MeshBuffer currentDepthFrame;
+	Kinect::FrameBuffer currentDepthFrame;
+	Kinect::MeshBuffer currentMesh;
 	while(nextColorFrame.timeStamp<=currentTimeStamp||nextDepthFrame.timeStamp<=currentTimeStamp)
 		{
 		if(nextColorFrame.timeStamp<=currentTimeStamp)
@@ -327,11 +329,13 @@ void KinectPlayer::KinectStreamer::updateFrames(double currentTimeStamp)
 		if(nextDepthFrame.timeStamp<=currentTimeStamp)
 			{
 			currentDepthFrame=nextDepthFrame;
+			currentMesh=nextMesh;
 			{
 			Threads::MutexCond::Lock frameQueueLock(frameQueueCond);
 			while(numDepthFrames==0)
 				frameQueueCond.wait(frameQueueLock);
 			nextDepthFrame=depthFrames[(mostRecentDepthFrame-numDepthFrames+3)%2];
+			nextMesh=meshes[(mostRecentDepthFrame-numDepthFrames+3)%2];
 			if(--numDepthFrames==1)
 				frameQueueCond.broadcast();
 			}
@@ -342,7 +346,13 @@ void KinectPlayer::KinectStreamer::updateFrames(double currentTimeStamp)
 	if(currentColorFrame.timeStamp!=0.0)
 		projector.setColorFrame(currentColorFrame);
 	if(currentDepthFrame.timeStamp!=0.0)
-		projector.setMesh(currentDepthFrame);
+		{
+		#if !KINECT_CONFIG_USE_PROJECTOR2&&!KINECT_CONFIG_USE_SHADERPROJECTOR
+		projector.setMesh(currentMesh);
+		#else
+		projector.setMesh(currentDepthFrame,currentMesh);
+		#endif
+		}
 	projector.updateFrames();
 	}
 

@@ -1,7 +1,7 @@
 /***********************************************************************
 KinectViewer - Simple application to view 3D reconstructions of color
 and depth images captured from a Kinect device.
-Copyright (c) 2010-2013 Oliver Kreylos
+Copyright (c) 2010-2016 Oliver Kreylos
 
 This file is part of the Kinect 3D Video Capture Project (Kinect).
 
@@ -25,18 +25,29 @@ Software Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA
 #define KINECTVIEWER_INCLUDED
 
 #include <vector>
-#include <USB/Context.h>
+#include <Threads/Mutex.h>
+#include <Threads/Spinlock.h>
+#include <GL/gl.h>
+#include <GL/GLObject.h>
 #include <GLMotif/ToggleButton.h>
 #include <GLMotif/TextFieldSlider.h>
+#include <GLMotif/FileSelectionHelper.h>
 #include <Vrui/Application.h>
-#include <Vrui/FileSelectionHelper.h>
+#include <Vrui/GenericToolFactory.h>
 #include <Kinect/Config.h>
+#if KINECT_CONFIG_FRAMESOURCE_EXTRINSIC_PROJECTIVE
+#include <Geometry/ProjectiveTransformation.h>
+#else
+#include <Geometry/OrthogonalTransformation.h>
+#endif
 #include <Kinect/FrameSource.h>
+#include <Kinect/ProjectorType.h>
 
 /* Forward declarations: */
 namespace GLMotif {
 class PopupWindow;
 class PopupMenu;
+class Button;
 }
 namespace Sound {
 class SoundRecorder;
@@ -44,17 +55,14 @@ class SoundPlayer;
 }
 namespace Kinect {
 class FrameBuffer;
-class Camera;
-#if !KINECT_USE_SHADERPROJECTOR
+class DirectFrameSource;
+#if !KINECT_CONFIG_USE_SHADERPROJECTOR
 class MeshBuffer;
-#endif
-#if KINECT_USE_SHADERPROJECTOR
-class ShaderProjector;
-#else
-class Projector;
 #endif
 class FrameSaver;
 }
+class SphereExtractor;
+class SphereExtractorTool;
 
 class KinectViewer:public Vrui::Application
 	{
@@ -68,38 +76,32 @@ class KinectViewer:public Vrui::Application
 		public:
 		KinectViewer* application; // Pointer to the application object
 		Kinect::FrameSource* source; // Pointer to the 3D video frame source
-		#if KINECT_USE_SHADERPROJECTOR
-		Kinect::ShaderProjector* projector; // Pointer to the shader-based projector
-		#else
-		Kinect::Projector* projector; // Pointer to the projector
-		#endif
+		Kinect::ProjectorType* projector; // Pointer to the projector of configured type
+		Kinect::FrameSource::ExtrinsicParameters savedExtrinsics; // Saved extrinsic parameters of projector
+		Threads::Spinlock frameSaverMutex; // Mutex protecting changes to the frame saver object
 		Kinect::FrameSaver* frameSaver; // Pointer to a frame saver writing received color and depth frames to a pair of files
 		bool enabled; // Flag whether the streamer is currently processing and rendering 3D video frames
 		DepthPixel maxDepth; // Maximum depth value for background removal
+		Threads::Mutex sphereExtractorMutex; // Mutex protecting the sphere extractor object
+		SphereExtractor* sphereExtractor; // Pointer to a sphere extractor used during extrinsic calibration
 		GLMotif::PopupWindow* streamerDialog; // Pointer to a dialog window to control this streamer
+		GLMotif::Button* captureBackgroundButton; // Button to capture a current background image
 		GLMotif::ToggleButton* showStreamerDialogToggle; // Pointer to a toggle button to show/hide the control dialog window
 		
 		/* Private methods: */
 		void colorStreamingCallback(const Kinect::FrameBuffer& frameBuffer); // Callback receiving color frames from the frame source
 		void depthStreamingCallback(const Kinect::FrameBuffer& frameBuffer); // Callback receiving depth frames from the frame source
-		#if !KINECT_USE_SHADERPROJECTOR
+		#if !KINECT_CONFIG_USE_SHADERPROJECTOR
 		void meshStreamingCallback(const Kinect::MeshBuffer& meshBuffer); // Callback receiving projected meshes from the Kinect projector
 		#endif
 		void showStreamerDialogCallback(GLMotif::ToggleButton::ValueChangedCallbackData* cbData); // Callback when the control dialog show/hide button is pressed
 		GLMotif::PopupWindow* createStreamerDialog(void); // Creates a dialog box to control parameters of this streamer
 		void showFacadeCallback(GLMotif::ToggleButton::ValueChangedCallbackData* cbData);
 		void showFromCameraCallback(Misc::CallbackData* cbData);
-		#if !KINECT_USE_SHADERPROJECTOR
+		#if !KINECT_CONFIG_USE_SHADERPROJECTOR
 		void filterDepthFramesCallback(GLMotif::ToggleButton::ValueChangedCallbackData* cbData);
 		#endif
 		void triangleDepthRangeCallback(GLMotif::TextFieldSlider::ValueChangedCallbackData* cbData);
-		void removeBackgroundCallback(GLMotif::ToggleButton::ValueChangedCallbackData* cbData);
-		void backgroundCaptureCompleteCallback(Kinect::Camera& camera);
-		void captureBackgroundCallback(Misc::CallbackData* cbData);
-		void loadBackgroundOKCallback(GLMotif::FileSelectionDialog::OKCallbackData* cbData);
-		void saveBackgroundOKCallback(GLMotif::FileSelectionDialog::OKCallbackData* cbData);
-		void backgroundMaxDepthCallback(GLMotif::TextFieldSlider::ValueChangedCallbackData* cbData);
-		void backgroundRemovalFuzzCallback(GLMotif::TextFieldSlider::ValueChangedCallbackData* cbData);
 		void streamerDialogCloseCallback(Misc::CallbackData* cbData);
 		
 		/* Constructors and destructors: */
@@ -113,21 +115,22 @@ class KinectViewer:public Vrui::Application
 			return *source;
 			}
 		void setShowStreamerDialogToggle(GLMotif::ToggleButton* newShowStreamerDialogToggle); // Sets the toggle button to show/hide the control dialog
-		void resetFrameTimer(void); // Resets the streamer's frame timer
-		void startStreaming(void); // Starts streaming
+		void startStreaming(const Kinect::FrameSource::Time& timeBase); // Starts streaming with the given time base
 		void setFrameSaver(Kinect::FrameSaver* newFrameSaver); // Sets a new frame saver; if !=0, starts saving frames
 		void frame(void); // Called once per Vrui frame to update state
 		void display(GLContextData& contextData) const; // Renders the streamer's current state into the given OpenGL context
 		};
 	
 	friend class KinectStreamer;
+	friend class SphereExtractorTool;
 	
 	/* Elements: */
 	private:
-	USB::Context usbContext; // USB device context
-	Vrui::FileSelectionHelper backgroundSelectionHelper; // Helper object to load and save background frames
+	Kinect::FrameSource::Time timeBase; // A common time base for all streamers
 	std::vector<KinectStreamer*> streamers; // List of Kinect streamers, each connected to one Kinect camera
-	Vrui::FileSelectionHelper streamSelectionHelper; // Helper object to save 3D video streams
+	GLMotif::ToggleButton* saveStreamsToggle; // Toggle button to save 3D video streams to files
+	IO::DirectoryPtr saveStreamsDirectory; // Last directory used/viewed when saving 3D video streams to files
+	GLMotif::FileSelectionDialog* saveStreamsFileSelectionDialog; // Pointer to file selection dialog if user is preparing to save 3D video streams
 	Sound::SoundRecorder* soundRecorder; // Recorder to save sound from the default sound source while saving 3D video streams
 	Sound::SoundPlayer* soundPlayer; // Player to play back sound from a previously saved 3D video stream
 	// Vrui::InputDevice* cameraDevice; // Pointer to the device to which the depth camera is attached
@@ -137,9 +140,11 @@ class KinectViewer:public Vrui::Application
 	
 	/* Private methods: */
 	GLMotif::PopupMenu* createMainMenu(void); // Creates the program's main menu
-	void resetNavigationCallback(Misc::CallbackData* cbData); // Callback when the user wants to reset the navigation transformation
 	void goToPhysicalCallback(Misc::CallbackData* cbData);
+	void alignProjectorsCallback(GLMotif::ToggleButton::ValueChangedCallbackData* cbData);
+	void saveStreamsCallback(GLMotif::ToggleButton::ValueChangedCallbackData* cbData);
 	void saveStreamsOKCallback(GLMotif::FileSelectionDialog::OKCallbackData* cbData);
+	void saveStreamsCancelCallback(GLMotif::FileSelectionDialog::CancelCallbackData* cbData);
 	
 	/* Constructors and destructors: */
 	public:
@@ -149,6 +154,7 @@ class KinectViewer:public Vrui::Application
 	/* Methods from Vrui::Application: */
 	virtual void frame(void);
 	virtual void display(GLContextData& contextData) const;
+	virtual void resetNavigation(void);
 	};
 
 #endif

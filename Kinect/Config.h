@@ -1,7 +1,7 @@
 /***********************************************************************
 Config - Configuration header file for the Kinect 3D Video Capture
 Project.
-Copyright (c) 2013 Oliver Kreylos
+Copyright (c) 2013-2016 Oliver Kreylos
 
 This file is part of the Kinect 3D Video Capture Project (Kinect).
 
@@ -24,7 +24,10 @@ Software Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA
 #ifndef KINECT_CONFIG_INCLUDED
 #define KINECT_CONFIG_INCLUDED
 
+#define KINECT_CONFIG_HAVE_LIBREALSENSE 0
 #define KINECT_CONFIG_FRAMESOURCE_EXTRINSIC_PROJECTIVE 0
-#define KINECT_USE_SHADERPROJECTOR 1
+#define KINECT_CONFIG_USE_PROJECTOR2 1
+#define KINECT_CONFIG_USE_SHADERPROJECTOR 0
+#define KINECT_CONFIG_PROJECTORTYPE Projector2
 
 #endif

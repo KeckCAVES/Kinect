@@ -1,7 +1,7 @@
 /***********************************************************************
 DepthFrameReader - Class to read compressed depth frames from a source,
 and pass decompressed time-stamped depth frames to a client.
-Copyright (c) 2010-2013 Oliver Kreylos
+Copyright (c) 2010-2015 Oliver Kreylos
 
 This file is part of the Kinect 3D Video Capture Project (Kinect).
 
@@ -104,7 +104,7 @@ FrameBuffer DepthFrameReader::readNextFrame(void)
 	result.timeStamp=source.read<Misc::Float64>();
 	
 	/* Process all spans: */
-	FrameSource::DepthPixel* resultBuffer=static_cast<FrameSource::DepthPixel*>(result.getBuffer());
+	FrameSource::DepthPixel* resultBuffer=result.getData<FrameSource::DepthPixel>();
 	unsigned int numPixels=size[0]*size[1];
 	const unsigned int* hcPtr=hilbertCurve.getOffsets();
 	while(numPixels>0)

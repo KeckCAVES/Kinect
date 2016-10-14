@@ -1,7 +1,7 @@
 /***********************************************************************
 KinectViewer - Vislet to draw 3D reconstructions captured from a Kinect
 device in 3D space.
-Copyright (c) 2010-2013 Oliver Kreylos
+Copyright (c) 2010-2016 Oliver Kreylos
 
 This file is part of the Kinect 3D Video Capture Project (Kinect).
 
@@ -30,25 +30,26 @@ Software Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA
 #include <Threads/Mutex.h>
 #include <Threads/Cond.h>
 #include <IO/File.h>
+#include <Geometry/OrthonormalTransformation.h>
+#include <Vrui/Geometry.h>
+#include <Vrui/Tool.h>
+#include <Vrui/GenericToolFactory.h>
+#include <Vrui/ToolManager.h>
 #include <Vrui/Vislet.h>
 #include <Kinect/Config.h>
-#if KINECT_USE_SHADERPROJECTOR
-#include <Kinect/ShaderProjector.h>
-#else
-#include <Kinect/Projector.h>
-#endif
+#include <Kinect/FrameSource.h>
+#include <Kinect/ProjectorHeader.h>
 
 /* Forward declarations: */
 
-namespace USB {
-class Context;
+namespace Vrui {
+class InputDevice;
 }
 namespace Kinect {
 class FrameBuffer;
-#if !KINECT_USE_SHADERPROJECTOR
+#if !KINECT_CONFIG_USE_SHADERPROJECTOR
 class MeshBuffer;
 #endif
-class FrameSource;
 class FrameSaver;
 class FrameReader;
 }
@@ -74,15 +75,12 @@ class KinectViewer:public Vrui::Vislet
 	friend class KinectViewerFactory;
 	
 	/* Embedded classes: */
+	private:
 	class Renderer // Base class to render 3D video
 		{
 		/* Elements: */
 		protected:
-		#if KINECT_USE_SHADERPROJECTOR
-		Kinect::ShaderProjector* projector;
-		#else
-		Kinect::Projector* projector;
-		#endif
+		Kinect::ProjectorType* projector; // Pointer to the projector of the configured type
 		
 		/* Constructors and destructors: */
 		public:
@@ -93,13 +91,14 @@ class KinectViewer:public Vrui::Vislet
 		virtual ~Renderer(void);
 		
 		/* Methods: */
-		virtual void startStreaming(void) =0; // Starts streaming 3D video frames into the projector
-		virtual void frame(double newTimeStamp) =0; // Called once per application frame to update renderer state
-		void glRenderAction(GLContextData& contextData) const // Draws the renderer's current state into the given OpenGL context
+		Kinect::ProjectorType& getProjector(void) // Returns the renderer's projector
 			{
-			/* Draw the current 3D video frame: */
-			projector->glRenderAction(contextData);
+			return *projector;
 			}
+		void applyPreTransform(const Kinect::FrameSource::ExtrinsicParameters& preTransform); // Applies a pre-transformation to the projector's transformation
+		virtual void startStreaming(const Kinect::FrameSource::Time& timeBase) =0; // Starts streaming 3D video frames into the projector
+		virtual void frame(double newTimeStamp) =0; // Called once per application frame to update renderer state
+		virtual void glRenderAction(GLContextData& contextData) const; // Draws the renderer's current state into the given OpenGL context
 		};
 	
 	class LiveRenderer:public Renderer // Class to render 3D video from a "live" unsynchronized source
@@ -108,13 +107,14 @@ class KinectViewer:public Vrui::Vislet
 		public:
 		Kinect::FrameSource* source;
 		bool started; // Flag whether streaming has been started
+		bool paused; // Flag if the renderer is currently paused
 		Kinect::FrameSaver* frameSaver;
 		double timeStamp; // Current timestamp when saving 3D video streams
 		
 		/* Private methods: */
 		void colorStreamingCallback(const Kinect::FrameBuffer& frameBuffer); // Callback receiving color frames from the frame source
 		void depthStreamingCallback(const Kinect::FrameBuffer& frameBuffer); // Callback receiving depth frames from the frame source
-		#if !KINECT_USE_SHADERPROJECTOR
+		#if !KINECT_CONFIG_USE_SHADERPROJECTOR
 		void meshStreamingCallback(const Kinect::MeshBuffer& meshBuffer); // Callback receiving projected meshes from the projector
 		#endif
 		
@@ -123,11 +123,36 @@ class KinectViewer:public Vrui::Vislet
 		virtual ~LiveRenderer(void);
 		
 		/* Methods from Renderer: */
-		virtual void startStreaming(void);
+		virtual void startStreaming(const Kinect::FrameSource::Time& timeBase);
 		virtual void frame(double newTimeStamp);
 		
 		/* New methods: */
 		void saveStreams(const std::string& saveFileName); // Prepares the renderer to save streams to a pair of files of the given name
+		};
+	
+	class TrackedRenderer:public LiveRenderer // Class to render 3D video from a "live" source that is attached to a tracked input device
+		{
+		/* Elements: */
+		public:
+		Kinect::FrameSource::Time sourceTimeBase; // Time base of the connected frame source
+		double latency; // Expected latency of source device
+		Vrui::InputDevice* trackingDevice; // Pointer to the tracking device to which the live source is attached
+		size_t trackingBufferSize; // Size of ring buffer containing past tracking device positions/orientations
+		double* timeStampBuffer; // Ring buffer containing tracking device time stamps
+		Vrui::TrackerState* trackingBuffer; // Ring buffer containing past tracking device positions/orientations
+		size_t numTrackingBufferEntries; // Number of entries currently in tracking buffer
+		size_t tail; // Index behind newest sample in tracking buffer
+		double meshTimeStamp; // Time stamp of the triangle mesh currently locked for rendering
+		Vrui::TrackerState meshTrackerState; // Tracked device position/orientation to display the triangle mesh currently locked in the projector
+		
+		/* Constructors and destructors: */
+		TrackedRenderer(Kinect::FrameSource* sSource,Vrui::InputDevice* sTrackingDevice); // Creates a renderer for the given 3D video source and tracked input device and saves streams from source if save file name is non-empty; adopts source object
+		virtual ~TrackedRenderer(void);
+		
+		/* Methods from Renderer: */
+		virtual void startStreaming(const Kinect::FrameSource::Time& timeBase);
+		virtual void frame(double newTimeStamp);
+		virtual void glRenderAction(GLContextData& contextData) const;
 		};
 	
 	class SynchedRenderer:public Renderer // Class to render 3D video from a time-synchronized 3D video stream file
@@ -156,16 +181,14 @@ class KinectViewer:public Vrui::Vislet
 		
 		Threads::Cond depthFrameQueueFullCond; // Condition variable to wait when the depth frame queue is full
 		int numDepthFrames; // Number of depth frames currently in the queue
-		#if KINECT_USE_SHADERPROJECTOR
 		Kinect::FrameBuffer depthFrames[numQueueSlots]; // Queue of two depth frames whose time stamps bracket the display time stamp
-		#else
-		Kinect::MeshBuffer depthFrames[numQueueSlots]; // Queue of two depth frames whose time stamps bracket the display time stamp
+		#if !KINECT_CONFIG_USE_SHADERPROJECTOR
+		Kinect::MeshBuffer meshes[numQueueSlots]; // Queue of two meshes whose time stamps bracket the display time stamp
 		#endif
 		int mostRecentDepthFrame; // Index of the queue slot containing the most recent depth frame
-		#if KINECT_USE_SHADERPROJECTOR
 		Kinect::FrameBuffer nextDepthFrame; // The next depth frame
-		#else
-		Kinect::MeshBuffer nextDepthFrame; // The next depth frame
+		#if !KINECT_CONFIG_USE_SHADERPROJECTOR
+		Kinect::MeshBuffer nextMesh; // The next mesh
 		#endif
 		
 		/* Private methods: */
@@ -178,20 +201,92 @@ class KinectViewer:public Vrui::Vislet
 		virtual ~SynchedRenderer(void);
 		
 		/* Methods from Renderer: */
-		virtual void startStreaming(void);
+		virtual void startStreaming(const Kinect::FrameSource::Time& timeBase);
 		virtual void frame(double newTimeStamp);
 		};
+	
+	/* Embedded classes: */
+	private:
+	class Tool // Mix-in class for tool classes related to KinectViewer vislets
+		{
+		/* Elements: */
+		protected:
+		KinectViewer* vislet; // Pointer to the vislet with which this tool is associated
+		
+		/* Constructors and destructors: */
+		public:
+		Tool(void) // Default constructor
+			:vislet(0)
+			{
+			}
+		
+		/* Methods: */
+		void setVislet(KinectViewer* newVislet) // Associates the tool with a vislet
+			{
+			vislet=newVislet;
+			}
+		};
+	
+	class PauseViewerTool; // Forward declaration
+	typedef Vrui::GenericToolFactory<PauseViewerTool> PauseViewerToolFactory; // Factory class for pausing tools
+	
+	class PauseViewerTool:public Vrui::Tool,public Tool // Tool class to pause a live 3D video stream
+		{
+		friend class Vrui::GenericToolFactory<PauseViewerTool>;
+		
+		/* Elements: */
+		private:
+		static PauseViewerToolFactory* factory; // Pointer to the tool's factory
+		
+		/* Constructors and destructors: */
+		public:
+		static void initClass(void);
+		PauseViewerTool(const Vrui::ToolFactory* sFactory,const Vrui::ToolInputAssignment& inputAssignment);
+		
+		/* Methods: */
+		virtual const Vrui::ToolFactory* getFactory(void) const;
+		virtual void buttonCallback(int buttonSlotIndex,Vrui::InputDevice::ButtonCallbackData* cbData);
+		};
+	
+	class MapTextureTool; // Forward declaration
+	typedef Vrui::GenericToolFactory<MapTextureTool> MapTextureToolFactory; // Factory class for texture mapping tools
+	
+	class MapTextureTool:public Vrui::Tool,public Tool // Tool class to switch the texture mapping flag of a projector
+		{
+		friend class Vrui::GenericToolFactory<MapTextureTool>;
+		
+		/* Elements: */
+		private:
+		static MapTextureToolFactory* factory; // Pointer to the tool's factory
+		bool mapTexture; // Current texture mapping state
+		
+		/* Constructors and destructors: */
+		public:
+		static void initClass(void);
+		MapTextureTool(const Vrui::ToolFactory* sFactory,const Vrui::ToolInputAssignment& inputAssignment);
+		
+		/* Methods: */
+		virtual const Vrui::ToolFactory* getFactory(void) const;
+		virtual void buttonCallback(int buttonSlotIndex,Vrui::InputDevice::ButtonCallbackData* cbData);
+		};
+	
+	friend class PauseViewerTool;
+	friend class MapTextureTool;
 	
 	/* Elements: */
 	private:
 	static KinectViewerFactory* factory; // Pointer to the class' factory object
 	
-	USB::Context* usbContext; // USB device context
 	bool navigational; // Flag whether to render 3D video in navigational space
+	Kinect::FrameSource::Time timeBase; // Common time base for all 3D video stream renderers
 	std::vector<Renderer*> renderers; // List of 3D video stream renderers
 	bool synched; // Flag if the vislet has to stay synched to recorded or played video streams even while disabled
+	bool startDisabled; // Flag if the vislet starts in disabled state
 	bool firstEnable; // Flag to indicate the first time the vislet is enabled at start-up
 	bool enabled; // Flag whether the vislet is enabled; class cannot use the active flag
+	
+	/* Private methods: */
+	void toolCreationCallback(Vrui::ToolManager::ToolCreationCallbackData* cbData); // Callback called when a new tool is created
 	
 	/* Constructors and destructors: */
 	public:

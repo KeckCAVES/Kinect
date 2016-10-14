@@ -1,6 +1,6 @@
 /***********************************************************************
 DepthCorrectionTool - Calibration tool for RawKinectViewer.
-Copyright (c) 2012-2013 Oliver Kreylos
+Copyright (c) 2012-2015 Oliver Kreylos
 
 This file is part of the Kinect 3D Video Capture Project (Kinect).
 
@@ -25,6 +25,7 @@ Software Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA
 #include <string>
 #include <iostream>
 #include <Misc/SizedTypes.h>
+#include <Misc/ThrowStdErr.h>
 #include <IO/File.h>
 #include <Math/Matrix.h>
 #include <Geometry/Point.h>
@@ -32,6 +33,7 @@ Software Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA
 #include <Geometry/PCACalculator.h>
 #include <Vrui/ToolManager.h>
 #include <Vrui/OpenFile.h>
+#include <Kinect/Internal/Config.h>
 #include <Kinect/Camera.h>
 
 #include "RawKinectViewer.h"
@@ -54,7 +56,7 @@ void DepthCorrectionTool::averageDepthFrameReady(int)
 	float foregroundCutoff=float(application->averageNumFrames)*0.5f;
 	float* afdPtr=application->averageFrameDepth;
 	float* affPtr=application->averageFrameForeground;
-	float* dfPtr=static_cast<float*>(df.frame.getBuffer());
+	float* dfPtr=df.frame.getData<float>();
 	typedef Geometry::PCACalculator<3>::Point PPoint;
 	typedef Geometry::PCACalculator<3>::Vector PVector;
 	Geometry::PCACalculator<3> pca;
@@ -179,7 +181,7 @@ void DepthCorrectionTool::buttonCallback(int buttonSlotIndex,Vrui::InputDevice::
 					unsigned int numFrames=0;
 					for(std::vector<DepthFrame>::iterator dfIt=depthFrames.begin();dfIt!=depthFrames.end();++dfIt)
 						{
-						double actual=double(static_cast<float*>(dfIt->frame.getBuffer())[pixelOffset]);
+						double actual=double(dfIt->frame.getData<float>()[pixelOffset]);
 						if(actual!=2047.0)
 							{
 							ata(0,0)+=actual*actual;
@@ -195,60 +197,75 @@ void DepthCorrectionTool::buttonCallback(int buttonSlotIndex,Vrui::InputDevice::
 					
 					if(numFrames>=2)
 						{
-						/* Solve for the pixel's correction scale and offset: */
-						Math::Matrix x=atb.divideFullPivot(ata);
-						double scale=x(0);
-						double offset=x(1);
-						
-						/* Accumulate the pixel's correction scale and offset into the spline appoximation matrix: */
-						for(int i=0;i<numSegments[1]+degree;++i)
-							for(int j=0;j<numSegments[0]+degree;++j)
-								c[i*(numSegments[0]+degree)+j]=bs(i-degree,degree,dy)*bs(j-degree,degree,dx);
-						for(int i=0;i<numControlPoints;++i)
+						try
 							{
-							for(int j=0;j<numControlPoints;++j)
-								bsplineAta(i,j)+=c[i]*c[j];
-							bsplineAtb(i,0)+=c[i]*scale;
-							bsplineAtb(i,1)+=c[i]*offset;
+							/* Solve for the pixel's correction scale and offset: */
+							Math::Matrix x=atb.divideFullPivot(ata);
+							double scale=x(0);
+							double offset=x(1);
+							
+							/* Accumulate the pixel's correction scale and offset into the spline appoximation matrix: */
+							for(int i=0;i<numSegments[1]+degree;++i)
+								for(int j=0;j<numSegments[0]+degree;++j)
+									c[i*(numSegments[0]+degree)+j]=bs(i-degree,degree,dy)*bs(j-degree,degree,dx);
+							for(int i=0;i<numControlPoints;++i)
+								{
+								for(int j=0;j<numControlPoints;++j)
+									bsplineAta(i,j)+=c[i]*c[j];
+								bsplineAtb(i,0)+=c[i]*scale;
+								bsplineAtb(i,1)+=c[i]*offset;
+								}
+							}
+						catch(Math::Matrix::RankDeficientError)
+							{
+							/* Ignore the pixel */
 							}
 						}
 					}
 				}
 			delete[] c;
 			
-			/* Solve for the approximating B-spline coefficients: */
-			Math::Matrix bsplineCoeffs=bsplineAtb.divideFullPivot(bsplineAta);
-			Misc::Float32* correctionCoefficients=new Misc::Float32[(numSegments[1]+degree)*(numSegments[0]+degree)*2];
-			for(int i=0;i<numControlPoints;++i)
+			try
 				{
-				/* Save scale control point: */
-				correctionCoefficients[2*i+0]=Misc::Float32(bsplineCoeffs(i,0));
+				/* Solve for the approximating B-spline coefficients: */
+				Math::Matrix bsplineCoeffs=bsplineAtb.divideFullPivot(bsplineAta);
+				Misc::Float32* correctionCoefficients=new Misc::Float32[(numSegments[1]+degree)*(numSegments[0]+degree)*2];
+				for(int i=0;i<numControlPoints;++i)
+					{
+					/* Save scale control point: */
+					correctionCoefficients[2*i+0]=Misc::Float32(bsplineCoeffs(i,0));
+
+					/* Save offset control point: */
+					correctionCoefficients[2*i+1]=Misc::Float32(bsplineCoeffs(i,1));
+					}
 				
-				/* Save offset control point: */
-				correctionCoefficients[2*i+1]=Misc::Float32(bsplineCoeffs(i,1));
+				/* Save the depth correction B-spline coefficients: */
+				std::string depthCorrectionFileName=KINECT_INTERNAL_CONFIG_CONFIGDIR;
+				depthCorrectionFileName.push_back('/');
+				depthCorrectionFileName.append(KINECT_INTERNAL_CONFIG_CAMERA_DEPTHCORRECTIONFILENAMEPREFIX);
+				depthCorrectionFileName.push_back('-');
+				depthCorrectionFileName.append(application->camera->getSerialNumber());
+				depthCorrectionFileName.append(".dat");
+				std::cout<<"Writing depth correction file "<<depthCorrectionFileName<<std::endl;
+				IO::FilePtr depthCorrectionFile(Vrui::openFile(depthCorrectionFileName.c_str(),IO::File::WriteOnly));
+				depthCorrectionFile->setEndianness(Misc::LittleEndian);
+				
+				/* Write the number of B-spline coefficients: */
+				depthCorrectionFile->write<Misc::SInt32>(degree);
+				for(int i=0;i<2;++i)
+					depthCorrectionFile->write<Misc::SInt32>(numSegments[i]);
+				
+				/* Write the B-spline coefficients: */
+				depthCorrectionFile->write<Misc::Float32>(correctionCoefficients,numControlPoints*2);
+				
+				/* Clean up: */
+				delete[] correctionCoefficients;
 				}
-			
-			/* Save the depth correction B-spline coefficients: */
-			std::string depthCorrectionFileName=KINECT_CONFIG_DIR;
-			depthCorrectionFileName.push_back('/');
-			depthCorrectionFileName.append(KINECT_CAMERA_DEPTHCORRECTIONFILENAMEPREFIX);
-			depthCorrectionFileName.push_back('-');
-			depthCorrectionFileName.append(application->camera->getSerialNumber());
-			depthCorrectionFileName.append(".dat");
-			std::cout<<"Writing depth correction file "<<depthCorrectionFileName<<std::endl;
-			IO::FilePtr depthCorrectionFile(Vrui::openFile(depthCorrectionFileName.c_str(),IO::File::WriteOnly));
-			depthCorrectionFile->setEndianness(Misc::LittleEndian);
-			
-			/* Write the number of B-spline coefficients: */
-			depthCorrectionFile->write<Misc::SInt32>(degree);
-			for(int i=0;i<2;++i)
-				depthCorrectionFile->write<Misc::SInt32>(numSegments[i]);
-			
-			/* Write the B-spline coefficients: */
-			depthCorrectionFile->write<Misc::Float32>(correctionCoefficients,numControlPoints*2);
-			
-			/* Clean up: */
-			delete[] correctionCoefficients;
+			catch(std::runtime_error err)
+				{
+				/* Show an error message: */
+				Vrui::showErrorMessage("Calibrate Depth Lens",Misc::printStdErrMsg("Could not calculate depth correction coefficients due to exception %s",err.what()));
+				}
 			}
 		}
 	}

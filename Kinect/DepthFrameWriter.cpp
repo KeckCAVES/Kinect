@@ -1,6 +1,6 @@
 /***********************************************************************
 DepthFrameWriter - Class to write compressed depth frames to a sink.
-Copyright (c) 2010-2013 Oliver Kreylos
+Copyright (c) 2010-2015 Oliver Kreylos
 
 This file is part of the Kinect 3D Video Capture Project (Kinect).
 
@@ -208,7 +208,7 @@ size_t DepthFrameWriter::writeFrame(const FrameBuffer& frame)
 	compressedSize+=sizeof(Misc::Float64);
 	
 	/* Process all pixels: */
-	const FrameSource::DepthPixel* frameBuffer=static_cast<const FrameSource::DepthPixel*>(frame.getBuffer());
+	const FrameSource::DepthPixel* frameBuffer=frame.getData<FrameSource::DepthPixel>();
 	unsigned int numPixels=size[0]*size[1];
 	const unsigned int* hcPtr=hilbertCurve.getOffsets();
 	while(numPixels>0)

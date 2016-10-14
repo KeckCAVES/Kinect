@@ -2,7 +2,7 @@
 FrameSaver - Helper class to save raw color and video frames from a
 Kinect frame source to a set of time-stamped files for playback and
 further processing.
-Copyright (c) 2010-2013 Oliver Kreylos
+Copyright (c) 2010-2015 Oliver Kreylos
 
 This file is part of the Kinect 3D Video Capture Project (Kinect).
 

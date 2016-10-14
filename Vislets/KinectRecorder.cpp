@@ -1,7 +1,7 @@
 /***********************************************************************
 KinectRecorder - Vislet to capture and save 3D video from one or more
 Kinect devices.
-Copyright (c) 2011-2013 Oliver Kreylos
+Copyright (c) 2011-2016 Oliver Kreylos
 
 This file is part of the Kinect 3D Video Capture Project (Kinect).
 
@@ -155,8 +155,8 @@ extern "C" void destroyKinectRecorderFactory(Vrui::VisletFactory* factory)
 Methods of class KinectRecorder::KinectStreamer:
 ***********************************************/
 
-KinectRecorder::KinectStreamer::KinectStreamer(USB::Context& usbContext,const KinectRecorderFactory::KinectConfig& config)
-	:camera(usbContext,config.deviceSerialNumber.c_str()),frameSaver(0)
+KinectRecorder::KinectStreamer::KinectStreamer(const KinectRecorderFactory::KinectConfig& config)
+	:camera(config.deviceSerialNumber.c_str()),frameSaver(0)
 	{
 	/* Check if there is an existing background frame for the camera: */
 	bool removeBackground=false;
@@ -214,9 +214,10 @@ KinectRecorder::KinectStreamer::~KinectStreamer(void)
 	delete frameSaver;
 	}
 
-void KinectRecorder::KinectStreamer::startStreaming(void)
+void KinectRecorder::KinectStreamer::startStreaming(const Kinect::FrameSource::Time& timeBase)
 	{
 	/* Start streaming: */
+	camera.setTimeBase(timeBase);
 	camera.startStreaming(Misc::createFunctionCall(frameSaver,&Kinect::FrameSaver::saveColorFrame),Misc::createFunctionCall(frameSaver,&Kinect::FrameSaver::saveDepthFrame));
 	}
 
@@ -234,24 +235,13 @@ KinectRecorder::KinectRecorder(int numArguments,const char* const arguments[])
 	:soundRecorder(0),
 	 firstEnable(true)
 	{
-	/* Check if this node has any connected Kinect devices: */
-	bool haveDevices=false;
-	for(std::vector<KinectRecorderFactory::KinectConfig>::const_iterator kcIt=factory->kinectConfigs.begin();kcIt!=factory->kinectConfigs.end()&&!haveDevices;++kcIt)
-		haveDevices=kcIt->nodeIndex==Vrui::getNodeIndex();
-	
-	if(haveDevices)
-		{
-		/* Enable background USB event handling: */
-		usbContext.startEventHandling();
-		
-		/* Connect to all requested Kinect devices: */
-		for(std::vector<KinectRecorderFactory::KinectConfig>::const_iterator kcIt=factory->kinectConfigs.begin();kcIt!=factory->kinectConfigs.end();++kcIt)
-			if(kcIt->nodeIndex==Vrui::getNodeIndex())
-				{
-				/* Create a streamer for the Kinect device of the given serial number: */
-				streamers.push_back(new KinectStreamer(usbContext,*kcIt));
-				}
-		}
+	/* Connect to all requested Kinect devices: */
+	for(std::vector<KinectRecorderFactory::KinectConfig>::const_iterator kcIt=factory->kinectConfigs.begin();kcIt!=factory->kinectConfigs.end();++kcIt)
+		if(kcIt->nodeIndex==Vrui::getNodeIndex())
+			{
+			/* Create a streamer for the Kinect device of the given serial number: */
+			streamers.push_back(new KinectStreamer(*kcIt));
+			}
 	
 	/* Create this node's sound recorders: */
 	for(std::vector<KinectRecorderFactory::SoundConfig>::const_iterator scIt=factory->soundConfigs.begin();scIt!=factory->soundConfigs.end();++scIt)
@@ -288,17 +278,16 @@ void KinectRecorder::enable(void)
 	
 	if(firstEnable)
 		{
+		/* Establish a common time base for all cameras: */
+		Kinect::FrameSource::Time now;
+		
 		/* Start recording sound: */
 		if(soundRecorder!=0)
 			soundRecorder->start();
 		
-		/* Synchronize all cameras' time bases: */
-		for(std::vector<KinectStreamer*>::iterator sIt=streamers.begin();sIt!=streamers.end();++sIt)
-			(*sIt)->getCamera().resetFrameTimer(Vrui::getApplicationTime());
-		
 		/* Start recording: */
 		for(std::vector<KinectStreamer*>::iterator sIt=streamers.begin();sIt!=streamers.end();++sIt)
-			(*sIt)->startStreaming();
+			(*sIt)->startStreaming(now);
 		
 		firstEnable=false;
 		}

@@ -2,7 +2,7 @@
 FrameSaver - Helper class to save raw color and video frames from a
 Kinect camera to a time-stamped file on disk for playback and further
 processing.
-Copyright (c) 2010-2013 Oliver Kreylos
+Copyright (c) 2010-2015 Oliver Kreylos
 
 This file is part of the Kinect 3D Video Capture Project (Kinect).
 
@@ -50,12 +50,21 @@ void FrameSaver::initialize(FrameSource& frameSource)
 	{
 	/* Write the file formats' version numbers to the depth and color files: */
 	colorFrameFile->write<Misc::UInt32>(1);
-	depthFrameFile->write<Misc::UInt32>(4);
+	depthFrameFile->write<Misc::UInt32>(5);
 	
 	/* Write the frame source's depth correction parameters: */
 	FrameSource::DepthCorrection* dc=frameSource.getDepthCorrectionParameters();
-	dc->write(*depthFrameFile);
-	delete dc;
+	if(dc!=0)
+		{
+		dc->write(*depthFrameFile);
+		delete dc;
+		}
+	else
+		{
+		/* Write dummy depth correction parameters instead: */
+		for(int i=0;i<3;++i)
+			depthFrameFile->write<Misc::SInt32>(0);
+		}
 	
 	#if KINECT_FRAMESAVER_LOSSY
 	
@@ -71,6 +80,9 @@ void FrameSaver::initialize(FrameSource& frameSource)
 	
 	/* Get the frame source's intrinsic calibration parameters: */
 	FrameSource::IntrinsicParameters ips=frameSource.getIntrinsicParameters();
+	
+	/* Write the depth camera's lens distortion parameters: */
+	ips.depthLensDistortion.write(*depthFrameFile);
 	
 	/* Write the color and depth projections to their respective files: */
 	Misc::Marshaller<FrameSource::IntrinsicParameters::PTransform>::write(ips.colorProjection,*colorFrameFile);

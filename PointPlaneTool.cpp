@@ -1,6 +1,6 @@
 /***********************************************************************
 PointPlaneTool - Calibration tool for RawKinectViewer.
-Copyright (c) 2013 Oliver Kreylos
+Copyright (c) 2013-2015 Oliver Kreylos
 
 This file is part of the Kinect 3D Video Capture Project (Kinect).
 
@@ -77,6 +77,8 @@ void PointPlaneTool::buttonCallback(int buttonSlotIndex,Vrui::InputDevice::Butto
 		if(buttonSlotIndex==0)
 			{
 			/* Select another depth image point: */
+			#if 0
+			
 			Point newP=Point(application->calcImagePoint(getButtonDeviceRay(0)));
 			if(application->averageFrameValid&&newP[0]>=-double(application->depthFrameSize[0])&&newP[0]<0.0&&newP[1]>=0.0&&newP[1]<double(application->depthFrameSize[1]))
 				{
@@ -88,10 +90,24 @@ void PointPlaneTool::buttonCallback(int buttonSlotIndex,Vrui::InputDevice::Butto
 					{
 					newP[0]=double(x)+0.5;
 					newP[1]=double(y)+0.5;
-					newP[2]=double(application->depthCorrection[index].correct(application->averageFrameDepth[index]/application->averageFrameForeground[index]));
+					if(application->depthCorrection!=0)
+						newP[2]=double(application->depthCorrection[index].correct(application->averageFrameDepth[index]/application->averageFrameForeground[index]));
+					else
+						newP[2]=double(application->averageFrameDepth[index]/application->averageFrameForeground[index]);
 					points.push_back(newP);
 					}
 				}
+			
+			#else
+			
+			RawKinectViewer::CPoint imagePoint=application->getDepthImagePoint(application->calcImagePoint(getButtonDeviceRay(0)));
+			if(imagePoint[2]>=RawKinectViewer::CPoint::Scalar(0))
+				{
+				/* Add the point to the list: */
+				points.push_back(imagePoint);
+				}
+			
+			#endif
 			}
 		else
 			{
@@ -162,7 +178,7 @@ void PointPlaneTool::display(GLContextData& contextData) const
 		glBegin(GL_POINTS);
 		glColor3f(1.0f,1.0f,1.0f);
 		for(std::vector<Point>::const_iterator pIt=points.begin();pIt!=points.end();++pIt)
-			glVertex3d((*pIt)[0]-double(application->depthFrameSize[0]),(*pIt)[1],0.01);
+			glVertex3d((*pIt)[0]-application->depthImageOffset,(*pIt)[1],0.01);
 		glEnd();
 		
 		glPopMatrix();

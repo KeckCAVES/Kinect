@@ -1,7 +1,7 @@
 /***********************************************************************
 LossyDepthFrameWriter - Class to write lossily compressed depth frames
 to a sink.
-Copyright (c) 2013 Oliver Kreylos
+Copyright (c) 2013-2015 Oliver Kreylos
 
 This file is part of the Kinect 3D Video Capture Project (Kinect).
 
@@ -110,7 +110,7 @@ size_t LossyDepthFrameWriter::writeFrame(const FrameBuffer& frame)
 	#if VIDEO_CONFIG_HAVE_THEORA
 	
 	/* Convert the new raw depth frame to Y'CbCr 4:2:0 by processing pixels in 2x2 blocks: */
-	const FrameSource::DepthPixel* fRowPtr=static_cast<const FrameSource::DepthPixel*>(frame.getBuffer());
+	const FrameSource::DepthPixel* fRowPtr=frame.getData<FrameSource::DepthPixel>();
 	unsigned char* ypRowPtr=theoraFrame.planes[0].data;
 	unsigned char* cbRowPtr=theoraFrame.planes[1].data;
 	unsigned char* crRowPtr=theoraFrame.planes[2].data;

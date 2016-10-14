@@ -2,7 +2,7 @@
 FindBlobs - Helper function to extract all eight-connected blobs of
 pixels from a frame whose pixel values match a given value up to a given
 tolerance.
-Copyright (c) 2010-2011 Oliver Kreylos
+Copyright (c) 2010-2015 Oliver Kreylos
 
 This file is part of the Kinect 3D Video Capture Project (Kinect).
 
@@ -76,7 +76,7 @@ findBlobs(const Kinect::FrameBuffer& frame,
 	unsigned int lastLineEnd=0; // Index one after last line blob for the previous pixel row
 	
 	/* Process all pixel rows: */
-	const PixelParam* frameRowPtr=static_cast<const PixelParam*>(frame.getBuffer());
+	const PixelParam* frameRowPtr=frame.getData<PixelParam>();
 	for(int y=0;y<frame.getSize(1);++y,frameRowPtr+=frame.getSize(0))
 		{
 		/* Find all line blobs on the current line: */

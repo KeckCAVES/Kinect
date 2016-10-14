@@ -1,6 +1,6 @@
 ########################################################################
 # Makefile for Kinect 3D Video Capture Project.
-# Copyright (c) 2010-2013 Oliver Kreylos
+# Copyright (c) 2010-2016 Oliver Kreylos
 #
 # This file is part of the WhyTools Build Environment.
 # 
@@ -24,19 +24,35 @@
 # matches the default Vrui installation; if Vrui's installation
 # directory was changed during Vrui's installation, the directory below
 # must be adapted.
-VRUI_MAKEDIR := $(HOME)/Vrui-3.1/share/make
+VRUI_MAKEDIR := /usr/local/share/Vrui-4.2/make
 ifdef DEBUG
   VRUI_MAKEDIR := $(VRUI_MAKEDIR)/debug
 endif
 
-# Set the following flag to 1 to use the new facade projector based on
-# GLSL shaders. Using the shader projector will significantly reduce
-# CPU load and system bus bandwidth utilization, but will also
-# significantly slow down rendering on older graphics cards.
+# Set the following variable to the type of facade projector to be built
+# into the Kinect library. There are currently three types:
+# 0 - CPU-based projector (Kinect::Projector). Creates vertex array and
+#     triangle mesh from depth frame on CPU.
+# 1 - Vertex shader-based projector (Kinect::Projector2). Updates static
+#     template vertex array with depth frame in a vertex shader, and
+#     creates triangle mesh from depth frame on CPU.
+# 2 - Geometry shader-based projector (Kinect::ShaderProjector). Updates
+#     static template vertex array and static template triangle mesh in
+#     a geometry shader.
 # Which facade projector version is better depends on system hardware,
 # number of Kinect facades rendered simultaneously, rendering modes,
 # etc. I.e., to optimize performance, typical-case testing is in order.
-KINECT_USE_SHADERS = 0
+KINECT_PROJECTORTYPE = 0
+
+# Set configuration flags based on projector type choice:
+KINECT_USE_PROJECTOR2 = 0
+KINECT_USE_SHADERPROJECTOR = 0
+ifeq ($(KINECT_PROJECTORTYPE),1)
+  KINECT_USE_PROJECTOR2 = 1
+endif
+ifeq ($(KINECT_PROJECTORTYPE),2)
+  KINECT_USE_SHADERPROJECTOR = 1
+endif
 
 ########################################################################
 # Everything below here should not have to be changed
@@ -46,9 +62,9 @@ KINECT_USE_SHADERS = 0
 PACKAGEROOT := $(shell pwd)
 
 # Specify version of created dynamic shared libraries
-KINECT_VERSION = 2008
-MAJORLIBVERSION = 2
-MINORLIBVERSION = 8
+KINECT_VERSION = 3002
+MAJORLIBVERSION = 3
+MINORLIBVERSION = 2
 KINECT_NAME := Kinect-$(MAJORLIBVERSION).$(MINORLIBVERSION)
 
 # Check if Vrui's collaboration infrastructure is installed
@@ -88,7 +104,12 @@ VISLETDESTDIR := $(LIBDESTDIR)/Vislets
 PLUGINDESTDIR := $(LIBDESTDIR)/Plugins
 
 # Set default destination directory for Kinect udev rule:
-UDEVRULEDIR := /etc/udev/rules.d
+# FIXME: This should come from Configuration.Vrui!
+ifeq ($(EXECUTABLEINSTALLDIR),/usr/bin)
+  UDEVRULEDIR := /usr/lib/udev/rules.d
+else
+  UDEVRULEDIR := /etc/udev/rules.d
+endif
 
 ########################################################################
 # Specify additional compiler and linker flags
@@ -188,15 +209,31 @@ ifeq ($(SYSTEM_HAVE_LIBUSB1),0)
 	@exit 1
 endif
 	@echo "---- Kinect configuration options: ----"
-ifneq ($(KINECT_USE_SHADERS),0)
-	@echo "GLSL shader-based facade projector selected"
+ifneq ($(SYSTEM_HAVE_REALSENSE),0)
+	@echo "Support for Intel RealSense cameras via librealsense library enabled"
+else
+	@echo "Support for Intel RealSense cameras via librealsense library disabled"
+endif
+ifneq ($(KINECT_USE_PROJECTOR2),0)
+	@echo "GLSL vertex shader-based facade projector selected"
+else
+ifneq ($(KINECT_USE_SHADERPROJECTOR),0)
+	@echo "GLSL geometry shader-based facade projector selected"
 else
 	@echo "CPU-based facade projector selected"
 endif
+endif
 	@cp Kinect/Config.h Kinect/Config.h.temp
-	@$(call CONFIG_SETVAR,Kinect/Config.h.temp,KINECT_USE_SHADERPROJECTOR,$(KINECT_USE_SHADERS))
+	@$(call CONFIG_SETVAR,Kinect/Config.h.temp,KINECT_CONFIG_HAVE_LIBREALSENSE,$(SYSTEM_HAVE_REALSENSE))
+	@$(call CONFIG_SETVAR,Kinect/Config.h.temp,KINECT_CONFIG_USE_PROJECTOR2,$(KINECT_USE_PROJECTOR2))
+	@$(call CONFIG_SETVAR,Kinect/Config.h.temp,KINECT_CONFIG_USE_SHADERPROJECTOR,$(KINECT_USE_SHADERPROJECTOR))
 	@if ! diff Kinect/Config.h.temp Kinect/Config.h > /dev/null ; then cp Kinect/Config.h.temp Kinect/Config.h ; fi
 	@rm Kinect/Config.h.temp
+	@cp Kinect/Internal/Config.h Kinect/Internal/Config.h.temp
+	@$(call CONFIG_SETSTRINGVAR,Kinect/Internal/Config.h.temp,KINECT_INTERNAL_CONFIG_CONFIGDIR,$(ETCINSTALLDIR)/$(KINECTCONFIGDIREXT))
+	@$(call CONFIG_SETSTRINGVAR,Kinect/Internal/Config.h.temp,KINECT_INTERNAL_CONFIG_SHADERDIR,$(PWD)/$(SHAREINSTALLDIR)/$(KINECTRESOURCEDIREXT)/Shaders)
+	@if ! diff Kinect/Internal/Config.h.temp Kinect/Internal/Config.h > /dev/null ; then cp Kinect/Internal/Config.h.temp Kinect/Internal/Config.h ; fi
+	@rm Kinect/Internal/Config.h.temp
 ifneq ($(HAVE_COLLABORATION),0)
 	@echo "Vrui collaboration infrastructure detected"
 endif
@@ -238,28 +275,23 @@ extrasqueakyclean:
 include $(VRUI_MAKEDIR)/BasicMakefile
 
 ########################################################################
-# Specify additional per-package compiler flags
-########################################################################
-
-# Define location for configuration files:
-CFLAGS += -DKINECT_CONFIG_DIR='"$(ETCINSTALLDIR)/$(KINECTCONFIGDIREXT)"'
-
-########################################################################
 # Specify build rules for dynamic shared objects
 ########################################################################
 
-LIBKINECT_HEADERS = $(wildcard Kinect/*.h)
-
-LIBKINECT_SOURCES = $(wildcard Kinect/*.cpp)
-
-# Define names for camera calibration files:
-$(OBJDIR)/Kinect/Camera.o: CFLAGS += -DKINECT_CAMERA_DEPTHCORRECTIONFILENAMEPREFIX='"DepthCorrection"'
-$(OBJDIR)/Kinect/Camera.o: CFLAGS += -DKINECT_CAMERA_INTRINSICPARAMETERSFILENAMEPREFIX='"IntrinsicParameters"'
-$(OBJDIR)/Kinect/Camera.o: CFLAGS += -DKINECT_CAMERA_EXTRINSICPARAMETERSFILENAMEPREFIX='"ExtrinsicParameters"'
-$(OBJDIR)/Kinect/Camera.o: CFLAGS += -DKINECT_CAMERA_DEFAULTBACKGROUNDFILENAMEPREFIX='"Background"'
-
-# Define locations for shader program files: */
-$(OBJDIR)/Kinect/ShaderProjector.o: CFLAGS += -DKINECT_SHADERPROJECTOR_SHADERDIR='"$(SHAREINSTALLDIR)/$(KINECTRESOURCEDIREXT)/Shaders"'
+ifneq ($(SYSTEM_HAVE_REALSENSE),0)
+  LIBKINECT_HEADERS = $(wildcard Kinect/*.h)
+  
+  LIBKINECT_SOURCES = $(wildcard Kinect/*.cpp) \
+                      $(wildcard Kinect/Internal/*.cpp)
+else
+  LIBKINECT_HEADERS = $(filter-out Kinect/CameraRealSense.h, \
+                        $(wildcard Kinect/*.h))
+  
+  LIBKINECT_SOURCES = $(filter-out Kinect/CameraRealSense.cpp \
+                                   Kinect/Internal/LibRealSenseContext.cpp, \
+                        $(wildcard Kinect/*.cpp) \
+                        $(wildcard Kinect/Internal/*.cpp))
+endif
 
 $(call LIBRARYNAME,libKinect): PACKAGES += $(MYKINECT_DEPENDS)
 $(call LIBRARYNAME,libKinect): EXTRACINCLUDEFLAGS += $(MYKINECT_INCLUDE)
@@ -277,8 +309,6 @@ libKinect: $(call LIBRARYNAME,libKinect)
 # them:
 #
 
-$(OBJDIR)/KinectUtil.o: CFLAGS += -DKINECT_CAMERA_INTRINSICPARAMETERSFILENAMEPREFIX='"IntrinsicParameters"'
-
 $(EXEDIR)/KinectUtil: PACKAGES += MYKINECT MYMATH MYUSB MYIO
 $(EXEDIR)/KinectUtil: $(OBJDIR)/KinectUtil.o
 .PHONY: KinectUtil
@@ -289,11 +319,9 @@ KinectUtil: $(EXEDIR)/KinectUtil
 # internally and externally calibrate Kinect cameras:
 #
 
-$(OBJDIR)/DepthCorrectionTool.o: CFLAGS += -DKINECT_CAMERA_DEPTHCORRECTIONFILENAMEPREFIX='"DepthCorrection"'
-$(OBJDIR)/GridTool.o: CFLAGS += -DKINECT_CAMERA_INTRINSICPARAMETERSFILENAMEPREFIX='"IntrinsicParameters"'
-
 $(EXEDIR)/RawKinectViewer: PACKAGES += MYVRUI MYKINECT
 $(EXEDIR)/RawKinectViewer: $(OBJDIR)/PauseTool.o \
+                           $(OBJDIR)/MeasurementTool.o \
                            $(OBJDIR)/TiePointTool.o \
                            $(OBJDIR)/LineTool.o \
                            $(OBJDIR)/DepthCorrectionTool.o \
@@ -316,6 +344,16 @@ $(EXEDIR)/AlignPoints: $(OBJDIR)/AlignPoints.o
 AlignPoints: $(EXEDIR)/AlignPoints
 
 #
+# 3D space alignment program for external calibration of multiple Kinect
+# devices, based on two or more files containing 3D tie points:
+#
+
+$(EXEDIR)/AlignPoints2: PACKAGES += MYVRUI
+$(EXEDIR)/AlignPoints2: $(OBJDIR)/AlignPoints2.o
+.PHONY: AlignPoints2
+AlignPoints2: $(EXEDIR)/AlignPoints2
+
+#
 # Server for real-time 3D video streaming protocol:
 #
 
@@ -324,8 +362,6 @@ $(OBJDIR)/KinectServer.o: CFLAGS += -DVERBOSE
 
 # Tell Kinect server to be extremely verbose:
 #$(OBJDIR)/KinectServer.o: CFLAGS += -DVVERBOSE
-
-$(OBJDIR)/KinectServerMain.o: CFLAGS += -DKINECTSERVER_CONFIGURATIONFILENAME='"KinectServer.cfg"'
 
 $(EXEDIR)/KinectServer: PACKAGES += MYKINECT MYCOMM
 $(EXEDIR)/KinectServer: $(OBJDIR)/KinectServer.o \
@@ -339,7 +375,9 @@ KinectServer: $(EXEDIR)/KinectServer
 #
 
 $(EXEDIR)/KinectViewer: PACKAGES += MYVRUI MYKINECT
-$(EXEDIR)/KinectViewer: $(OBJDIR)/KinectViewer.o
+$(EXEDIR)/KinectViewer: $(OBJDIR)/SphereExtractor.o \
+                        $(OBJDIR)/SphereExtractorTool.o \
+                        $(OBJDIR)/KinectViewer.o
 .PHONY: KinectViewer
 KinectViewer: $(EXEDIR)/KinectViewer
 
@@ -483,7 +521,7 @@ ifdef INSTALLPREFIX
   MAKEINSTALLDIR := $(INSTALLPREFIX)/$(MAKEINSTALLDIR)
 endif
 
-install: all
+install: config
 # Install all header files in HEADERINSTALLDIR:
 	@echo Installing header files...
 	@install -d $(HEADERINSTALLDIR)/Kinect
@@ -525,6 +563,11 @@ endif
 	@install -m u=rw,go=r BuildRoot/Packages.Kinect $(MAKEINSTALLDIR)
 	@install -m u=rw,go=r $(MAKECONFIGFILE) $(MAKEINSTALLDIR)
 
+installudevrules:
+# Install the Kinect udev rule in the udev rule directory:
+	@echo Installing Kinect device permission udev rule in $(UDEVRULEDIR)
+	@install -m u=rw,go=r share/69-Kinect.rules $(UDEVRULEDIR)
+
 uninstall:
 	@echo Removing header files...
 	@rm -rf $(HEADERINSTALLDIR)/Kinect
@@ -547,14 +590,7 @@ endif
 	@rm -f $(MAKEINSTALLDIR)/Packages.Kinect
 	@rm -f $(MAKEINSTALLDIR)/Configuration.Kinect
 
-installudevrule:
-# Install the Kinect udev rule in the udev rule directory:
-	@echo Installing Kinect device permission udev rule in $(UDEVRULEDIR)
-	@echo Please enter your password to copy the rule file into the udev directory
-	@sudo install -m u=rw,go=r share/70-Kinect.rules $(UDEVRULEDIR)
-
-uninstalludevrule:
+uninstalludevrules:
 # Remove the Kinect udev rule from the udev rule directory:
 	@echo Removing Kinect device permission udev rule from $(UDEVRULEDIR)
-	@echo Please enter your password to remove the rule file from the udev directory
-	@sudo rm -f $(UDEVRULEDIR)/70-Kinect.rules
+	@rm -f $(UDEVRULEDIR)/69-Kinect.rules

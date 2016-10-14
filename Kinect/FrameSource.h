@@ -1,7 +1,7 @@
 /***********************************************************************
 FrameSource - Base class for objects that create streams of depth and
 color frames.
-Copyright (c) 2011-2013 Oliver Kreylos
+Copyright (c) 2011-2016 Oliver Kreylos
 
 This file is part of the Kinect 3D Video Capture Project (Kinect).
 
@@ -25,8 +25,11 @@ Software Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA
 #define KINECT_FRAMESOURCE_INCLUDED
 
 #include <Misc/SizedTypes.h>
+#include <Realtime/Time.h>
+#include <Math/Interval.h>
 #include <Geometry/ProjectiveTransformation.h>
 #include <Kinect/Config.h>
+#include <Kinect/LensDistortion.h>
 
 /* Forward declarations: */
 namespace Misc {
@@ -55,12 +58,14 @@ class FrameSource
 	{
 	/* Embedded classes: */
 	public:
-	enum Sensor // Enumerated type to select one of frame streams
+	enum Sensor // Enumerated type to select one of the source's streams
 		{
 		COLOR=0,DEPTH
 		};
 	
+	typedef Realtime::TimePointMonotonic Time; // Type for timestamp base points
 	typedef Misc::UInt16 DepthPixel; // Type for raw depth pixels
+	typedef Math::Interval<DepthPixel> DepthRange; // Type for ranges of depth pixel values
 	typedef Misc::UInt8 ColorComponent; // Type for color pixel components
 	
 	struct ColorPixel // Type for color pixels
@@ -72,6 +77,16 @@ class FrameSource
 		/* Elements: */
 		public:
 		Component rgb[3]; // RGB color components
+		
+		/* Methods: */
+		Component operator[](int index) const // Returns one color component
+			{
+			return rgb[index];
+			}
+		Component& operator[](int index) // Ditto
+			{
+			return rgb[index];
+			}
 		};
 	
 	class DepthCorrection // Class defining the depth correction parameters of a depth frame source
@@ -108,6 +123,10 @@ class FrameSource
 		~DepthCorrection(void); // Destroys a depth correction object
 		
 		/* Methods: */
+		bool isValid(void) const // Returns true if the depth correction parameters are valid
+			{
+			return degree>0;
+			}
 		void write(IO::File& file) const; // Writes a depth correction object to a binary file or pipe
 		PixelCorrection getPixelCorrection(unsigned int x,unsigned int y,const unsigned int frameSize[2]) const; // Returns the depth correction factor for the depth image pixel at the given position
 		PixelCorrection* getPixelCorrection(const unsigned int frameSize[2]) const; // Returns pointer to a new-allocated array containing per-pixel depth correction parameters
@@ -120,9 +139,11 @@ class FrameSource
 		typedef Geometry::ProjectiveTransformation<double,3> PTransform; // Type for projective transformations
 		
 		/* Elements: */
+		LensDistortion depthLensDistortion; // Lens distortion correction parameters for the depth camera
 		PTransform depthProjection; // The projection transformation from depth image space into 3D camera space
 		PTransform colorProjection; // The projection transformation from 3D camera space into color image space
 		};
+	
 	#if KINECT_CONFIG_FRAMESOURCE_EXTRINSIC_PROJECTIVE
 	typedef Geometry::ProjectiveTransformation<double,3> ExtrinsicParameters; // Type for extrinsic camera parameters
 	#else
@@ -132,16 +153,21 @@ class FrameSource
 	
 	static const DepthPixel invalidDepth=0x07ffU; // The depth value indicating an invalid (or removed) pixel
 	
+	protected:
+	Time timeBase; // Time base point for timestamp calculation
+	
 	/* Constructors and destructors: */
 	public:
 	FrameSource(void);
 	virtual ~FrameSource(void);
 	
 	/* Methods: */
+	virtual void setTimeBase(const Time& newTimeBase); // Sets the frame source's timestamp base point
 	virtual DepthCorrection* getDepthCorrectionParameters(void); // Returns the camera depth correction object, i.e., per-pixel depth value offsets
 	virtual IntrinsicParameters getIntrinsicParameters(void) =0; // Returns the intrinsic camera parameters, i.e., the virtual camera's projection matrix in camera space
 	virtual ExtrinsicParameters getExtrinsicParameters(void) =0; // Returns the extrinsic camera parameters, i.e., the position and orientation of the virtual camera in 3D world space
 	virtual const unsigned int* getActualFrameSize(int sensor) const =0; // Returns the selected frame size of the color or depth stream as an array of (width, height) in pixels
+	virtual DepthRange getDepthRange(void) const; // Returns the range of valid depth pixel values delivered by this frame source
 	virtual void startStreaming(StreamingCallback* newColorStreamingCallback,StreamingCallback* newDepthStreamingCallback) =0; // Installs the given streaming callback and starts receiving color and depth frames
 	virtual void stopStreaming(void) =0; // Stops streaming; blocks until all pending frame transfers have either completed or been cancelled
 	};

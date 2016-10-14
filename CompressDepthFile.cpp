@@ -1,7 +1,7 @@
 /***********************************************************************
 CompressDepthFile - Utility to compress a Kinect depth frame file using
 the DepthFrameWriter class.
-Copyright (c) 2010-2011 Oliver Kreylos
+Copyright (c) 2010-2015 Oliver Kreylos
 
 This file is part of the Kinect 3D Video Capture Project (Kinect).
 
@@ -65,7 +65,7 @@ int main(int argc,char* argv[])
 		
 		/* Read the next depth frame: */
 		Kinect::FrameBuffer frame(size[0],size[1],size[1]*size[0]*sizeof(unsigned short));
-		unsigned short* frameBuffer=static_cast<unsigned short*>(frame.getBuffer());
+		unsigned short* frameBuffer=frame.getData<unsigned short>();
 		depthFrameFile->read(frameBuffer,size[1]*size[0]);
 		
 		if(numCaptureFrames>0)

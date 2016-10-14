@@ -1,6 +1,6 @@
 /***********************************************************************
 TiePointTool - Calibration tool for RawKinectViewer.
-Copyright (c) 2010-2012 Oliver Kreylos
+Copyright (c) 2010-2015 Oliver Kreylos
 
 This file is part of the Kinect 3D Video Capture Project (Kinect).
 
@@ -24,91 +24,147 @@ Software Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA
 
 #include <vector>
 #include <iostream>
+#include <Misc/FunctionCalls.h>
 #include <Math/Math.h>
+#include <Geometry/ArrayKdTree.h>
+#include <Geometry/OutputOperators.h>
 #include <GL/GLTransformationWrappers.h>
 #include <Vrui/Vrui.h>
 #include <Vrui/ToolManager.h>
 #include <Vrui/DisplayState.h>
 
-#include "RawKinectViewer.h"
+namespace {
 
-/**********************************************************************
-Static elements of class BlobProperty<Kinect::FrameSource::DepthPixel>:
-**********************************************************************/
+/**************
+Helper classes:
+**************/
 
-BlobProperty<Kinect::FrameSource::DepthPixel>::PTransform BlobProperty<Kinect::FrameSource::DepthPixel>::projection;
-
-template <>
-class PixelComparer<Kinect::FrameSource::DepthPixel> // Pixel comparer for depth frames
+struct LinkCorner:public Kinect::CornerExtractor::Point // Structure to represent links between extracted corners
 	{
 	/* Embedded classes: */
 	public:
-	typedef Kinect::FrameSource::DepthPixel Pixel;
+	typedef Kinect::CornerExtractor::Scalar Scalar;
+	typedef Kinect::CornerExtractor::Point Point;
+	typedef Kinect::CornerExtractor::Vector Vector;
 	
 	/* Elements: */
-	private:
-	Pixel minPixelValue; // Minimal similar pixel value
-	Pixel maxPixelValue; // Maximal similar pixel value
-	
-	/* Constructors and destructors: */
 	public:
-	PixelComparer(const Pixel& sPixelValue,unsigned int sThreshold)
-		{
-		if(sPixelValue>=sThreshold)
-			minPixelValue=Pixel(sPixelValue-sThreshold);
-		else
-			minPixelValue=0U;
-		if(sPixelValue<=0xffffU-sThreshold)
-			maxPixelValue=Pixel(sPixelValue+sThreshold);
-		else
-			maxPixelValue=0xffffU;
-		}
+	Vector bw,wb; // Separation line directions from black to white and white to black, respectively, forming a right-handed frame
+	LinkCorner* links[4]; // Array of four pointers to neighboring corners along the grid directions bw+, wb+, bw-, wb-, respectively
 	
 	/* Methods: */
-	bool operator()(const Pixel& pixel) const
+	void unlink(int dir)
 		{
-		return minPixelValue<=pixel&&pixel<=maxPixelValue;
-		}
-	};
-
-template <>
-class PixelComparer<GLColor<GLubyte,3> > // Pixel comparer for color frames
-	{
-	/* Embedded classes: */
-	public:
-	typedef GLColor<GLubyte,3> Pixel;
-	
-	/* Elements: */
-	private:
-	Pixel minPixelValue; // Minimal similar pixel value, in maximum norm
-	Pixel maxPixelValue; // Maximal similar pixel value, in maximum norm
-	
-	/* Constructors and destructors: */
-	public:
-	PixelComparer(const Pixel& sPixelValue,unsigned int sThreshold)
-		{
-		for(int i=0;i<3;++i)
+		if(links[dir]!=0)
 			{
-			if(sPixelValue[i]>=sThreshold)
-				minPixelValue[i]=GLubyte(sPixelValue[i]-sThreshold);
-			else
-				minPixelValue[i]=0U;
-			if(sPixelValue[i]<=0xffU-sThreshold)
-				maxPixelValue[i]=GLubyte(sPixelValue[i]+sThreshold);
-			else
-				maxPixelValue[i]=0xffU;
+			/* Find and remove the linked node's link back to this node: */
+			LinkCorner* other=links[dir];
+			int otherDir=(dir+1)%2;
+			if(other->links[otherDir]==this)
+				other->links[otherDir]=0;
+			otherDir+=2;
+			if(other->links[otherDir]==this)
+				other->links[otherDir]=0;
+			
+			links[dir]=0;
 			}
 		}
+	};
+
+typedef Geometry::ArrayKdTree<LinkCorner> LinkCornerTree; // Tree to enumerate corners in distance order
+
+struct CornerLinker // Functor to link corners based on their separator directions
+	{
+	/* Embedded classes: */
+	public:
+	typedef LinkCorner::Scalar Scalar;
+	
+	/* Elements: */
+	LinkCorner* treeBase;
+	LinkCorner* corner;
+	Scalar maxAngleCos;
+	Scalar maxSearchDist;
+	Scalar linkedDists[4];
 	
 	/* Methods: */
-	bool operator()(const Pixel& pixel) const
+	const LinkCornerTree::Point& getQueryPosition(void) const
 		{
-		bool result=true;
-		for(int i=0;i<3&&result;++i)
-			result=minPixelValue[i]<=pixel[i]&&pixel[i]<=maxPixelValue[i];
-		return result;
+		return *corner;
+		}
+	bool operator()(const LinkCornerTree::StoredPoint& node,int splitDimension)
+		{
+		/* Get a non-const pointer to the other corner: */
+		LinkCorner* other=treeBase+(&node-treeBase);
+		
+		/* Get the direction and distance to the other node: */
+		LinkCorner::Vector d=*other-*corner;
+		Scalar dist=d.mag();
+		
+		/* Find the separator line most closely aligned with the direction to the other node: */
+		int dir=-1;
+		Scalar mac=maxAngleCos;
+		for(int i=0;i<4;++i)
+			{
+			/* Check whether the link is unused or the currently linked node is farther away than the one being tested: */
+			if(corner->links[i]==0||linkedDists[i]>dist)
+				{
+				/* Calculate the angle of the other node w.r.t. the current separator line: */
+				Scalar angleCos=i%2==0?(corner->bw*d)/dist:(corner->wb*d)/dist; // Dirs 0 and 2 are bw, dirs 1 and 3 are wb
+				if(i>=2) // Dirs 0 and 1 are +bw and +wb, dirs 2 and 3 are -bw and -wb
+					angleCos=-angleCos;
+				
+				if(mac<angleCos)
+					{
+					dir=i;
+					mac=angleCos;
+					}
+				}
+			}
+		
+		if(dir>=0)
+			{
+			/* Check if the tested node's orientation is compatible with the corner: */
+			int otherDir=(dir+1)%2; // wb can only link with bw, and vice versa
+			Scalar otherAngleCos=otherDir==0?-(other->bw*d)/dist:-(other->wb*d)/dist;
+			if(otherAngleCos<Scalar(0)) // If the node's separator points the other way, go to the opposite separator
+				{
+				otherDir+=2;
+				otherAngleCos=-otherAngleCos;
+				}
+			
+			/* Check whether the link is possible: */
+			if(otherAngleCos>maxAngleCos&&(other->links[otherDir]==0||Geometry::sqrDist(*other,*other->links[otherDir])>Math::sqr(dist)))
+				{
+				/* Unlink any previously existing link: */
+				corner->unlink(dir);
+				other->unlink(otherDir);
+				
+				/* Link the two corners: */
+				corner->links[dir]=other;
+				other->links[otherDir]=corner;
+				linkedDists[dir]=dist;
+				
+				/* Check if all the corner's links are occupied: */
+				float maxLinkedDist=Scalar(0);
+				int i;
+				for(i=0;i<4&&corner->links[i]!=0;++i)
+					{
+					if(maxLinkedDist<linkedDists[i])
+						maxLinkedDist=linkedDists[i];
+					}
+				if(i==4)
+					{
+					/* Reduce the maximum search distance: */
+					maxSearchDist=maxLinkedDist;
+					}
+				}
+			}
+		
+		return Math::abs(node[splitDimension]-(*corner)[splitDimension])<maxSearchDist;
 		}
 	};
+
+}
 
 /*************************************
 Static elements of class TiePointTool:
@@ -120,15 +176,92 @@ TiePointToolFactory* TiePointTool::factory=0;
 Methods of class TiePointTool:
 *****************************/
 
+void TiePointTool::cornerExtractionCallback(const TiePointTool::CornerList& corners)
+	{
+	/* Enter the new corner list into the triple buffer: */
+	CornerList& newValue=cornerBuffer.startNewValue();
+	newValue.clear();
+	
+	/* Create a new kd-tree from all root corner candidate points to assemble a grid: */
+	LinkCornerTree cornerTree(corners.size());
+	LinkCorner* cPtr=cornerTree.accessPoints();
+	for(CornerList::const_iterator cIt=corners.begin();cIt!=corners.end();++cIt,++cPtr)
+		{
+		cPtr->Corner::Point::operator=(*cIt);
+		cPtr->bw=cIt->bw;
+		cPtr->wb=cIt->wb;
+		for(int i=0;i<4;++i)
+			cPtr->links[i]=0;
+		}
+	cornerTree.releasePoints();
+	
+	/* Create links between any pair of corners that roughly lie along their separating directions: */
+	CornerLinker cl;
+	cl.treeBase=cornerTree.accessPoints();
+	cl.maxAngleCos=Math::cos(Math::rad(CornerLinker::Scalar(30)));
+	LinkCorner* ctEnd=cornerTree.accessPoints()+cornerTree.getNumNodes();
+	for(LinkCorner* cPtr=cornerTree.accessPoints();cPtr!=ctEnd;++cPtr)
+		{
+		/* Prepare to look for links from the current corner: */
+		cl.corner=cPtr;
+		cl.maxSearchDist=Math::Constants<Corner::Scalar>::max;
+		for(int i=0;i<4;++i)
+			cl.linkedDists[i]=Corner::Scalar(0); // Not actually necessary
+		
+		/* Traverse the tree to find all links: */
+		cornerTree.traverseTreeDirected(cl);
+		}
+	
+	/* Look for a corner with four outgoing links whose intersections are close to the corner itself: */
+	for(LinkCorner* cPtr=cornerTree.accessPoints();cPtr!=ctEnd;++cPtr)
+		{
+		if(cPtr->links[0]!=0&&cPtr->links[1]!=0&&cPtr->links[2]!=0&&cPtr->links[3]!=0)
+			{
+			/* Find the intersection between lines through opposing neighbors: */
+			const Corner::Point& p0=*cPtr->links[0];
+			const Corner::Point& p1=*cPtr->links[1];
+			const Corner::Point& p2=*cPtr->links[2];
+			const Corner::Point& p3=*cPtr->links[3];
+			
+			Corner::Scalar det=(p2[0]-p0[0])*(p1[1]-p3[1])-(p1[0]-p3[0])*(p2[1]-p0[1]);
+			Corner::Scalar alpha=((p1[1]-p3[1])*(p1[0]-p0[0])+(p3[0]-p1[0])*(p1[1]-p0[1]))/det;
+			Corner::Scalar beta=((p0[1]-p2[1])*(p1[0]-p0[0])+(p2[0]-p0[0])*(p1[1]-p0[1]))/det;
+			Corner::Point intersect=Geometry::mid(p0+(p2-p0)*alpha,p1+(p3-p1)*beta);
+			
+			/* Check if the intersection is close enough to the central point: */
+			if(Geometry::sqrDist(intersect,*cPtr)<Math::sqr(2.0))
+				{
+				/* Store the center point: */
+				Corner newCorner;
+				newCorner.Corner::Point::operator=(Geometry::mid(*cPtr,intersect));
+				newCorner.bw=cPtr->bw;
+				newCorner.wb=cPtr->wb;
+				newValue.push_back(newCorner);
+				}
+			}
+		}
+	
+	cornerBuffer.postNewValue();
+	Vrui::requestUpdate();
+	}
+
+void TiePointTool::diskExtractionCallback(const TiePointTool::DiskList& disks)
+	{
+	/* Enter the new disk list into the triple buffer: */
+	DiskList& newValue=diskBuffer.startNewValue();
+	newValue=disks;
+	diskBuffer.postNewValue();
+	Vrui::requestUpdate();
+	}
+
 TiePointToolFactory* TiePointTool::initClass(Vrui::ToolManager& toolManager)
 	{
 	/* Create the tool factory: */
 	factory=new TiePointToolFactory("TiePointTool","Tie Points",0,toolManager);
 	
 	/* Set up the tool class' input layout: */
-	factory->setNumButtons(2);
-	factory->setButtonFunction(0,"Select Point");
-	factory->setButtonFunction(1,"Save Point Pair");
+	factory->setNumButtons(1);
+	factory->setButtonFunction(0,"Save Point Pair");
 	
 	/* Register and return the class: */
 	toolManager.addClass(factory,Vrui::ToolManager::defaultToolFactoryDestructor);
@@ -137,7 +270,9 @@ TiePointToolFactory* TiePointTool::initClass(Vrui::ToolManager& toolManager)
 
 TiePointTool::TiePointTool(const Vrui::ToolFactory* factory,const Vrui::ToolInputAssignment& inputAssignment)
 	:Vrui::Tool(factory,inputAssignment),
-	 haveDepthPoint(false),haveColorPoint(false)
+	 colorFrameCallback(0),depthFrameCallback(0),
+	 cornerExtractor(0),diskExtractor(0),
+	 accumulate(false)
 	{
 	}
 
@@ -145,164 +280,167 @@ TiePointTool::~TiePointTool(void)
 	{
 	}
 
+void TiePointTool::initialize(void)
+	{
+	/* Set up the color frame processing pipeline: */
+	cornerExtractor=new Kinect::CornerExtractor(application->colorFrameSize,7,3);
+	cornerExtractor->setInputGamma(2.2f);
+	cornerExtractor->setNormalizationWindowSize(48);
+	cornerExtractor->setRegionThreshold(64U);
+	colorFrameCallback=Misc::createFunctionCall(cornerExtractor,&Kinect::CornerExtractor::submitFrame);
+	
+	/* Set up the depth frame processing pipeline: */
+	diskExtractor=new Kinect::DiskExtractor(application->depthFrameSize,application->depthCorrection,application->intrinsicParameters);
+	diskExtractor->setMaxBlobMergeDist(5);
+	diskExtractor->setMinNumPixels(300);
+	diskExtractor->setDiskRadius(6.0);
+	diskExtractor->setDiskRadiusMargin(1.1);
+	diskExtractor->setDiskFlatness(25.0);
+	depthFrameCallback=Misc::createFunctionCall(diskExtractor,&Kinect::DiskExtractor::submitFrame);
+	
+	/* Start processing on both pipelines: */
+	cornerExtractor->startStreaming(Misc::createFunctionCall(this,&TiePointTool::cornerExtractionCallback));
+	diskExtractor->startStreaming(Misc::createFunctionCall(this,&TiePointTool::diskExtractionCallback));
+	
+	/* Register streaming callbacks with the RawKinectViewer application: */
+	application->registerColorCallback(colorFrameCallback);
+	application->registerDepthCallback(depthFrameCallback);
+	}
+
+void TiePointTool::deinitialize(void)
+	{
+	/* Unregister the color and depth streaming callbacks: */
+	application->unregisterColorCallback(colorFrameCallback);
+	delete colorFrameCallback;
+	colorFrameCallback=0;
+	application->unregisterDepthCallback(depthFrameCallback);
+	delete depthFrameCallback;
+	depthFrameCallback=0;
+	
+	/* Shut down the color and depth frame processing pipelines: */
+	cornerExtractor->stopStreaming();
+	diskExtractor->stopStreaming();
+	
+	delete cornerExtractor;
+	cornerExtractor=0;
+	delete diskExtractor;
+	diskExtractor=0;
+	}
+
 const Vrui::ToolFactory* TiePointTool::getFactory(void) const
 	{
 	return factory;
 	}
 
-void TiePointTool::buttonCallback(int buttonSlotIndex,Vrui::InputDevice::ButtonCallbackData* cbData)
+void TiePointTool::buttonCallback(int,Vrui::InputDevice::ButtonCallbackData* cbData)
 	{
-	if(buttonSlotIndex==0&&cbData->newButtonState)
+	if(cbData->newButtonState)
 		{
-		/* Get the image-space device point: */
-		Vrui::Point imagePoint=application->calcImagePoint(getButtonDeviceRay(0));
-		int x=int(Math::floor(imagePoint[0]));
-		int y=int(Math::floor(imagePoint[1]));
+		/* Reset the point accumulators: */
+		cornerCombiner.reset();
+		diskCombiner.reset();
 		
-		/* Check whether the intersection point is inside the depth or the color image: */
-		if(x>=-int(application->depthFrameSize[0])&&x<0&&y>=0&&y<int(application->depthFrameSize[1])) // It's a depth frame point
-			{
-			x+=int(application->depthFrameSize[0]);
-			
-			/****************************************
-			Extract a blob around the selected pixel:
-			****************************************/
-			
-			/* Calculate a low-pass filtered depth value for the selected pixel: */
-			const DepthPixel* framePtr=static_cast<const DepthPixel*>(application->depthFrames.getLockedValue().getBuffer());
-			double avgDepth=0.0;
-			unsigned int numSamples=0;
-			for(int dy=-2;dy<=2;++dy)
-				if(y+dy>=0&&y+dy<int(application->depthFrameSize[1]))
-					{
-					for(int dx=-2;dx<=2;++dx)
-						if(x+dx>=0&&x+dx<int(application->depthFrameSize[0]))
-							{
-							avgDepth+=double(framePtr[(y+dy)*application->depthFrameSize[0]+(x+dx)]);
-							++numSamples;
-							}
-					}
-			DepthPixel avg=DepthPixel(avgDepth/double(numSamples)+0.5);
-			
-			/* Extract all blobs with the average depth value: */
-			PixelComparer<DepthPixel> pc(avg,10); // 10 is just a guess for now
-			std::vector<DepthBlob> blobs=findBlobs(application->depthFrames.getLockedValue(),pc);
-			
-			/* Find the smallest blob containing the selected pixel: */
-			unsigned int minSize=~0x0U;
-			for(std::vector<DepthBlob>::iterator bIt=blobs.begin();bIt!=blobs.end();++bIt)
-				{
-				if(bIt->min[0]<=x&&x<bIt->max[0]&&bIt->min[1]<=y&&y<bIt->max[1])
-					{
-					unsigned int size=(unsigned int)(bIt->max[0]-bIt->min[0])*(unsigned int)(bIt->max[1]-bIt->min[1]);
-					if(minSize>size)
-						{
-						depthPoint=*bIt;
-						minSize=size;
-						}
-					}
-				}
-			haveDepthPoint=true;
-			std::cout<<"Average raw depth value: "<<depthPoint.blobProperty.getRawDepth()<<std::endl;
-			}
-		else if(x>=0&&x<int(application->colorFrameSize[0])&&y>=0&&y<int(application->colorFrameSize[1])) // It's a color frame point
-			{
-			/****************************************
-			Extract a blob around the selected pixel:
-			****************************************/
-			
-			/* Calculate a low-pass filtered color value for the selected pixel: */
-			const ColorPixel* framePtr=static_cast<const ColorPixel*>(application->colorFrames.getLockedValue().getBuffer());
-			double avgColor[3];
-			for(int i=0;i<3;++i)
-				avgColor[i]=0.0;
-			unsigned int numSamples=0;
-			for(int dy=-2;dy<=2;++dy)
-				if(y+dy>=0&&y+dy<int(application->colorFrameSize[1]))
-					{
-					for(int dx=-2;dx<=2;++dx)
-						if(x+dx>=0&&x+dx<int(application->colorFrameSize[0]))
-							{
-							for(int i=0;i<3;++i)
-								avgColor[i]+=double(framePtr[(y+dy)*application->colorFrameSize[0]+(x+dx)][i]);
-							++numSamples;
-							}
-					}
-			ColorPixel avg;
-			for(int i=0;i<3;++i)
-				avg[i]=ColorPixel::Scalar(avgColor[i]/double(numSamples)+0.5);
-			
-			/* Extract all blobs with the average color value: */
-			PixelComparer<ColorPixel> pc(avg,25); // 25 is just a guess for now
-			std::vector<ColorBlob> blobs=findBlobs(application->colorFrames.getLockedValue(),pc);
-			
-			/* Find the smallest blob containing the selected pixel: */
-			unsigned int minSize=~0x0U;
-			for(std::vector<ColorBlob>::iterator bIt=blobs.begin();bIt!=blobs.end();++bIt)
-				{
-				if(bIt->min[0]<=x&&x<bIt->max[0]&&bIt->min[1]<=y&&y<bIt->max[1])
-					{
-					unsigned int size=(unsigned int)(bIt->max[0]-bIt->min[0])*(unsigned int)(bIt->max[1]-bIt->min[1]);
-					if(minSize>size)
-						{
-						colorPoint=*bIt;
-						minSize=size;
-						}
-					}
-				}
-			haveColorPoint=true;
-			}
+		/* Start accumulating: */
+		accumulate=true;
 		}
-	
-	if(buttonSlotIndex==1&&cbData->newButtonState&&haveDepthPoint&&haveColorPoint)
+	else
 		{
+		/* Stop accumulating: */
+		accumulate=false;
+		
 		/* Append a tie point pair to the calibration file: */
-		BlobProperty<DepthPixel>::Point p=depthPoint.blobProperty.getCentroid();
-		std::cout<<p[0]<<','<<p[1]<<','<<p[2]<<',';
-		std::cout<<colorPoint.x<<','<<colorPoint.y<<std::endl;
+		Corner::Point cp=cornerCombiner.getPoint();
+		Point dp=diskCombiner.getPoint();
+		std::cout<<dp[0]<<','<<dp[1]<<','<<dp[2]<<',';
+		std::cout<<cp[0]<<','<<cp[1]<<std::endl;
+		}
+	}
+
+void TiePointTool::frame(void)
+	{
+	/* Lock the most recent extraction results: */
+	cornerBuffer.lockNewValue();
+	
+	// DEBUGGING
+	#if 0
+	if(diskBuffer.lockNewValue())
+		{
+		const DiskList& diskList=diskBuffer.getLockedValue();
+		if(diskList.size()==1)
+			std::cout<<diskList.front().center<<", "<<diskList.front().normal<<std::endl;
+		}
+	#else
+	diskBuffer.lockNewValue();
+	#endif
+	
+	/* Check if the current results are valid and need to be accumulated: */
+	if(accumulate&&cornerBuffer.getLockedValue().size()==1U&&diskBuffer.getLockedValue().size()==1U)
+		{
+		cornerCombiner.addPoint(cornerBuffer.getLockedValue().front());
+		diskCombiner.addPoint(diskBuffer.getLockedValue().front().center);
 		}
 	}
 
 void TiePointTool::display(GLContextData& contextData) const
 	{
-	if(haveDepthPoint||haveColorPoint)
+	glPushAttrib(GL_ENABLE_BIT|GL_LINE_BIT|GL_POINT_BIT);
+	glDisable(GL_LIGHTING);
+	glLineWidth(3.0f);
+	glPointSize(3.0f);
+	
+	/* Go to navigation coordinates: */
+	glPushMatrix();
+	const Vrui::DisplayState& displayState=Vrui::getDisplayState(contextData);
+	glLoadMatrix(displayState.modelviewNavigational);
+	
+	if(!cornerBuffer.getLockedValue().empty())
 		{
-		glPushAttrib(GL_ENABLE_BIT|GL_LINE_BIT);
-		glDisable(GL_LIGHTING);
-		
-		/* Go to navigation coordinates: */
-		glPushMatrix();
-		const Vrui::DisplayState& displayState=Vrui::getDisplayState(contextData);
-		glLoadMatrix(displayState.modelviewNavigational);
-		
-		if(haveDepthPoint)
+		/* Draw all current grid corners: */
+		Corner::Scalar radius=Corner::Scalar(cornerExtractor->getTestRadius());
+		glBegin(GL_LINES);
+		glColor3f(1.0f,0.0f,1.0f);
+		for(CornerList::const_iterator cIt=cornerBuffer.getLockedValue().begin();cIt!=cornerBuffer.getLockedValue().end();++cIt)
 			{
-			/* Draw the depth blob: */
-			glLineWidth(1.0f);
-			glColor3f(0.0f,1.0f,0.0f);
-			glBegin(GL_LINE_LOOP);
-			glVertex3f(depthPoint.min[0]-GLfloat(application->depthFrameSize[0]),depthPoint.min[1],0.01f);
-			glVertex3f(depthPoint.max[0]-GLfloat(application->depthFrameSize[0]),depthPoint.min[1],0.01f);
-			glVertex3f(depthPoint.max[0]-GLfloat(application->depthFrameSize[0]),depthPoint.max[1],0.01f);
-			glVertex3f(depthPoint.min[0]-GLfloat(application->depthFrameSize[0]),depthPoint.max[1],0.01f);
-			glEnd();
+			glVertex3f((*cIt)[0]-cIt->bw[0]*radius,(*cIt)[1]-cIt->bw[1]*radius,0.02f);
+			glVertex3f((*cIt)[0]+cIt->bw[0]*radius,(*cIt)[1]+cIt->bw[1]*radius,0.02f);
+			glVertex3f((*cIt)[0]-cIt->wb[0]*radius,(*cIt)[1]-cIt->wb[1]*radius,0.02f);
+			glVertex3f((*cIt)[0]+cIt->wb[0]*radius,(*cIt)[1]+cIt->wb[1]*radius,0.02f);
 			}
-		
-		if(haveColorPoint)
-			{
-			/* Draw the color blob: */
-			glLineWidth(1.0f);
-			glColor3f(0.0f,1.0f,0.0f);
-			glBegin(GL_LINE_LOOP);
-			glVertex3f(colorPoint.min[0],colorPoint.min[1],0.01f);
-			glVertex3f(colorPoint.max[0],colorPoint.min[1],0.01f);
-			glVertex3f(colorPoint.max[0],colorPoint.max[1],0.01f);
-			glVertex3f(colorPoint.min[0],colorPoint.max[1],0.01f);
-			glEnd();
-			}
-		
-		glPopMatrix();
-		
-		glPopAttrib();
+		glEnd();
 		}
+	
+	/* Draw all current disk centroids: */
+	if(!diskBuffer.getLockedValue().empty())
+		{
+		glColor3f(1.0f,1.0f,1.0f);
+		for(DiskList::const_iterator dIt=diskBuffer.getLockedValue().begin();dIt!=diskBuffer.getLockedValue().end();++dIt)
+			{
+			/* Project the extracted 3D disk into depth image space: */
+			Vector x=Geometry::normal(dIt->normal);
+			x.normalize();
+			Vector y=dIt->normal^x;
+			y.normalize();
+			glBegin(GL_LINE_LOOP);
+			for(int i=0;i<32;++i)
+				{
+				Scalar angle=Scalar(2)*Math::Constants<Scalar>::pi*Scalar(i)/Scalar(32);
+				Point ip=application->intrinsicParameters.depthProjection.inverseTransform(dIt->center+x*(Math::cos(angle)*dIt->radius)+y*(Math::sin(angle)*dIt->radius));
+				glVertex3d(ip[0]-application->depthImageOffset,ip[1],0.02);
+				}
+			glEnd();
+			
+			glBegin(GL_POINTS);
+			Point ip=application->intrinsicParameters.depthProjection.inverseTransform(dIt->center);
+			glVertex3d(ip[0]-application->depthImageOffset,ip[1],0.02);
+			glEnd();
+			
+			// DEBUGGING
+			// std::cout<<imageDisk[0]<<", "<<imageDisk[1]<<", "<<imageDisk[2]<<std::endl;
+			}
+		}
+	
+	/* Go back to physical coordinates: */
+	glPopMatrix();
+	
+	glPopAttrib();
 	}
