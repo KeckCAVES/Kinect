@@ -1,7 +1,7 @@
 /***********************************************************************
 DiskExtractor - Helper class to extract the 3D center points of disks
 from depth images.
-Copyright (c) 2015 Oliver Kreylos
+Copyright (c) 2015-2017 Oliver Kreylos
 
 This file is part of the Kinect 3D Video Capture Project (Kinect).
 
@@ -41,6 +41,8 @@ namespace Kinect {
 /********************************
 Declarations of embedded classes:
 ********************************/
+
+#if 0 // Not used anymore
 
 struct DiskExtractor::DepthCentroidBlob:public Images::Blob<DiskExtractor::DepthPixel> // Structure to calculate 3D centroids of blobs in depth image space
 	{
@@ -121,6 +123,8 @@ struct DiskExtractor::DepthCentroidBlob:public Images::Blob<DiskExtractor::Depth
 		}
 	};
 
+#endif
+
 struct DiskExtractor::DepthPCABlob:public Images::Blob<DiskExtractor::DepthPixel> // Structure to calculate 3D plane equations of blobs in depth image space
 	{
 	/* Embedded classes: */
@@ -137,11 +141,13 @@ struct DiskExtractor::DepthPCABlob:public Images::Blob<DiskExtractor::DepthPixel
 		const PixelDepthCorrection* depthCorrection; // 2D array of per-pixel depth correction factors
 		const ImagePoint* framePixels; // 2D array of lens distortion-corrected depth image pixels
 		PTransform depthProjection; // Projection from depth image space into camera space
+		unsigned int trackingIndex; // Linear index of a pixel whose blob to track through the extraction process
 		};
 	
 	/* Elements: */
 	double pxpxs,pxpys,pxpzs,pypys,pypzs,pzpzs,pxs,pys,pzs; // Accumulated components of covariance matrix and centroid
 	double weights; // Sum of all accumulated point weights
+	bool tracked; // Flag whether this blob contains the tracking pixel
 	
 	/* Constructors and destructors: */
 	DepthPCABlob(unsigned int x,unsigned int y,const Pixel& pixel,const Creator& creator)
@@ -170,6 +176,9 @@ struct DiskExtractor::DepthPCABlob:public Images::Blob<DiskExtractor::DepthPixel
 		pys=double(p[1])*weight;
 		pzs=double(p[2])*weight;
 		weights=weight;
+		
+		/* Check if the new pixel is the tracking pixel: */
+		tracked=index==creator.trackingIndex;
 		}
 	
 	/* Methods: */
@@ -200,6 +209,9 @@ struct DiskExtractor::DepthPCABlob:public Images::Blob<DiskExtractor::DepthPixel
 		pys+=double(p[1])*weight;
 		pzs+=double(p[2])*weight;
 		weights+=weight;
+		
+		/* Check if the new pixel is the tracking pixel: */
+		tracked=tracked||index==creator.trackingIndex;
 		}
 	void merge(const DepthPCABlob& other,const Creator& creator)
 		{
@@ -215,6 +227,9 @@ struct DiskExtractor::DepthPCABlob:public Images::Blob<DiskExtractor::DepthPixel
 		pys+=other.pys;
 		pzs+=other.pzs;
 		weights+=other.weights;
+		
+		/* Keep tracked of the tracking pixel: */
+		tracked=tracked||other.tracked;
 		}
 	Point calcCentroid(void) const // Returns the blob's centroid in depth image space
 		{
@@ -372,6 +387,10 @@ struct DiskExtractor::DepthPCABlob:public Images::Blob<DiskExtractor::DepthPixel
 		result.normalize();
 		return result;
 		}
+	bool isTracked(void) const // Returns true if this blob contains the tracking pixel
+		{
+		return tracked;
+		}
 	};
 
 namespace {
@@ -425,6 +444,8 @@ void* DiskExtractor::diskExtractorThreadMethod(void)
 		unsigned int mnp;
 		Scalar drMin,drMax;
 		Scalar df;
+		unsigned int tp;
+		TrackingCallback* tc;
 		{
 		Threads::MutexCond::Lock newFrameLock(newFrameCond);
 		
@@ -444,6 +465,10 @@ void* DiskExtractor::diskExtractorThreadMethod(void)
 		drMin=diskRadius/diskRadiusMargin;
 		drMax=diskRadius*diskRadiusMargin;
 		df=diskFlatness;
+		
+		/* Grab the current pixel tracking parameters: */
+		tp=trackingPixel;
+		tc=trackingCallback;
 		}
 		
 		// DEBUGGING
@@ -459,13 +484,14 @@ void* DiskExtractor::diskExtractorThreadMethod(void)
 		blobCreator.depthCorrection=depthCorrection;
 		blobCreator.framePixels=framePixels;
 		blobCreator.depthProjection=depthProjection;
+		blobCreator.trackingIndex=tp;
 		std::vector<DepthPCABlob> blobs=Images::extractBlobs<DepthPCABlob>(frameSize,depthFramePixels,bfs,bmc,blobCreator);
 		
 		/* Create the result list: */
 		DiskList extractionResult;
 		extractionResult.reserve(blobs.size());
 		for(std::vector<DepthPCABlob>::iterator bIt=blobs.begin();bIt!=blobs.end();++bIt)
-			if(bIt->numPixels>=mnp)
+			if(bIt->numPixels>=mnp||bIt->isTracked())
 				{
 				/* Calculate the blob's principal components: */
 				Point centroid=bIt->calcCentroid();
@@ -508,15 +534,27 @@ void* DiskExtractor::diskExtractorThreadMethod(void)
 				#endif
 				
 				/* Check if the blob fits the search parameters: */
-				if(axisLengths[0]>=drMin&&axisLengths[0]<=drMax&&axisLengths[1]>=drMin&&axisLengths[1]<=drMax&&axisLengths[2]<=df)
+				bool blobValid=axisLengths[0]>=drMin&&axisLengths[0]<=drMax&&axisLengths[1]>=drMin&&axisLengths[1]<=drMax&&axisLengths[2]<=df;
+				if(bIt->isTracked()||blobValid)
 					{
 					/* Store the extracted disk: */
 					Disk disk;
 					disk.center=depthProjection.transform(centroid);
 					disk.normal=axes[0]^axes[1];
 					disk.normal.normalize();
+					
+					disk.numPixels=bIt->numPixels;
 					disk.radius=Math::sqrt(axisLengths[0]*axisLengths[1]);
-					extractionResult.push_back(disk);
+					disk.flatness=axisLengths[2];
+					disk.numPixels=bIt->numPixels;
+					
+					if(blobValid)
+						extractionResult.push_back(disk);
+					if(bIt->isTracked()&&tc!=0)
+						{
+						/* Call the tracking callback: */
+						(*tc)(disk);
+						}
 					
 					// DEBUGGING
 					// std::cout<<"("<<centroid[0]<<", "<<centroid[1]<<", "<<centroid[2]<<"), "<<disk.radius<<std::endl;
@@ -543,7 +581,8 @@ DiskExtractor::DiskExtractor(const unsigned int sFrameSize[2],const FrameSource:
 	 minNumPixels(500),
 	 diskRadius(60),diskRadiusMargin(1.1),diskFlatness(5.0),
 	 keepProcessing(false),
-	 extractionResultCallback(0)
+	 extractionResultCallback(0),
+	 trackingPixel(~0x0U),trackingCallback(0)
 	{
 	/* Copy the frame size: */
 	for(int i=0;i<2;++i)
@@ -620,7 +659,8 @@ DiskExtractor::DiskExtractor(const unsigned int sFrameSize[2],const DiskExtracto
 	 minNumPixels(500),
 	 diskRadius(60),diskRadiusMargin(1.1),diskFlatness(5.0),
 	 keepProcessing(false),
-	 extractionResultCallback(0)
+	 extractionResultCallback(0),
+	 trackingPixel(~0x0U),trackingCallback(0)
 	{
 	/* Copy the frame size: */
 	for(int i=0;i<2;++i)
@@ -708,6 +748,7 @@ DiskExtractor::~DiskExtractor(void)
 		delete[] depthCorrection;
 	delete[] framePixels;
 	delete extractionResultCallback;
+	delete trackingCallback;
 	}
 
 void DiskExtractor::setMaxBlobMergeDist(int newMaxBlobMergeDist)
@@ -748,6 +789,8 @@ DiskExtractor::DiskList DiskExtractor::processFrame(const FrameBuffer& frame) co
 	Scalar drMin=diskRadius/diskRadiusMargin;
 	Scalar drMax=diskRadius*diskRadiusMargin;
 	Scalar df=diskFlatness;
+	unsigned int tp=trackingPixel;
+	TrackingCallback* tc=trackingCallback;
 	
 	/* Extract all foreground blobs from the raw depth frame: */
 	const DepthPixel* depthFramePixels=frame.getData<DepthPixel>();
@@ -759,13 +802,14 @@ DiskExtractor::DiskList DiskExtractor::processFrame(const FrameBuffer& frame) co
 	blobCreator.depthCorrection=depthCorrection;
 	blobCreator.framePixels=framePixels;
 	blobCreator.depthProjection=depthProjection;
+	blobCreator.trackingIndex=tp;
 	std::vector<DepthPCABlob> blobs=Images::extractBlobs<DepthPCABlob>(frameSize,depthFramePixels,bfs,bmc,blobCreator);
 	
 	/* Create the result list: */
 	DiskList extractionResult;
 	extractionResult.reserve(blobs.size());
 	for(std::vector<DepthPCABlob>::iterator bIt=blobs.begin();bIt!=blobs.end();++bIt)
-		if(bIt->numPixels>=mnp)
+		if(bIt->numPixels>=mnp||bIt->isTracked())
 			{
 			/* Calculate the blob's principal components: */
 			Point centroid=bIt->calcCentroid();
@@ -810,15 +854,27 @@ DiskExtractor::DiskList DiskExtractor::processFrame(const FrameBuffer& frame) co
 			#endif
 			
 			/* Check if the blob fits the search parameters: */
-			if(axisLengths[0]>=drMin&&axisLengths[0]<=drMax&&axisLengths[1]>=drMin&&axisLengths[1]<=drMax&&axisLengths[2]<=df)
+			bool blobValid=axisLengths[0]>=drMin&&axisLengths[0]<=drMax&&axisLengths[1]>=drMin&&axisLengths[1]<=drMax&&axisLengths[2]<=df;
+			if(bIt->isTracked()||blobValid)
 				{
 				/* Store the extracted disk: */
 				Disk disk;
 				disk.center=depthProjection.transform(centroid);
 				disk.normal=axes[0]^axes[1];
 				disk.normal.normalize();
+				
+				disk.numPixels=bIt->numPixels;
 				disk.radius=Math::sqrt(axisLengths[0]*axisLengths[1]);
-				extractionResult.push_back(disk);
+				disk.flatness=axisLengths[2];
+				disk.numPixels=bIt->numPixels;
+				
+				if(blobValid)
+					extractionResult.push_back(disk);
+				if(bIt->isTracked()&&tc!=0)
+					{
+					/* Call the tracking callback: */
+					(*tc)(disk);
+					}
 				}
 			}
 	
@@ -863,6 +919,29 @@ void DiskExtractor::stopStreaming(void)
 	
 	delete extractionResultCallback;
 	extractionResultCallback=0;
+	}
+
+void DiskExtractor::startTracking(DiskExtractor::TrackingCallback* newTrackingCallback)
+	{
+	/* Store the callback: */
+	trackingCallback=newTrackingCallback;
+	}
+
+void DiskExtractor::setTrackingPixel(unsigned int trackingX,unsigned int trackingY)
+	{
+	/* Update the tracking pixel index: */
+	trackingPixel=trackingY*frameSize[0]+trackingX;
+	}
+
+void DiskExtractor::stopTracking(void)
+	{
+	/* Reset the tracking pixel index: */
+	trackingPixel=~0x0U;
+	
+	/* Delete the tracking callback: */
+	TrackingCallback* tc=trackingCallback;
+	trackingCallback=0;
+	delete tc;
 	}
 
 }

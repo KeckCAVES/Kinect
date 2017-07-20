@@ -1,7 +1,7 @@
 /***********************************************************************
 MultiplexedFrameSource - Class to stream several pairs of color and
 depth frames from a single source file or pipe.
-Copyright (c) 2010-2016 Oliver Kreylos
+Copyright (c) 2010-2017 Oliver Kreylos
 
 This file is part of the Kinect 3D Video Capture Project (Kinect).
 
@@ -59,6 +59,11 @@ MultiplexedFrameSource::Stream::Stream(MultiplexedFrameSource* sOwner,unsigned i
 		{
 		/* Read new B-spline based depth correction parameters: */
 		depthCorrection=new DepthCorrection(source);
+		if(!depthCorrection->isValid())
+			{
+			delete depthCorrection;
+			depthCorrection=0;
+			}
 		}
 	else
 		{
@@ -134,8 +139,11 @@ MultiplexedFrameSource::Stream::~Stream(void)
 
 FrameSource::DepthCorrection* MultiplexedFrameSource::Stream::getDepthCorrectionParameters(void)
 	{
-	/* Clone and return the depth correction object: */
-	return new DepthCorrection(*depthCorrection);
+	/* Clone and return the depth correction object if it exists, otherwise return NULL: */
+	if(depthCorrection!=0)
+		return new DepthCorrection(*depthCorrection);
+	else
+		return 0;
 	}
 
 FrameSource::IntrinsicParameters MultiplexedFrameSource::Stream::getIntrinsicParameters(void)
@@ -229,8 +237,10 @@ void* MultiplexedFrameSource::receivingThreadMethod(void)
 							if(streams[i]->streaming)
 								{
 								/* Push the streamer's frames: */
-								(*streams[i]->colorStreamingCallback)(frames[i*2+0]);
-								(*streams[i]->depthStreamingCallback)(frames[i*2+1]);
+								if(streams[i]->colorStreamingCallback!=0)
+									(*streams[i]->colorStreamingCallback)(frames[i*2+0]);
+								if(streams[i]->depthStreamingCallback!=0)
+									(*streams[i]->depthStreamingCallback)(frames[i*2+1]);
 								}
 							}
 						}

@@ -1,7 +1,7 @@
 /***********************************************************************
 DiskExtractor - Helper class to extract the 3D center points of disks
 from depth images.
-Copyright (c) 2015 Oliver Kreylos
+Copyright (c) 2015-2017 Oliver Kreylos
 
 This file is part of the Kinect 3D Video Capture Project (Kinect).
 
@@ -61,14 +61,21 @@ class DiskExtractor
 		public:
 		Point center; // Disk's center point
 		Vector normal; // Normal vector of plane containing Disk
+		
+		/* Extraction statistics: */
+		unsigned int numPixels; // Number of pixels in the disk's blob
 		Scalar radius; // Disk's radius
+		Scalar flatness; // Disk's flatness factor
 		};
 	
 	typedef std::vector<Disk> DiskList; // Type for lists of extracted disks
 	typedef Misc::FunctionCall<const DiskList&> ExtractionResultCallback; // Type for functions to be called when disks have been extracted from a depth image
+	typedef Misc::FunctionCall<const Disk&> TrackingCallback; // Type for functions to be called with the blob containing a tracked pixel
 	
 	/* Forward declarations of embedded classes: */
+	#if 0 // Not used anymore
 	struct DepthCentroidBlob;
+	#endif
 	struct DepthPCABlob;
 	
 	/* Elements: */
@@ -91,6 +98,8 @@ class DiskExtractor
 	FrameBuffer newFrame; // Buffer holding incoming depth image for disk extraction
 	Threads::Thread diskExtractorThread; // Background thread extracting disks from depth images
 	ExtractionResultCallback* extractionResultCallback; // Function called with disk extraction results
+	unsigned int trackingPixel; // Linear index of the tracking pixel
+	TrackingCallback* trackingCallback; // Function called with the disk containing a tracked pixel
 	
 	/* Private methods: */
 	void* diskExtractorThreadMethod(void); // Method implementing the disk extractor thread
@@ -106,6 +115,26 @@ class DiskExtractor
 	~DiskExtractor(void);
 	
 	/* Methods: */
+	int getMaxBlobMergeDist(void) const
+		{
+		return maxBlobMergeDist;
+		}
+	unsigned int getMinNumPixels(void) const
+		{
+		return minNumPixels;
+		}
+	Scalar getDiskRadius(void) const
+		{
+		return diskRadius;
+		}
+	Scalar getDiskRadiusMargin(void) const
+		{
+		return diskRadiusMargin;
+		}
+	Scalar getDiskFlatness(void) const
+		{
+		return diskFlatness;
+		}
 	const ImagePoint& getFramePixel(unsigned int x,unsigned int y) const // Returns the lens distortion-corrected position of the given depth frame pixel
 		{
 		return framePixels[y*frameSize[0]+x];
@@ -118,6 +147,9 @@ class DiskExtractor
 	DiskList processFrame(const FrameBuffer& frame) const; // Immediately processes the given frame
 	void startStreaming(ExtractionResultCallback* newExtractionResultCallback); // Starts background processing; class takes ownership of new-allocated function object
 	void stopStreaming(void); // Stops background processing
+	void startTracking(TrackingCallback* newTrackingCallback); // Starts tracking a specific pixel in the depth image
+	void setTrackingPixel(unsigned int trackingX,unsigned int trackingY); // Sets the pixel to be tracked
+	void stopTracking(void); // Stops pixel tracking
 	void submitFrame(const FrameBuffer& newNewFrame) // Holds the given depth image frame for disk extraction
 		{
 		Threads::MutexCond::Lock newFrameLock(newFrameCond);

@@ -31,6 +31,9 @@ Software Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA
 #include <Kinect/FrameBuffer.h>
 #include <Kinect/CameraV2.h>
 
+// DEBUGGING
+#include <iostream>
+
 namespace Kinect {
 
 /*****************************************
@@ -170,6 +173,10 @@ void* KinectV2JpegStreamReader::decompressionThreadMethod(void)
 		decompressor.dct_method=JDCT_FASTEST;
 		decompressor.do_fancy_upsampling=false;
 		decompressor.do_block_smoothing=false;
+		
+		// DEBUGGING
+		// std::cout<<"Image's color space: "<<decompressor.jpeg_color_space<<", selected output color space: "<<decompressor.out_color_space<<std::endl;
+		
 		jpeg_start_decompress(&decompressor);
 		
 		/* Create a frame buffer to hold the decompressed image: */

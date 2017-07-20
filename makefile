@@ -1,6 +1,6 @@
 ########################################################################
 # Makefile for Kinect 3D Video Capture Project.
-# Copyright (c) 2010-2016 Oliver Kreylos
+# Copyright (c) 2010-2017 Oliver Kreylos
 #
 # This file is part of the WhyTools Build Environment.
 # 
@@ -24,7 +24,7 @@
 # matches the default Vrui installation; if Vrui's installation
 # directory was changed during Vrui's installation, the directory below
 # must be adapted.
-VRUI_MAKEDIR := /usr/local/share/Vrui-4.2/make
+VRUI_MAKEDIR := /usr/local/share/Vrui-4.3/make
 ifdef DEBUG
   VRUI_MAKEDIR := $(VRUI_MAKEDIR)/debug
 endif
@@ -42,7 +42,7 @@ endif
 # Which facade projector version is better depends on system hardware,
 # number of Kinect facades rendered simultaneously, rendering modes,
 # etc. I.e., to optimize performance, typical-case testing is in order.
-KINECT_PROJECTORTYPE = 0
+KINECT_PROJECTORTYPE = 1
 
 # Set configuration flags based on projector type choice:
 KINECT_USE_PROJECTOR2 = 0
@@ -62,9 +62,9 @@ endif
 PACKAGEROOT := $(shell pwd)
 
 # Specify version of created dynamic shared libraries
-KINECT_VERSION = 3002
+KINECT_VERSION = 3003
 MAJORLIBVERSION = 3
-MINORLIBVERSION = 2
+MINORLIBVERSION = 3
 KINECT_NAME := Kinect-$(MAJORLIBVERSION).$(MINORLIBVERSION)
 
 # Check if Vrui's collaboration infrastructure is installed
@@ -160,6 +160,7 @@ LIBRARIES += $(LIBRARY_NAMES:%=$(call LIBRARYNAME,%))
 EXECUTABLES += $(EXEDIR)/KinectUtil \
                $(EXEDIR)/RawKinectViewer \
                $(EXEDIR)/AlignPoints \
+               $(EXEDIR)/ExtrinsicCalibrator \
                $(EXEDIR)/KinectServer \
                $(EXEDIR)/KinectViewer
 
@@ -209,6 +210,11 @@ ifeq ($(SYSTEM_HAVE_LIBUSB1),0)
 	@exit 1
 endif
 	@echo "---- Kinect configuration options: ----"
+ifneq ($(SYSTEM_HAVE_LIBJPEG),0)
+	@echo "Support for Microsoft Kinect v2 (Kinect-for-Xbox-One) enabled"
+else
+	@echo "Support for Microsoft Kinect v2 (Kinect-for-Xbox-One) disabled due to missing jpeg library"
+endif
 ifneq ($(SYSTEM_HAVE_REALSENSE),0)
 	@echo "Support for Intel RealSense cameras via librealsense library enabled"
 else
@@ -224,6 +230,7 @@ else
 endif
 endif
 	@cp Kinect/Config.h Kinect/Config.h.temp
+	@$(call CONFIG_SETVAR,Kinect/Config.h.temp,KINECT_CONFIG_HAVE_KINECTV2,$(SYSTEM_HAVE_LIBJPEG))
 	@$(call CONFIG_SETVAR,Kinect/Config.h.temp,KINECT_CONFIG_HAVE_LIBREALSENSE,$(SYSTEM_HAVE_REALSENSE))
 	@$(call CONFIG_SETVAR,Kinect/Config.h.temp,KINECT_CONFIG_USE_PROJECTOR2,$(KINECT_USE_PROJECTOR2))
 	@$(call CONFIG_SETVAR,Kinect/Config.h.temp,KINECT_CONFIG_USE_SHADERPROJECTOR,$(KINECT_USE_SHADERPROJECTOR))
@@ -231,7 +238,7 @@ endif
 	@rm Kinect/Config.h.temp
 	@cp Kinect/Internal/Config.h Kinect/Internal/Config.h.temp
 	@$(call CONFIG_SETSTRINGVAR,Kinect/Internal/Config.h.temp,KINECT_INTERNAL_CONFIG_CONFIGDIR,$(ETCINSTALLDIR)/$(KINECTCONFIGDIREXT))
-	@$(call CONFIG_SETSTRINGVAR,Kinect/Internal/Config.h.temp,KINECT_INTERNAL_CONFIG_SHADERDIR,$(PWD)/$(SHAREINSTALLDIR)/$(KINECTRESOURCEDIREXT)/Shaders)
+	@$(call CONFIG_SETSTRINGVAR,Kinect/Internal/Config.h.temp,KINECT_INTERNAL_CONFIG_SHADERDIR,$(SHAREINSTALLDIR)/$(KINECTRESOURCEDIREXT)/Shaders)
 	@if ! diff Kinect/Internal/Config.h.temp Kinect/Internal/Config.h > /dev/null ; then cp Kinect/Internal/Config.h.temp Kinect/Internal/Config.h ; fi
 	@rm Kinect/Internal/Config.h.temp
 ifneq ($(HAVE_COLLABORATION),0)
@@ -278,19 +285,36 @@ include $(VRUI_MAKEDIR)/BasicMakefile
 # Specify build rules for dynamic shared objects
 ########################################################################
 
-ifneq ($(SYSTEM_HAVE_REALSENSE),0)
-  LIBKINECT_HEADERS = $(wildcard Kinect/*.h)
-  
-  LIBKINECT_SOURCES = $(wildcard Kinect/*.cpp) \
-                      $(wildcard Kinect/Internal/*.cpp)
+# Headers and sources to support Kinect v2:
+LIBKINECT_KINECTV2_SOURCES = Kinect/CameraV2.cpp \
+                             Kinect/Internal/KinectV2CommandDispatcher.cpp \
+                             Kinect/Internal/KinectV2JpegStreamReader.cpp \
+                             Kinect/Internal/KinectV2DepthStreamReader.cpp
+
+# Headers and sources to support RealSense cameras:
+LIBKINECT_REALSENSE_SOURCES = Kinect/CameraRealSense.cpp \
+                              Kinect/Internal/LibRealSenseContext.cpp
+
+# Headers and sources for dummy implementations of certain 3D camera types:
+LIBKINECT_DUMMY_SOURCES = Kinect/CameraV2Dummy.cpp \
+                          Kinect/CameraRealSenseDummy.cpp
+
+# Create list of libKinect external headers and sources:
+LIBKINECT_HEADERS = $(wildcard Kinect/*.h)
+LIBKINECT_SOURCES = $(filter-out $(LIBKINECT_KINECTV2_SOURCES) $(LIBKINECT_REALSENSE_SOURCES) $(LIBKINECT_DUMMY_SOURCES),$(wildcard Kinect/*.cpp) $(wildcard Kinect/Internal/*.cpp))
+
+# Add Kinect v2 sources if jpeg library is present, otherwise use dummy implementation:
+ifneq ($(SYSTEM_HAVE_LIBJPEG),0)
+  LIBKINECT_SOURCES += $(LIBKINECT_KINECTV2_SOURCES)
 else
-  LIBKINECT_HEADERS = $(filter-out Kinect/CameraRealSense.h, \
-                        $(wildcard Kinect/*.h))
-  
-  LIBKINECT_SOURCES = $(filter-out Kinect/CameraRealSense.cpp \
-                                   Kinect/Internal/LibRealSenseContext.cpp, \
-                        $(wildcard Kinect/*.cpp) \
-                        $(wildcard Kinect/Internal/*.cpp))
+  LIBKINECT_SOURCES += Kinect/CameraV2Dummy.cpp
+endif
+
+# Add RealSense sources if RealSense library is present, otherwise use dummy implementation:
+ifneq ($(SYSTEM_HAVE_REALSENSE),0)
+  LIBKINECT_SOURCES += $(LIBKINECT_REALSENSE_SOURCES)
+else
+  LIBKINECT_SOURCES += Kinect/CameraRealSenseDummy.cpp
 endif
 
 $(call LIBRARYNAME,libKinect): PACKAGES += $(MYKINECT_DEPENDS)
@@ -342,6 +366,17 @@ $(EXEDIR)/AlignPoints: PACKAGES += MYVRUI
 $(EXEDIR)/AlignPoints: $(OBJDIR)/AlignPoints.o
 .PHONY: AlignPoints
 AlignPoints: $(EXEDIR)/AlignPoints
+
+#
+# Utility to calculate an extrinsic calibration transformation between a
+# 3D camera and a 6-DOF tracking system, using a tracked controller and
+# a disk target.
+#
+
+$(EXEDIR)/ExtrinsicCalibrator: PACKAGES += MYVRUI MYKINECT
+$(EXEDIR)/ExtrinsicCalibrator: $(OBJDIR)/ExtrinsicCalibrator.o
+.PHONY: ExtrinsicCalibrator
+ExtrinsicCalibrator: $(EXEDIR)/ExtrinsicCalibrator
 
 #
 # 3D space alignment program for external calibration of multiple Kinect

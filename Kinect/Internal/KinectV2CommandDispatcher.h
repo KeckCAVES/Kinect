@@ -1,7 +1,7 @@
 /***********************************************************************
 KinectV2CommandDispatcher - Class to exchange commands and command
 replies with a Kinect v2 device via USB bulk transfers.
-Copyright (c) 2014-2015 Oliver Kreylos
+Copyright (c) 2014-2017 Oliver Kreylos
 
 This file is part of the Kinect 3D Video Capture Project (Kinect).
 
@@ -87,6 +87,11 @@ class KinectV2CommandDispatcher
 		{
 		/* Elements: */
 		public:
+		float sx,cx; // Projection scale and center in x
+		float sy,cy; // Projection scale and center in y
+		float shiftM,shiftD; // Multiplier and divisor for lateral shift between depth and color cameras
+		float pxx3y0,pxx2y1,pxx1y2,pxx0y3,pxx2y0,pxx1y1,pxx0y2,pxx1y0,pxx0y1,pxx0y0; // Coefficients of polynomial mapping depth image pixels to color image pixels in x
+		float pyx3y0,pyx2y1,pyx1y2,pyx0y3,pyx2y0,pyx1y1,pyx0y2,pyx1y0,pyx0y1,pyx0y0; // Coefficients of polynomial mapping depth image pixels to color image pixels in y
 		};
 	
 	/* Elements: */
@@ -134,7 +139,7 @@ class KinectV2CommandDispatcher
 	
 	/* Methods implementing the Kinect v2 USB command protocol: */
 	void initInterfaces(void);
-	void downloadTables(KinectV2DepthStreamReader& depthStreamReader);
+	void downloadTables(KinectV2DepthStreamReader* depthStreamReader);
 	const DepthCameraParams& getDepthCameraParams(void) const
 		{
 		return depthCameraParams;

@@ -2,7 +2,7 @@
 Projector - Class to project a depth frame captured from a Kinect camera
 back into calibrated 3D camera space, and texture-map it with a matching
 color frame.
-Copyright (c) 2010-2015 Oliver Kreylos
+Copyright (c) 2010-2017 Oliver Kreylos
 
 This file is part of the Kinect 3D Video Capture Project (Kinect).
 
@@ -252,6 +252,39 @@ void Projector::setExtrinsicParameters(const FrameSource::ExtrinsicParameters& e
 	
 	worldDepthProjection=projectorTransform;
 	worldDepthProjection*=depthProjection;
+	}
+
+Projector::Point Projector::projectPoint(const Projector::Point& p) const
+	{
+	/* Transform the point from world space to depth image space: */
+	Point dip=worldDepthProjection.inverseTransform(p);
+	
+	/* Apply inverse lens distortion correction: */
+	if(!depthLensDistortion.isIdentity())
+		{
+		/* Extract the depth camera's 2D intrinsic parameters from the depth unprojection matrix: */
+		const PTransform::Matrix& dpMat=depthProjection.getMatrix();
+		double fxfy=-dpMat(2,3);
+		double fy=fxfy/dpMat(1,1);
+		double cy=-dpMat(1,3)*fy/fxfy;
+		double fx=fxfy/dpMat(0,0);
+		double sk=-dpMat(0,1)*fx*fy/fxfy;
+		double cx=(-dpMat(0,3)/fxfy+sk*cy/(fx*fy))*fx;
+		
+		/* Calculate the distorted pixel position in normalized camera space: */
+		LensDistortion::Point dp;
+		dp[1]=(dip[1]-cy)/fy;
+		dp[0]=(dip[0]-cx-sk*dp[1])/fx;
+		
+		/* Calculate the undistorted pixel position in normalized camera space: */
+		LensDistortion::Point up=depthLensDistortion.undistort(dp);
+		
+		/* Calculate the undistorted pixel position in pixel space: */
+		dip[0]=Point::Scalar(fx*up[0]+sk*up[1]+cx);
+		dip[1]=Point::Scalar(fy*up[1]+cy);
+		}
+	
+	return dip;
 	}
 
 void Projector::setFilterDepthFrames(bool newFilterDepthFrames,bool newLowpassDepthFrames)

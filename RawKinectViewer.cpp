@@ -1,7 +1,7 @@
 /***********************************************************************
 RawKinectViewer - Simple application to view color and depth images
 captured from a Kinect device.
-Copyright (c) 2010-2016 Oliver Kreylos
+Copyright (c) 2010-2017 Oliver Kreylos
 
 This file is part of the Kinect 3D Video Capture Project (Kinect).
 
@@ -45,10 +45,7 @@ Software Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA
 #include <Vrui/OpenFile.h>
 #include <Kinect/Config.h>
 #include <Kinect/Camera.h>
-#include <Kinect/CameraV2.h>
-#if KINECT_CONFIG_HAVE_LIBREALSENSE
-#include <Kinect/CameraRealSense.h>
-#endif
+#include <Kinect/OpenDirectFrameSource.h>
 #include "PauseTool.h"
 #include "MeasurementTool.h"
 #include "TiePointTool.h"
@@ -629,7 +626,7 @@ void RawKinectViewer::saveColorFrameOKCallback(GLMotif::FileSelectionDialog::OKC
 	{
 	try
 		{
-		#if 0 // Quick shortcut
+		#if 1 // Quick shortcut
 		
 		/* Convert the current color frame into an RGB image: */
 		const ColorPixel* sPtr=colorFrames.getLockedValue().getData<ColorPixel>();
@@ -761,8 +758,7 @@ RawKinectViewer::RawKinectViewer(int& argc,char**& argv,char**& appDefaults)
 	
 	/* Parse the command line: */
 	bool printHelp=false;
-	int cameraType=0; // Default to first-generation Kinect camera
-	int cameraIndex=0; // Use first Kinect camera device on USB bus
+	int cameraIndex=0; // Use first 3D camera device on USB bus
 	Kinect::Camera::FrameSize selectedColorFrameSize=Kinect::Camera::FS_640_480;
 	Kinect::Camera::FrameSize selectedDepthFrameSize=Kinect::Camera::FS_640_480;
 	bool compressDepthFrames=false;
@@ -775,17 +771,17 @@ RawKinectViewer::RawKinectViewer(int& argc,char**& argv,char**& appDefaults)
 			{
 			if(strcasecmp(argv[i]+1,"h")==0)
 				printHelp=true;
-			else if(strcasecmp(argv[i]+1,"v2")==0)
-				cameraType=1; // Use Kinect V2
-			else if(strcasecmp(argv[i]+1,"rs")==0)
-				cameraType=2; // Use RealSense camera
 			else if(strcasecmp(argv[i]+1,"high")==0)
 				{
+				/* Select high-resolution color image for Kinect v1: */
 				selectedColorFrameSize=Kinect::Camera::FS_1280_1024;
 				// selectedDepthFrameSize=Kinect::Camera::FS_1280_1024;
 				}
 			else if(strcasecmp(argv[i]+1,"compress")==0)
+				{
+				/* Select depth frame compression for Kinect v1: */
 				compressDepthFrames=true;
+				}
 			else if(strcasecmp(argv[i]+1,"gridSize")==0)
 				{
 				GridTool::setGridSize(atoi(argv[i+1]),atoi(argv[i+2]));
@@ -812,19 +808,15 @@ RawKinectViewer::RawKinectViewer(int& argc,char**& argv,char**& appDefaults)
 		{
 		std::cout<<"Usage: RawKinectViewer [option 1] ... [option n] <camera index>"<<std::endl;
 		std::cout<<"  <camera index>"<<std::endl;
-		std::cout<<"     Selects the local Kinect camera of the given index (0: first camera on USB bus)"<<std::endl;
+		std::cout<<"     Selects the local 3D camera of the given index (0: first camera on USB bus)"<<std::endl;
 		std::cout<<"     Default: 0"<<std::endl;
 		std::cout<<"  Options:"<<std::endl;
 		std::cout<<"  -h"<<std::endl;
 		std::cout<<"     Prints this help message"<<std::endl;
-		std::cout<<"  -v2"<<std::endl;
-		std::cout<<"    Connect to a second-generation Kinect device"<<std::endl;
-		std::cout<<"  -rs"<<std::endl;
-		std::cout<<"    Connect to an Intel RealSense device"<<std::endl;
 		std::cout<<"  -high"<<std::endl;
-		std::cout<<"    Sets color frame size for the selected Kinect camera to 1280x1024 @ 15Hz"<<std::endl;
+		std::cout<<"    Sets color frame size for the selected first-generation Kinect camera to 1280x1024 @ 15Hz"<<std::endl;
 		std::cout<<"  -compress"<<std::endl;
-		std::cout<<"     Requests compressed depth frames from the selected Kinect camera"<<std::endl;
+		std::cout<<"     Requests compressed depth frames from the selected first-generation Kinect camera"<<std::endl;
 		std::cout<<"  -gridSize <grid width> <grid height>"<<std::endl;
 		std::cout<<"     Sets the number of tiles of the semi-transparent calibration grid"<<std::endl;
 		std::cout<<"     Default: 7 5"<<std::endl;
@@ -836,34 +828,20 @@ RawKinectViewer::RawKinectViewer(int& argc,char**& argv,char**& appDefaults)
 		std::cout<<"     Default: 300 1100"<<std::endl;
 		}
 	
-	if(cameraType==0)
+	/* Connect to the 3D camera of the given index: */
+	camera=Kinect::openDirectFrameSource(cameraIndex);
+	std::cout<<"RawKinectViewer: Connected to 3D camera with serial number "<<camera->getSerialNumber()<<std::endl;
+	
+	/* Check if it's a first-generation Kinect to apply type-specific settings: */
+	Kinect::Camera* kinectV1=dynamic_cast<Kinect::Camera*>(camera);
+	if(kinectV1!=0)
 		{
-		/* Connect to the given first-generation Kinect camera device on the host: */
-		Kinect::Camera* realCamera=new Kinect::Camera(cameraIndex);
-		camera=realCamera;
-		
 		/* Set the color camera's frame size: */
-		realCamera->setFrameSize(Kinect::FrameSource::COLOR,selectedColorFrameSize);
-		realCamera->setFrameSize(Kinect::FrameSource::DEPTH,selectedDepthFrameSize);
+		kinectV1->setFrameSize(Kinect::FrameSource::COLOR,selectedColorFrameSize);
+		kinectV1->setFrameSize(Kinect::FrameSource::DEPTH,selectedDepthFrameSize);
 		
 		/* Set depth frame compression: */
-		realCamera->setCompressDepthFrames(compressDepthFrames);
-		}
-	else if(cameraType==1)
-		{
-		/* Connect to the given second-generation Kinect camera device on the host: */
-		Kinect::CameraV2* realCamera=new Kinect::CameraV2(cameraIndex);
-		camera=realCamera;
-		}
-	else if(cameraType==2)
-		{
-		#if KINECT_CONFIG_HAVE_LIBREALSENSE
-		/* Connect to the given RealSense device: */
-		Kinect::CameraRealSense* realCamera=new Kinect::CameraRealSense(cameraIndex);
-		camera=realCamera;
-		#else
-		throw std::runtime_error("RawKinectViewer: Intel RealSense cameras not supported");
-		#endif
+		kinectV1->setCompressDepthFrames(compressDepthFrames);
 		}
 	
 	/* Get the cameras' actual frame sizes: */
