@@ -1,7 +1,7 @@
 /***********************************************************************
 KinectServer - Server to stream 3D video data from one or more Kinect
 cameras to remote clients for tele-immersion.
-Copyright (c) 2010-2016 Oliver Kreylos
+Copyright (c) 2010-2017 Oliver Kreylos
 
 This file is part of the Kinect 3D Video Capture Project (Kinect).
 
@@ -23,8 +23,13 @@ Software Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA
 
 #include "KinectServer.h"
 
+#include <string.h>
+#include <errno.h>
+#include <unistd.h>
 #include <iostream>
 #include <Misc/SizedTypes.h>
+#include <Misc/PrintInteger.h>
+#include <Misc/ThrowStdErr.h>
 #include <Misc/FunctionCalls.h>
 #include <Misc/Time.h>
 #include <Misc/StandardValueCoders.h>
@@ -32,10 +37,11 @@ Software Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA
 #include <Misc/ConfigurationFile.h>
 #include <USB/DeviceList.h>
 #include <IO/File.h>
-#include <Comm/TCPPipe.h>
 #include <Geometry/GeometryMarshallers.h>
 #include <Video/Config.h>
 #include <Kinect/Internal/Config.h>
+#include <Kinect/DirectFrameSource.h>
+#include <Kinect/OpenDirectFrameSource.h>
 #include <Kinect/ColorFrameWriter.h>
 #include <Kinect/DepthFrameWriter.h>
 #include <Kinect/LossyDepthFrameWriter.h>
@@ -55,8 +61,11 @@ void KinectServer::CameraState::colorStreamingCallback(const Kinect::FrameBuffer
 	compressedFrame.timeStamp=frame.timeStamp;
 	colorFile.storeBuffers(compressedFrame.data);
 	colorFrames.postNewValue();
-	newColorFrameCond.signal();
 	++colorFrameIndex;
+	
+	/* Notify the run loop: */
+	Misc::UInt32 frameIndex=cameraIndex*2U;
+	write(framePipeFd,&frameIndex,sizeof(frameIndex));
 	}
 
 void KinectServer::CameraState::depthStreamingCallback(const Kinect::FrameBuffer& frame)
@@ -70,34 +79,37 @@ void KinectServer::CameraState::depthStreamingCallback(const Kinect::FrameBuffer
 	compressedFrame.timeStamp=frame.timeStamp;
 	depthFile.storeBuffers(compressedFrame.data);
 	depthFrames.postNewValue();
-	newDepthFrameCond.signal();
 	++depthFrameIndex;
+	
+	/* Notify the run loop: */
+	Misc::UInt32 frameIndex=cameraIndex*2U+1U;
+	write(framePipeFd,&frameIndex,sizeof(frameIndex));
 	}
 
-KinectServer::CameraState::CameraState(const char* serialNumber,bool sLossyDepthCompression,Threads::MutexCond& sNewColorFrameCond,Threads::MutexCond& sNewDepthFrameCond)
-	:camera(serialNumber),
-	 depthCorrection(0),
+KinectServer::CameraState::CameraState(const char* serialNumber,bool sLossyDepthCompression)
+	:camera(Kinect::openDirectFrameSource(serialNumber)),cameraIndex(0U),
+	 depthCorrection(0),framePipeFd(-1),
 	 colorFile(16384),colorCompressor(0),
-	 colorFrameIndex(0),newColorFrameCond(sNewColorFrameCond),hasSentColorFrame(false),
+	 colorFrameIndex(0),hasSentColorFrame(false),
 	 depthFile(16384),lossyDepthCompression(sLossyDepthCompression),depthCompressor(0),
-	 depthFrameIndex(0),newDepthFrameCond(sNewDepthFrameCond),hasSentDepthFrame(false)
+	 depthFrameIndex(0),hasSentDepthFrame(false)
 	{
 	/* Retrieve the camera's depth correction parameters: */
-	depthCorrection=camera.getDepthCorrectionParameters();
+	depthCorrection=camera->getDepthCorrectionParameters();
 	
 	/* Retrieve the camera's intrinsic and extrinsic parameters: */
-	ips=camera.getIntrinsicParameters();
-	eps=camera.getExtrinsicParameters();
+	ips=camera->getIntrinsicParameters();
+	eps=camera->getExtrinsicParameters();
 	
 	/* Create the color and depth frame compressors: */
-	colorCompressor=new Kinect::ColorFrameWriter(colorFile,camera.getActualFrameSize(Kinect::FrameSource::COLOR));
+	colorCompressor=new Kinect::ColorFrameWriter(colorFile,camera->getActualFrameSize(Kinect::FrameSource::COLOR));
 	#if VIDEO_CONFIG_HAVE_THEORA
 	if(lossyDepthCompression)
-		depthCompressor=new Kinect::LossyDepthFrameWriter(depthFile,camera.getActualFrameSize(Kinect::FrameSource::DEPTH));
+		depthCompressor=new Kinect::LossyDepthFrameWriter(depthFile,camera->getActualFrameSize(Kinect::FrameSource::DEPTH));
 	else
-		depthCompressor=new Kinect::DepthFrameWriter(depthFile,camera.getActualFrameSize(Kinect::FrameSource::DEPTH));
+		depthCompressor=new Kinect::DepthFrameWriter(depthFile,camera->getActualFrameSize(Kinect::FrameSource::DEPTH));
 	#else
-	depthCompressor=new Kinect::DepthFrameWriter(depthFile,camera.getActualFrameSize(Kinect::FrameSource::DEPTH));
+	depthCompressor=new Kinect::DepthFrameWriter(depthFile,camera->getActualFrameSize(Kinect::FrameSource::DEPTH));
 	#endif
 	
 	/* Extract the color and depth compressors' stream header data: */
@@ -108,7 +120,7 @@ KinectServer::CameraState::CameraState(const char* serialNumber,bool sLossyDepth
 KinectServer::CameraState::~CameraState(void)
 	{
 	/* Stop streaming: */
-	camera.stopStreaming();
+	camera->stopStreaming();
 	
 	/* Destroy the color and depth compressors: */
 	delete colorCompressor;
@@ -116,13 +128,16 @@ KinectServer::CameraState::~CameraState(void)
 	
 	/* Destroy the depth correction parameters: */
 	delete depthCorrection;
+	
+	/* Destroy the camera: */
+	delete camera;
 	}
 
 void KinectServer::CameraState::startStreaming(const Kinect::FrameSource::Time& timeBase)
 	{
 	/* Start streaming: */
-	camera.setTimeBase(timeBase);
-	camera.startStreaming(Misc::createFunctionCall(this,&KinectServer::CameraState::colorStreamingCallback),Misc::createFunctionCall(this,&KinectServer::CameraState::depthStreamingCallback));
+	camera->setTimeBase(timeBase);
+	camera->startStreaming(Misc::createFunctionCall(this,&KinectServer::CameraState::colorStreamingCallback),Misc::createFunctionCall(this,&KinectServer::CameraState::depthStreamingCallback));
 	}
 
 void KinectServer::CameraState::writeHeaders(IO::File& sink) const
@@ -132,7 +147,15 @@ void KinectServer::CameraState::writeHeaders(IO::File& sink) const
 	sink.write<Misc::UInt32>(5);
 	
 	/* Write the camera's depth correction parameters: */
-	depthCorrection->write(sink);
+	if(depthCorrection!=0)
+		depthCorrection->write(sink);
+	else
+		{
+		/* Write a dummy depth correction object: */
+		int dcSize[2]={1,1};
+		Kinect::FrameSource::DepthCorrection dc(0,dcSize);
+		dc.write(sink);
+		}
 	
 	/* Check whether the depth stream uses lossy compression: */
 	#if VIDEO_CONFIG_HAVE_THEORA
@@ -154,245 +177,136 @@ void KinectServer::CameraState::writeHeaders(IO::File& sink) const
 	depthHeaders.writeToSink(sink);
 	}
 
+namespace {
+
+/**************
+Helper classes:
+**************/
+
+enum State
+	{
+	START,STREAMING
+	};
+
+}
+
+/******************************************
+Methods of class KinectServer::ClientState:
+******************************************/
+
+KinectServer::ClientState::ClientState(KinectServer* sServer,Comm::ListeningTCPSocket& listenSocket)
+	:server(sServer),
+	 pipe(listenSocket),
+	 state(START),
+	 protocolVersion(0),
+	 streaming(false)
+	{
+	#ifdef VERBOSE
+	/* Assemble the client name: */
+	clientName=pipe.getPeerHostName();
+	clientName.push_back(':');
+	char portId[10];
+	clientName.append(Misc::print(pipe.getPeerPortId(),portId+sizeof(portId)-1));
+	#endif
+	}
+
 /*****************************
 Methods of class KinectServer:
 *****************************/
 
-void* KinectServer::listeningThreadMethod(void)
+void KinectServer::newFrameCallback(void)
 	{
-	Threads::Thread::setCancelState(Threads::Thread::CANCEL_ENABLE);
-	// Threads::Thread::setCancelType(Threads::Thread::CANCEL_ASYNCHRONOUS);
+	/* Read the camera index and frame type: */
+	Misc::UInt32 frameIndex;
+	read(framePipeFds[0],&frameIndex,sizeof(frameIndex));
+	unsigned int cameraIndex=frameIndex>>1;
 	
-	while(true)
+	/* Check if the frame is a color or depth frame: */
+	if(frameIndex&0x01U) // New frame is a depth frame
 		{
-		/* Wait for the next incoming connection: */
-		Comm::TCPPipe* newClientSocket=0;
-		try
+		/* Check if the camera has not yet sent a depth frame in the current meta frame: */
+		if(!cameraStates[cameraIndex]->hasSentDepthFrame&&cameraStates[cameraIndex]->depthFrames.lockNewValue())
 			{
-			#ifdef VERBOSE
-			std::cout<<"KinectServer: Waiting for client connection on TCP port "<<listeningSocket.getPortId()<<std::endl<<std::flush;
+			#ifdef VERBOSE2
+			std::cout<<" depth "<<cameraIndex<<", "<<cameraStates[cameraIndex]->depthFrames.getLockedValue().index<<", "<<cameraStates[cameraIndex]->depthFrames.getLockedValue().timeStamp<<';';
 			#endif
-			newClientSocket=new Comm::TCPPipe(listeningSocket);
-			#ifdef VERBOSE
-			std::cout<<"KinectServer: Connecting new client from host "<<newClientSocket->getPeerHostName()<<", port "<<newClientSocket->getPeerPortId()<<std::endl<<std::flush;
-			#endif
-			}
-		catch(std::runtime_error err)
-			{
-			std::cerr<<"KinectServer: Caught exception "<<err.what()<<" while waiting for new client connection"<<std::endl;
-			}
-		
-		try
-			{
-			/* Read endianness flag and protocol version from new client: */
-			Misc::UInt32 endiannessFlag=newClientSocket->read<Misc::UInt32>();
-			if(endiannessFlag==0x78563412U)
-				newClientSocket->setSwapOnRead(true);
-			else if(endiannessFlag!=0x12345678U)
-				throw std::runtime_error("Client has unrecognized endianness");
-			unsigned int protocolVersion=newClientSocket->read<Misc::UInt32>();
-			if(protocolVersion>1U)
-				protocolVersion=1U;
 			
-			/* Send stream initialization states to the new client: */
-			#ifdef VERBOSE
-			std::cout<<"KinectServer: Sending stream headers to new client"<<std::endl<<std::flush;
-			#endif
-			newClientSocket->write<Misc::UInt32>(0x12345678U);
-			newClientSocket->write<Misc::UInt32>(protocolVersion);
-			Kinect::FrameSource::Time now;
-			newClientSocket->write<Misc::Float64>(double(now-timeBase));
-			newClientSocket->write<Misc::UInt32>(numCameras);
-			for(unsigned i=0;i<numCameras;++i)
-				cameraStates[i]->writeHeaders(*newClientSocket);
-			newClientSocket->flush();
+			/* Send the camera's new depth frame to all connected clients: */
+			unsigned int numClients=clients.size();
+			for(unsigned int i=0;i<numClients;++i)
+				if(clients[i]->streaming)
+					{
+					try
+						{
+						/* Write the meta frame index and frame identifier: */
+						clients[i]->pipe.write<Misc::UInt32>(metaFrameIndex);
+						clients[i]->pipe.write<Misc::UInt32>(frameIndex);
+						
+						/* Write the compressed depth frame: */
+						cameraStates[cameraIndex]->depthFrames.getLockedValue().data.writeToSink(clients[i]->pipe);
+						clients[i]->pipe.flush();
+						}
+					catch(std::runtime_error err)
+						{
+						#ifdef VERBOSE
+						std::cout<<"KinectServer: Disconnecting client "<<clients[i]->clientName<<" due to exception "<<err.what()<<std::endl;
+						#endif
+						disconnectClient(clients[i],false,true);
+						--numClients;
+						--i;
+						}
+					}
 			
-			/* Lock the client list and append the new client: */
-			#ifdef VERBOSE
-			std::cout<<"KinectServer: Adding new client to list of clients"<<std::endl<<std::flush;
+			/* Reduce the number of outstanding depth frames in the current meta frame: */
+			cameraStates[cameraIndex]->hasSentDepthFrame=true;
+			--numMissingDepthFrames;
+			}
+		}
+	else // New frame is a color frame
+		{
+		/* Check if the camera has not yet sent a color frame in the current meta frame: */
+		if(!cameraStates[cameraIndex]->hasSentColorFrame&&cameraStates[cameraIndex]->colorFrames.lockNewValue())
+			{
+			#ifdef VERBOSE2
+			std::cout<<" color "<<cameraIndex<<", "<<cameraStates[cameraIndex]->colorFrames.getLockedValue().index<<", "<<cameraStates[cameraIndex]->colorFrames.getLockedValue().timeStamp<<';';
 			#endif
-			{
-			Threads::Mutex::Lock clientListLock(clientListMutex);
-			clients.push_back(newClientSocket);
-			}
-			}
-		catch(std::runtime_error err)
-			{
-			std::cerr<<"KinectServer: Disconnecting new client due to exception "<<err.what()<<std::endl<<std::flush;
-			delete newClientSocket;
-			}
-		catch(...)
-			{
-			std::cerr<<"KinectServer: Disconnecting new client due to spurious exception; terminating"<<std::endl<<std::flush;
-			delete newClientSocket;
-			throw;
+			
+			/* Send the camera's new color frame to all connected clients: */
+			unsigned int numClients=clients.size();
+			for(unsigned int i=0;i<numClients;++i)
+				if(clients[i]->streaming)
+					{
+					try
+						{
+						/* Write the meta frame index and frame identifier: */
+						clients[i]->pipe.write<Misc::UInt32>(metaFrameIndex);
+						clients[i]->pipe.write<Misc::UInt32>(frameIndex);
+						
+						/* Write the compressed color frame: */
+						cameraStates[cameraIndex]->colorFrames.getLockedValue().data.writeToSink(clients[i]->pipe);
+						clients[i]->pipe.flush();
+						}
+					catch(std::runtime_error err)
+						{
+						#ifdef VERBOSE
+						std::cout<<"KinectServer: Disconnecting client "<<clients[i]->clientName<<" due to exception "<<err.what()<<std::endl;
+						#endif
+						disconnectClient(clients[i],false,true);
+						--numClients;
+						--i;
+						}
+					}
+			
+			/* Reduce the number of outstanding color frames in the current meta frame: */
+			cameraStates[cameraIndex]->hasSentColorFrame=true;
+			--numMissingColorFrames;
 			}
 		}
 	
-	return 0;
-	}
-
-void* KinectServer::streamingThreadMethod(void)
-	{
-	Threads::Thread::setCancelState(Threads::Thread::CANCEL_ENABLE);
-	Threads::Thread::setCancelType(Threads::Thread::CANCEL_DEFERRED);
-	
-	#ifdef VERBOSE2
-	std::cout<<"Meta frame "<<metaFrameIndex;
-	#endif
-	
-	while(true)
+	/* Check if the current meta frame is complete: */
+	if(numMissingDepthFrames==0U&&numMissingColorFrames==0U)
 		{
-		while(numMissingDepthFrames>0||numMissingColorFrames>0)
-			{
-			/* Find the next missing frame that has just become available: */
-			bool foundFrame=false;
-			for(unsigned int i=0;!foundFrame&&i<numCameras;++i)
-				{
-				if(!cameraStates[i]->hasSentColorFrame&&cameraStates[i]->colorFrames.lockNewValue())
-					{
-					#ifdef VERBOSE2
-					std::cout<<" color "<<i<<", "<<cameraStates[i]->colorFrames.getLockedValue().index<<", "<<cameraStates[i]->colorFrames.getLockedValue().timeStamp<<';';
-					#endif
-					
-					/* Send the camera's new color frame to all connected clients: */
-					{
-					Threads::Mutex::Lock clientListLock(clientListMutex);
-					unsigned int numClients=clients.size();
-					for(unsigned int j=0;j<numClients;++j)
-						{
-						try
-							{
-							if(clients[j]->waitForData(Misc::Time(0,0)))
-								{
-								/* Read the disconnect request: */
-								clients[j]->read<unsigned int>();
-								
-								/* Disconnect the client: */
-								#ifdef VERBOSE
-								std::cerr<<"Disconnecting client from "<<clients[j]->getPeerHostName()<<", port "<<clients[j]->getPeerPortId()<<std::endl;
-								#endif
-								delete clients[j];
-								clients.erase(clients.begin()+j);
-								--numClients;
-								--j;
-								}
-							else
-								{
-								#ifdef VVERBOSE
-								std::cout<<metaFrameIndex<<", "<<i*2+0<<", "<<cameraStates[i]->colorFrames.getLockedValue().timeStamp<<std::endl;
-								#endif
-								
-								/* Write the meta frame index and frame identifier: */
-								clients[j]->write<Misc::UInt32>(metaFrameIndex);
-								clients[j]->write<Misc::UInt32>(i*2+0);
-								
-								/* Write the compressed color frame: */
-								cameraStates[i]->colorFrames.getLockedValue().data.writeToSink(*clients[j]);
-								clients[j]->flush();
-								}
-							}
-						catch(std::runtime_error err)
-							{
-							std::cerr<<"Disconnecting client from "<<clients[j]->getPeerHostName()<<", port "<<clients[j]->getPeerPortId()<<" due to exception "<<err.what()<<std::endl;
-							delete clients[j];
-							clients.erase(clients.begin()+j);
-							--numClients;
-							--j;
-							}
-						catch(...)
-							{
-							std::cerr<<"Disconnecting client from "<<clients[j]->getPeerHostName()<<", port "<<clients[j]->getPeerPortId()<<" due to spurious exception; terminating"<<std::endl;
-							delete clients[j];
-							clients.erase(clients.begin()+j);
-							--numClients;
-							--j;
-							throw;
-							}
-						}
-					}
-					
-					cameraStates[i]->hasSentColorFrame=true;
-					--numMissingColorFrames;
-					foundFrame=true;
-					}
-				if(!cameraStates[i]->hasSentDepthFrame&&cameraStates[i]->depthFrames.lockNewValue())
-					{
-					#ifdef VERBOSE2
-					std::cout<<" depth "<<i<<", "<<cameraStates[i]->depthFrames.getLockedValue().index<<", "<<cameraStates[i]->depthFrames.getLockedValue().timeStamp<<';';
-					#endif
-					
-					/* Send the camera's new depth frame to all connected clients: */
-					{
-					Threads::Mutex::Lock clientListLock(clientListMutex);
-					unsigned int numClients=clients.size();
-					for(unsigned int j=0;j<numClients;++j)
-						{
-						try
-							{
-							/* Check if the client sent a disconnect request: */
-							if(clients[j]->waitForData(Misc::Time(0,0)))
-								{
-								/* Read the disconnect request: */
-								clients[j]->read<Misc::UInt32>();
-								
-								/* Disconnect the client: */
-								#ifdef VERBOSE
-								std::cerr<<"Disconnecting client from "<<clients[j]->getPeerHostName()<<", port "<<clients[j]->getPeerPortId()<<std::endl;
-								#endif
-								delete clients[j];
-								clients.erase(clients.begin()+j);
-								--numClients;
-								--j;
-								}
-							else
-								{
-								#ifdef VVERBOSE
-								std::cout<<metaFrameIndex<<", "<<i*2+1<<", "<<cameraStates[i]->depthFrames.getLockedValue().timeStamp<<std::endl;
-								#endif
-								
-								/* Write the meta frame index and frame identifier: */
-								clients[j]->write<Misc::UInt32>(metaFrameIndex);
-								clients[j]->write<Misc::UInt32>(i*2+1);
-								
-								/* Write the compressed depth frame: */
-								cameraStates[i]->depthFrames.getLockedValue().data.writeToSink(*clients[j]);
-								clients[j]->flush();
-								}
-							}
-						catch(std::runtime_error err)
-							{
-							std::cerr<<"Disconnecting client from "<<clients[j]->getPeerHostName()<<", port "<<clients[j]->getPeerPortId()<<" due to exception "<<err.what()<<std::endl;
-							delete clients[j];
-							clients.erase(clients.begin()+j);
-							--numClients;
-							--j;
-							}
-						catch(...)
-							{
-							std::cerr<<"Disconnecting client from "<<clients[j]->getPeerHostName()<<", port "<<clients[j]->getPeerPortId()<<" due to spurious exception; terminating"<<std::endl;
-							delete clients[j];
-							clients.erase(clients.begin()+j);
-							--numClients;
-							--j;
-							throw;
-							}
-						}
-					}
-					
-					cameraStates[i]->hasSentDepthFrame=true;
-					--numMissingDepthFrames;
-					foundFrame=true;
-					}
-				}
-			if(!foundFrame)
-				{
-				/* No frames ready; sleep until something becomes available: */
-				newFrameCond.wait();
-				}
-			}
-		
-		/* Start a new meta-frame: */
+		/* Start the next meta frame: */
 		++metaFrameIndex;
 		for(unsigned int i=0;i<numCameras;++i)
 			{
@@ -407,14 +321,160 @@ void* KinectServer::streamingThreadMethod(void)
 		std::cout<<"Meta frame "<<metaFrameIndex;
 		#endif
 		}
+	}
+
+bool KinectServer::newConnectionCallback(Threads::EventDispatcher::ListenerKey eventKey,int eventType,void* userData)
+	{
+	KinectServer* thisPtr=static_cast<KinectServer*>(userData);
 	
-	return 0;
+	/* Create a new client state object and add it to the list: */
+	ClientState* newClient=new ClientState(thisPtr,thisPtr->listeningSocket);
+	
+	#ifdef VERBOSE
+	std::cout<<"KinectServer: Connecting new client "<<newClient->clientName<<std::endl;
+	#endif
+	
+	thisPtr->clients.push_back(newClient);
+	
+	/* Add an event listener for incoming messages from the client: */
+	newClient->listenerKey=thisPtr->dispatcher.addIOEventListener(newClient->pipe.getFd(),Threads::EventDispatcher::Read,thisPtr->clientMessageCallback,newClient);
+	
+	return false;
+	}
+
+void KinectServer::disconnectClient(KinectServer::ClientState* client,bool removeListener,bool removeFromList)
+	{
+	if(removeListener)
+		{
+		/* Stop listening on the client's pipe: */
+		dispatcher.removeIOEventListener(client->listenerKey);
+		}
+	
+	/* Check if the client is still streaming: */
+	if(client->streaming)
+		--numStreamingClients;
+	
+	/* Disconnect the client: */
+	delete client;
+	
+	if(removeFromList)
+		{
+		/* Remove the dead client from the list: */
+		for(ClientStateList::iterator csIt=clients.begin();csIt!=clients.end();++csIt)
+			if(*csIt==client)
+				{
+				/* Remove it and stop searching: */
+				*csIt=clients.back();
+				clients.pop_back();
+				break;
+				}
+		}
+	}
+
+bool KinectServer::clientMessageCallback(Threads::EventDispatcher::ListenerKey eventKey,int eventType,void* userData)
+	{
+	ClientState* client=static_cast<ClientState*>(userData);
+	KinectServer* thisPtr=client->server;
+	
+	bool result=false;
+	
+	try
+		{
+		/* Read some data from the socket into the socket's read buffer and check if client hung up: */
+		if(client->pipe.readSomeData()==0)
+			throw std::runtime_error("Client terminated connection");
+		
+		/* Process messages as long as there is data in the read buffer: */
+		while(!result&&client->pipe.canReadImmediately())
+			{
+			switch(client->state)
+				{
+				case START:
+					{
+					/* Read endianness flag and protocol version from new client: */
+					Misc::UInt32 endiannessFlag=client->pipe.read<Misc::UInt32>();
+					if(endiannessFlag==0x78563412U)
+						client->pipe.setSwapOnRead(true);
+					else if(endiannessFlag!=0x12345678U)
+						throw std::runtime_error("Client has unrecognized endianness");
+					client->protocolVersion=client->pipe.read<Misc::UInt32>();
+					if(client->protocolVersion>1U)
+						client->protocolVersion=1U;
+					
+					/* Send stream initialization states to the new client: */
+					#ifdef VERBOSE
+					std::cout<<"KinectServer: Sending stream headers to client "<<client->clientName<<std::endl;
+					#endif
+					client->pipe.write<Misc::UInt32>(0x12345678U);
+					client->pipe.write<Misc::UInt32>(client->protocolVersion);
+					Kinect::FrameSource::Time now;
+					client->pipe.write<Misc::Float64>(double(now-thisPtr->timeBase));
+					client->pipe.write<Misc::UInt32>(thisPtr->numCameras);
+					for(unsigned i=0;i<thisPtr->numCameras;++i)
+						thisPtr->cameraStates[i]->writeHeaders(client->pipe);
+					
+					/* Finish the reply message: */
+					client->pipe.flush();
+					
+					/* Increase the number of streaming clients: */
+					++thisPtr->numStreamingClients;
+					
+					/* Go to streaming state: */
+					client->state=STREAMING;
+					client->streaming=true;
+					#ifdef VERBOSE
+					std::cout<<"KinectServer: Client "<<client->clientName<<" entered streaming mode"<<std::endl;
+					#endif
+					
+					break;
+					}
+				
+				case STREAMING:
+					{
+					/* Read a message from the client: */
+					Misc::UInt32 message=client->pipe.read<Misc::UInt32>();
+					
+					if(message==0U) // Disconnect request
+						{
+						/* Cleanly disconnect this client: */
+						#ifdef VERBOSE
+						std::cout<<"KinectServer: Disconnecting client "<<client->clientName<<std::endl;
+						#endif
+						thisPtr->disconnectClient(client,false,true);
+						result=true;
+						}
+					else
+						throw std::runtime_error("Protocol error in STREAMING state");
+						
+					break;
+					}
+				}
+			}
+		}
+	catch(std::runtime_error err)
+		{
+		#ifdef VERBOSE
+		std::cout<<"KinectServer: Disconnecting client "<<client->clientName<<" due to exception "<<err.what()<<std::endl;
+		#endif
+		thisPtr->disconnectClient(client,false,true);
+		result=true;
+		}
+	
+	return result;
 	}
 
 KinectServer::KinectServer(Misc::ConfigurationFileSection& configFileSection)
 	:numCameras(0),cameraStates(0),
-	 listeningSocket(configFileSection.retrieveValue<int>("./listenPortId",26000),1)
+	 listeningSocket(configFileSection.retrieveValue<int>("./listenPortId",26000),5),
+	 numStreamingClients(0)
 	{
+	/* Create a pipe to signal arrival of new frames to the run loop: */
+	if(pipe(framePipeFds)<0)
+		{
+		int error=errno;
+		Misc::throwStdErr("KinectServer: Unable to open frame notification pipe due to error %d (%s)",error,strerror(error));
+		}
+	
 	/* Read the list of cameras: */
 	std::vector<std::string> cameraNames=configFileSection.retrieveValue<std::vector<std::string> >("./cameras",std::vector<std::string>());
 	numCameras=cameraNames.size();
@@ -426,7 +486,7 @@ KinectServer::KinectServer(Misc::ConfigurationFileSection& configFileSection)
 		{
 		/* Read the camera's serial number: */
 		Misc::ConfigurationFileSection cameraSection=configFileSection.getSection(cameraNames[i].c_str());
-		std::string serialNumber=cameraSection.retrieveValue<std::string>("./serialNumber");
+		std::string serialNumber=cameraSection.retrieveString("./serialNumber");
 		
 		try
 			{
@@ -434,12 +494,12 @@ KinectServer::KinectServer(Misc::ConfigurationFileSection& configFileSection)
 			#ifdef VERBOSE
 			std::cout<<"KinectServer: Creating streamer for camera with serial number "<<serialNumber<<std::endl;
 			#endif
-			cameraStates[numFoundCameras]=new CameraState(serialNumber.c_str(),cameraSection.retrieveValue<bool>("./lossyDepthCompression",false),newFrameCond,newFrameCond);
+			cameraStates[numFoundCameras]=new CameraState(serialNumber.c_str(),cameraSection.retrieveValue<bool>("./lossyDepthCompression",false));
 			
 			/* Check if camera is to remove background: */
 			if(cameraSection.retrieveValue<bool>("./removeBackground",true))
 				{
-				Kinect::Camera& camera=cameraStates[numFoundCameras]->camera;
+				Kinect::DirectFrameSource* camera=cameraStates[numFoundCameras]->camera;
 				
 				/* Check whether to load a previously saved background file: */
 				std::string backgroundFile=cameraSection.retrieveValue<std::string>("./backgroundFile",std::string());
@@ -452,7 +512,7 @@ KinectServer::KinectServer(Misc::ConfigurationFileSection& configFileSection)
 					#ifdef VERBOSE
 					std::cout<<"KinectServer: Loading background depth image file "<<fullBackgroundFileName<<'-'<<serialNumber<<".background"<<std::endl;
 					#endif
-					camera.loadBackground(fullBackgroundFileName.c_str());
+					camera->loadBackground(fullBackgroundFileName.c_str());
 					}
 				
 				/* Check whether to capture background: */
@@ -463,7 +523,7 @@ KinectServer::KinectServer(Misc::ConfigurationFileSection& configFileSection)
 					#ifdef VERBOSE
 					std::cout<<"KinectServer: Capturing "<<captureBackgroundFrames<<" background depth frames"<<std::endl;
 					#endif
-					camera.captureBackground(captureBackgroundFrames,false);
+					camera->captureBackground(captureBackgroundFrames,false);
 					}
 				
 				/* Check whether to set a maximum depth value: */
@@ -474,18 +534,18 @@ KinectServer::KinectServer(Misc::ConfigurationFileSection& configFileSection)
 					#ifdef VERBOSE
 					std::cout<<"KinectServer: Setting maximum depth value to "<<maxDepth<<std::endl;
 					#endif
-					camera.setMaxDepth(maxDepth,false);
+					camera->setMaxDepth(maxDepth,false);
 					}
 				
 				/* Set the background removal fuzz value: */
-				int backgroundFuzz=cameraSection.retrieveValue<int>("./backgroundFuzz",camera.getBackgroundRemovalFuzz());
+				int backgroundFuzz=cameraSection.retrieveValue<int>("./backgroundFuzz",camera->getBackgroundRemovalFuzz());
 				#ifdef VERBOSE
 				std::cout<<"KinectServer: Setting background depth fuzz value to "<<backgroundFuzz<<std::endl;
 				#endif
-				camera.setBackgroundRemovalFuzz(backgroundFuzz);
+				camera->setBackgroundRemovalFuzz(backgroundFuzz);
 				
 				/* Enable background removal: */
-				camera.setRemoveBackground(true);
+				camera->setRemoveBackground(true);
 				}
 			
 			++numFoundCameras;
@@ -498,62 +558,36 @@ KinectServer::KinectServer(Misc::ConfigurationFileSection& configFileSection)
 	
 	/* Initialize streaming state: */
 	#ifdef VERBOSE
-	std::cout<<"KinectServer: "<<numFoundCameras<<" Kinect cameras initialized"<<std::endl;
+	std::cout<<"KinectServer: "<<numFoundCameras<<" cameras initialized"<<std::endl;
 	#endif
 	numCameras=numFoundCameras;
 	metaFrameIndex=0;
 	numMissingColorFrames=numCameras;
 	numMissingDepthFrames=numCameras;
-	
-	/* Start the listening and streaming threads: */
-	listeningThread.start(this,&KinectServer::listeningThreadMethod);
-	if(numCameras>0)
-		streamingThread.start(this,&KinectServer::streamingThreadMethod);
-	
-	/* Start streaming on all connected cameras: */
-	timeBase.set();
 	for(unsigned int i=0;i<numCameras;++i)
-		cameraStates[i]->startStreaming(timeBase);
+		{
+		cameraStates[i]->cameraIndex=i;
+		cameraStates[i]->framePipeFd=framePipeFds[1];
+		}
+	
+	/* Add an event listener for frame arrival messages: */
+	dispatcher.addIOEventListener(framePipeFds[0],Threads::EventDispatcher::Read,newFrameCallbackWrapper,this);
+	
+	/* Add an event listener for incoming connections on the listening socket: */
+	#ifdef VERBOSE
+	std::cout<<"KinectServer: Listening for incoming connections on TCP port "<<listeningSocket.getPortId()<<std::endl;
+	#endif
+	dispatcher.addIOEventListener(listeningSocket.getFd(),Threads::EventDispatcher::Read,newConnectionCallback,this);
 	}
 
 KinectServer::~KinectServer(void)
 	{
+	/* Forcefully disconnect all clients: */
 	#ifdef VERBOSE
-	std::cout<<"KinectServer: Shutting down listening and streaming threads"<<std::endl;
+	std::cout<<"KinectServer: Disconnecting all clients"<<std::endl;
 	#endif
-	
-	/* Stop the listening thread: */
-	try
-		{
-		listeningThread.cancel();
-		listeningThread.join();
-		}
-	catch(std::runtime_error err)
-		{
-		std::cerr<<"Caught exception "<<err.what()<<" while shutting down listening thread"<<std::endl;
-		}
-	catch(...)
-		{
-		std::cerr<<"Caught spurious exception while shutting down listening thread"<<std::endl;
-		}
-	
-	/* Stop the streaming thread: */
-	if(numCameras>0)
-		{
-		try
-			{
-			streamingThread.cancel();
-			streamingThread.join();
-			}
-		catch(std::runtime_error err)
-			{
-			std::cerr<<"Caught exception "<<err.what()<<" while shutting down streaming thread"<<std::endl;
-			}
-		catch(...)
-			{
-			std::cerr<<"Caught spurious exception while shutting down streaming thread"<<std::endl;
-			}
-		}
+	for(ClientStateList::iterator csIt=clients.begin();csIt!=clients.end();++csIt)
+		delete *csIt;
 	
 	/* Delete all camera states: */
 	#ifdef VERBOSE
@@ -563,23 +597,25 @@ KinectServer::~KinectServer(void)
 		delete cameraStates[i];
 	delete[] cameraStates;
 	
-	/* Disconnect all clients: */
+	/* Close the frame notification pipe: */
+	for(int i=0;i<2;++i)
+		close(framePipeFds[i]);
+	}
+
+void KinectServer::run(void)
+	{
+	/* Start streaming on all connected cameras: */
 	#ifdef VERBOSE
-	std::cout<<"KinectServer: Disconnecting all clients"<<std::endl;
+	std::cout<<"KinectServer: Starting streaming on "<<numCameras<<" cameras"<<std::endl;
 	#endif
-	for(std::vector<Comm::TCPPipe*>::iterator cIt=clients.begin();cIt!=clients.end();++cIt)
-		{
-		try
-			{
-			delete *cIt;
-			}
-		catch(std::runtime_error err)
-			{
-			std::cerr<<"Caught exception "<<err.what()<<" while forcefully disconnecting client from "<<(*cIt)->getPeerHostName()<<", port "<<(*cIt)->getPeerPortId()<<std::endl;
-			}
-		catch(...)
-			{
-			std::cerr<<"Caught spurious exception while forcefully disconnecting client from "<<(*cIt)->getPeerHostName()<<", port "<<(*cIt)->getPeerPortId()<<std::endl;
-			}
-		}
+	timeBase.set();
+	for(unsigned int i=0;i<numCameras;++i)
+		cameraStates[i]->startStreaming(timeBase);
+	
+	#ifdef VERBOSE2
+	std::cout<<"Meta frame "<<metaFrameIndex;
+	#endif
+	
+	/* Run the main loop and dispatch events until stopped: */
+	dispatcher.dispatchEvents();
 	}

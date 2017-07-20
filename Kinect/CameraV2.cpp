@@ -1,6 +1,6 @@
 /***********************************************************************
 CameraV2 - Class representing a Kinect v2 camera.
-Copyright (c) 2015-2016 Oliver Kreylos
+Copyright (c) 2015-2017 Oliver Kreylos
 
 This file is part of the Kinect 3D Video Capture Project (Kinect).
 
@@ -21,9 +21,6 @@ Software Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA
 ***********************************************************************/
 
 #include <Kinect/CameraV2.h>
-
-// DEBUGGING
-#include <iostream>
 
 #include <libusb-1.0/libusb.h>
 #include <Misc/ThrowStdErr.h>
@@ -63,7 +60,7 @@ void CameraV2::initialize(void)
 	depthStreamReader=new KinectV2DepthStreamReader(*this);
 	
 	/* Download reconstruction parameter tables: */
-	commandDispatcher->downloadTables(*depthStreamReader);
+	commandDispatcher->downloadTables(depthStreamReader);
 	
 	/* Calculate the depth calculation parameter tables: */
 	depthStreamReader->calcXZTables(commandDispatcher->getDepthCameraParams());
@@ -248,7 +245,7 @@ FrameSource::IntrinsicParameters CameraV2::getIntrinsicParameters(void)
 		/* Initialize the color projection matrix: */
 		result.colorProjection=FrameSource::IntrinsicParameters::PTransform::identity;
 		
-		#if 1 // Evil temporary hack
+		#if 0 // Evil temporary hack
 		
 		IO::FilePtr colorMatrixFile=IO::Directory::getCurrent()->openFile("/home/okreylos/Projects/Kinect/ColorMatrix.dat");
 		colorMatrixFile->setEndianness(Misc::LittleEndian);
@@ -316,7 +313,8 @@ void CameraV2::startStreaming(FrameSource::StreamingCallback* newColorStreamingC
 	if(newDepthStreamingCallback!=0)
 		{
 		/* Set up an isochronous transfer pool to receive depth data: */
-		depthTransfers=new USB::TransferPool(20,8,device.getMaxIsoPacketSize(0x84));
+		// depthTransfers=new USB::TransferPool(20,8,device.getMaxIsoPacketSize(0x84));
+		depthTransfers=new USB::TransferPool(20,8,33792); // Ignore what libusb says
 		
 		/* Set up the depth image processing pipeline: */
 		depthTransferCallback=depthStreamReader->startStreaming(depthTransfers,newDepthStreamingCallback);

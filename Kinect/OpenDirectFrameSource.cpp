@@ -1,7 +1,7 @@
 /***********************************************************************
 OpenDirectFrameSource - Helper functions to open a 3D camera by index or
 serial number without having to know its type.
-Copyright (c) 2016 Oliver Kreylos
+Copyright (c) 2016-2017 Oliver Kreylos
 
 This file is part of the Kinect 3D Video Capture Project (Kinect).
 
@@ -29,9 +29,7 @@ Software Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA
 #include <Kinect/Config.h>
 #include <Kinect/Camera.h>
 #include <Kinect/CameraV2.h>
-#if KINECT_CONFIG_HAVE_LIBREALSENSE
 #include <Kinect/CameraRealSense.h>
-#endif
 
 namespace Kinect {
 
@@ -65,8 +63,6 @@ DirectFrameSource* openDirectFrameSource(unsigned int index)
 		}
 	searchIndex-=numKinectV2s;
 	
-	#if KINECT_CONFIG_HAVE_LIBREALSENSE
-	
 	/* Get the number of Intel RealSense cameras: */
 	size_t numRealSenses=CameraRealSense::getNumDevices();
 	if(searchIndex<numRealSenses)
@@ -75,8 +71,6 @@ DirectFrameSource* openDirectFrameSource(unsigned int index)
 		return new CameraRealSense(searchIndex);
 		}
 	searchIndex-=numRealSenses;
-	
-	#endif
 	
 	/* Not enough cameras: */
 	Misc::throwStdErr("Kinect::openDirectFrameSource: Less than %u 3D cameras connected to local host",index);
@@ -101,13 +95,11 @@ DirectFrameSource* openDirectFrameSource(const char* serialNumber)
 			/* Look for a second-generation Kinect camera: */
 			return new CameraV2(snPtr+1);
 			}
-		#if KINECT_CONFIG_HAVE_LIBREALSENSE
 		else if(snPtr-serialNumber==2&&strncasecmp(serialNumber,"RS",2)==0)
 			{
 			/* Look for an Intel RealSense camera: */
 			return new CameraRealSense(snPtr+1);
 			}
-		#endif
 		else
 			Misc::throwStdErr("Kinect::openDirectFrameSource: Unsupported 3D camera type \"%s\"",std::string(serialNumber,snPtr).c_str());
 		}

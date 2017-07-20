@@ -2,7 +2,7 @@
 Projector - Class to project a depth frame captured from a Kinect camera
 back into calibrated 3D camera space, and texture-map it with a matching
 color frame.
-Copyright (c) 2010-2016 Oliver Kreylos
+Copyright (c) 2010-2017 Oliver Kreylos
 
 This file is part of the Kinect 3D Video Capture Project (Kinect).
 
@@ -54,6 +54,7 @@ class Projector:public GLObject
 	typedef FrameSource::DepthCorrection::PixelCorrection PixelCorrection; // Type for per-pixel depth correction factors
 	typedef FrameSource::IntrinsicParameters::PTransform PTransform; // Type for projective transformations
 	typedef FrameSource::ExtrinsicParameters ProjectorTransform; // Type for transformations from 3D camera space to 3D world space
+	typedef PTransform::Point Point; // Type for points in depth image or world space
 	
 	struct DataItem:public GLObject::DataItem // Structure containing per-context state
 		{
@@ -140,6 +141,7 @@ class Projector:public GLObject
 		{
 		return projectorTransform;
 		}
+	Point projectPoint(const Point& p) const; // Projects a point from world space into depth image space
 	bool getFilterDepthFrames(void) const // Returns true if depth frame filtering is enabled
 		{
 		return filterDepthFrames;

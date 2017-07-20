@@ -1,7 +1,7 @@
 /***********************************************************************
 KinectViewer - Simple application to view 3D reconstructions of color
 and depth images captured from a Kinect device.
-Copyright (c) 2010-2016 Oliver Kreylos
+Copyright (c) 2010-2017 Oliver Kreylos
 
 This file is part of the Kinect 3D Video Capture Project (Kinect).
 
@@ -57,10 +57,7 @@ Software Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA
 #include <Kinect/Internal/Config.h>
 #include <Kinect/FrameBuffer.h>
 #include <Kinect/Camera.h>
-#include <Kinect/CameraV2.h>
-#if KINECT_CONFIG_HAVE_LIBREALSENSE
-#include <Kinect/CameraRealSense.h>
-#endif
+#include <Kinect/OpenDirectFrameSource.h>
 #include <Kinect/FileFrameSource.h>
 #include <Kinect/MultiplexedFrameSource.h>
 #include <Kinect/ProjectorHeader.h>
@@ -209,6 +206,16 @@ GLMotif::PopupWindow* KinectViewer::KinectStreamer::createStreamerDialog(void)
 	GLMotif::Button* showFromCameraButton=new GLMotif::Button("ShowFromCameraButton",showBox,"Show From Camera");
 	showFromCameraButton->getSelectCallbacks().add(this,&KinectViewer::KinectStreamer::showFromCameraCallback);
 	
+	#if KINECT_CONFIG_USE_PROJECTOR2
+	
+	GLMotif::ToggleButton* mapTextureToggle=new GLMotif::ToggleButton("MapTextureToggle",showBox,"Map Color");
+	mapTextureToggle->setBorderWidth(0.0f);
+	mapTextureToggle->setBorderType(GLMotif::Widget::PLAIN);
+	mapTextureToggle->setToggle(true);
+	mapTextureToggle->getValueChangedCallbacks().add(this,&KinectViewer::KinectStreamer::mapTextureCallback);
+	
+	#endif
+	
 	showBox->manageChild();
 	
 	showMargin->manageChild();
@@ -278,6 +285,16 @@ void KinectViewer::KinectStreamer::showFromCameraCallback(Misc::CallbackData* cb
 	
 	#endif
 	}
+
+#if KINECT_CONFIG_USE_PROJECTOR2
+
+void KinectViewer::KinectStreamer::mapTextureCallback(GLMotif::ToggleButton::ValueChangedCallbackData* cbData)
+	{
+	/* Set the projector's texture mapping flag: */
+	projector->setMapTexture(cbData->set);
+	}
+
+#endif
 
 #if !KINECT_CONFIG_USE_SHADERPROJECTOR
 
@@ -587,13 +604,21 @@ KinectViewer::KinectViewer(int& argc,char**& argv)
 				
 				if(Vrui::getClusterMultiplexer()==0)
 					{
-					/* Open the camera of the given index: */
+					/* Open the 3D camera of the given index: */
 					int cameraIndex=atoi(argv[i]);
-					Kinect::Camera* camera=new Kinect::Camera(cameraIndex);
+					Kinect::DirectFrameSource* camera=Kinect::openDirectFrameSource(cameraIndex);
+					std::cout<<"KinectViewer: Connected to 3D camera with serial number "<<camera->getSerialNumber()<<std::endl;
 					
-					/* Set the camera's frame size and compression flag: */
-					camera->setFrameSize(Kinect::FrameSource::COLOR,highres?Kinect::Camera::FS_1280_1024:Kinect::Camera::FS_640_480);
-					camera->setCompressDepthFrames(compressDepth);
+					/* Check if it's a first-generation Kinect to apply type-specific settings: */
+					Kinect::Camera* kinectV1=dynamic_cast<Kinect::Camera*>(camera);
+					if(kinectV1!=0)
+						{
+						/* Set the color camera's frame size: */
+						kinectV1->setFrameSize(Kinect::FrameSource::COLOR,highres?Kinect::Camera::FS_1280_1024:Kinect::Camera::FS_640_480);
+						
+						/* Set depth frame compression: */
+						kinectV1->setCompressDepthFrames(compressDepth);
+						}
 					
 					/* Enable background removal if the camera has a default background image: */
 					if(camera->loadDefaultBackground())
@@ -605,62 +630,8 @@ KinectViewer::KinectViewer(int& argc,char**& argv)
 				else if(Vrui::isMaster())
 					{
 					/* Can't stream from local camera in cluster mode: */
-					std::cerr<<"Ignoring -c "<<argv[i]<<" command line argument: Streaming from local Kinect camera(s) is not supported in cluster environments"<<std::endl;
+					std::cerr<<"Ignoring -c "<<argv[i]<<" command line argument: Streaming from local 3D camera(s) is not supported in cluster environments"<<std::endl;
 					}
-				}
-			else if(strcasecmp(argv[i]+1,"c2")==0)
-				{
-				++i;
-				
-				if(Vrui::getClusterMultiplexer()==0)
-					{
-					/* Open the camera of the given index: */
-					int cameraIndex=atoi(argv[i]);
-					Kinect::CameraV2* camera=new Kinect::CameraV2(cameraIndex);
-					
-					/* Enable background removal if the camera has a default background image: */
-					if(camera->loadDefaultBackground())
-						camera->setRemoveBackground(true);
-					
-					/* Add a new streamer for the camera: */
-					streamers.push_back(new KinectStreamer(this,camera));
-					}
-				else if(Vrui::isMaster())
-					{
-					/* Can't stream from local camera in cluster mode: */
-					std::cerr<<"Ignoring -c2 "<<argv[i]<<" command line argument: Streaming from local Kinect V2 camera(s) is not supported in cluster environments"<<std::endl;
-					}
-				}
-			else if(strcasecmp(argv[i]+1,"rs")==0)
-				{
-				++i;
-				
-				#if KINECT_CONFIG_HAVE_LIBREALSENSE
-				
-				if(Vrui::getClusterMultiplexer()==0)
-					{
-					/* Open the camera of the given index: */
-					int cameraIndex=atoi(argv[i]);
-					Kinect::CameraRealSense* camera=new Kinect::CameraRealSense(cameraIndex);
-					
-					/* Enable background removal if the camera has a default background image: */
-					if(camera->loadDefaultBackground())
-						camera->setRemoveBackground(true);
-					
-					/* Add a new streamer for the camera: */
-					streamers.push_back(new KinectStreamer(this,camera));
-					}
-				else if(Vrui::isMaster())
-					{
-					/* Can't stream from local camera in cluster mode: */
-					std::cerr<<"Ignoring -rs "<<argv[i]<<" command line argument: Streaming from local RealSense camera(s) is not supported in cluster environments"<<std::endl;
-					}
-				
-				#else
-				
-				throw std::runtime_error("KinectViewer: Intel RealSense cameras not supported");
-				
-				#endif
 				}
 			else if(strcasecmp(argv[i]+1,"f")==0)
 				{
@@ -711,19 +682,15 @@ KinectViewer::KinectViewer(int& argc,char**& argv)
 		std::cout<<"  -h"<<std::endl;
 		std::cout<<"     Prints this help message"<<std::endl;
 		std::cout<<"  -high"<<std::endl;
-		std::cout<<"     Sets color frame size for all subsequent Kinect cameras to 1280x1024 @ 15Hz"<<std::endl;
+		std::cout<<"     Sets color frame size for all subsequent first-generation Kinect cameras to 1280x1024 @ 15Hz"<<std::endl;
 		std::cout<<"  -low"<<std::endl;
-		std::cout<<"     Sets color frame size for all subsequent Kinect cameras to 640x480 @ 30Hz"<<std::endl;
+		std::cout<<"     Sets color frame size for all subsequent first-generation Kinect cameras to 640x480 @ 30Hz"<<std::endl;
 		std::cout<<"  -compress"<<std::endl;
-		std::cout<<"     Requests compressed depth frames from all subsequent Kinect cameras"<<std::endl;
+		std::cout<<"     Requests compressed depth frames from all subsequent first-generation Kinect cameras"<<std::endl;
 		std::cout<<"  -nocompress"<<std::endl;
-		std::cout<<"     Requests uncompressed depth frames from all subsequent Kinect cameras"<<std::endl;
+		std::cout<<"     Requests uncompressed depth frames from all subsequent first-generation Kinect cameras"<<std::endl;
 		std::cout<<"  -c <camera index>"<<std::endl;
-		std::cout<<"     Connects to the local Kinect camera of the given index (0: first Kinect camera on USB bus)"<<std::endl;
-		std::cout<<"  -c2 <camera index>"<<std::endl;
-		std::cout<<"     Connects to the local Kinect v2 camera of the given index (0: first Kinect v2 camera on USB bus)"<<std::endl;
-		std::cout<<"  -rs <camera index>"<<std::endl;
-		std::cout<<"     Connects to the local Intel RealSense camera of the given index (0: first Intel RealSense camera on host)"<<std::endl;
+		std::cout<<"     Connects to the local 3D camera of the given index (0: first camera on USB bus)"<<std::endl;
 		std::cout<<"  -f <stream file base name>"<<std::endl;
 		std::cout<<"     Opens a previously recorded pair of color and depth stream files for playback"<<std::endl;
 		std::cout<<"  -s <sound file name>"<<std::endl;

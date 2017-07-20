@@ -197,3 +197,26 @@ Kinect-3.2:
     "sudo make installudevrules" / "sudo make uninstalludevrules".
 - Lotsa other things I forgot to write down while working on the
   SARndbox package with a gun to my head. :)
+
+Kinect-3.3:
+- Fixed Kinect v2 USB transfer problem by ignoring return value from
+  USB::Device::getMaxIsoTransferSize and always assuming 33792 bytes in
+  Kinect::CameraV2.
+- Changed frame correctness check in Kinect::KinectV2DepthStreamReader.
+- Fixed bad bug in Kinect::Projector2: was not taking lens distortion
+  correction into account when looking up mesh vertices' depth values.
+- Fixed KinectServer to work with other cameras than first-generation
+  Kinect.
+- Added extrinsic calibration utility using a tracked controller and a
+  target disk.
+- Added missing dependency on libjpeg (used by Kinect v2 driver) to
+  Kinect library.
+- Made building of Kinect v2 driver dependent on presence of libjpeg
+  library.
+- Provided dummy implementations of optional Kinect V2 and Intel
+  RealSense camera types to simplify application development.
+- Bumped Vrui version requirement to 4.3-001.
+- Switched RawKinectViewer, KinectViewer, and KinectViewer vislet to
+  connect to local 3D cameras of any type by their index in a shared
+  list. Command line arguments -v2, -c2, and -rs are no longer
+  recognized.

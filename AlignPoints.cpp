@@ -1,7 +1,7 @@
 /***********************************************************************
 AlignPoints - Utility to align two sets of measurements of the same set
 of points using a variety of transformation types.
-Copyright (c) 2009-2014 Oliver Kreylos
+Copyright (c) 2009-2017 Oliver Kreylos
 
 This file is part of the Kinect 3D Video Capture Project (Kinect).
 
@@ -28,6 +28,7 @@ Software Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA
 #include <Misc/File.h>
 #include <IO/ValueSource.h>
 #include <Math/Constants.h>
+#include <Math/Random.h>
 #include <Math/Matrix.h>
 #define GEOMETRY_NONSTANDARD_TEMPLATES
 #include <Geometry/Point.h>
@@ -147,7 +148,7 @@ findTransform2<OGTransformFitter>(std::vector<OGTransformFitter::Point>& points0
 		}
 	Point c0=cc0.getPoint();
 	Point c1=cc1.getPoint();
-	std::cout<<"Centroids: "<<c0<<", "<<c1<<", result translation = "<<c1-c0<<std::endl;
+	// std::cout<<"Centroids: "<<c0<<", "<<c1<<", result translation = "<<c1-c0<<std::endl;
 	
 	/* Calculate both point sets' inner products: */
 	double ip0=0.0;
@@ -163,7 +164,7 @@ findTransform2<OGTransformFitter>(std::vector<OGTransformFitter::Point>& points0
 	/* Calculate the normalizing scaling factors: */
 	double scale0=Math::sqrt(ip0);
 	double scale1=Math::sqrt(ip1);
-	std::cout<<"Scales: "<<scale0<<", "<<scale1<<", result scale = "<<scale1/scale0<<std::endl;
+	// std::cout<<"Scales: "<<scale0<<", "<<scale1<<", result scale = "<<scale1/scale0<<std::endl;
 	
 	/* Move both point sets to their centroids and scale them to uniform size: */
 	Transform centroidTransform0=Transform::translateToOriginFrom(c0);
@@ -187,6 +188,8 @@ findTransform2<OGTransformFitter>(std::vector<OGTransformFitter::Point>& points0
 		for(int i=0;i<3;++i)
 			for(int j=0;j<3;++j)
 				m[i][j]+=cPoints0[pi][i]*cPoints1[pi][j];
+	
+	#if 0
 	
 	/* Calculate the coefficients of the quaternion-based characteristic polynomial of the quaternion key matrix: */
 	double q4=1.0;
@@ -215,13 +218,16 @@ findTransform2<OGTransformFitter>(std::vector<OGTransformFitter::Point>& points0
 	double lambda0;
 	do
 		{
+		std::cout<<"lambda = "<<lambda<<std::endl;
 		lambda0=lambda;
 		double poly=(((q4*lambda+q3)*lambda+q2)*lambda+q1)*lambda+q0;
 		double dPoly=((4.0*q4*lambda+3.0*q3)*lambda+2.0*q2)*lambda+q1;
 		lambda-=poly/dPoly;
 		}
-	while(Math::abs(lambda-lambda0)<1.0e-8);
+	while(Math::abs(lambda-lambda0)>1.0e-10);
 	std::cout<<"Largest eigenvalue of key matrix: "<<lambda<<std::endl;
+	
+	#endif
 	
 	/* Find the eigenvector corresponding to the largest eigenvalue: */
 	Math::Matrix k(4,4);
@@ -242,7 +248,7 @@ findTransform2<OGTransformFitter>(std::vector<OGTransformFitter::Point>& points0
 	k(3,2)=m[1][2]+m[2][1];
 	k(3,3)=-m[0][0]-m[1][1]+m[2][2];
 	
-	#if 1
+	#if 0
 	
 	/* Test the polynomial: */
 	for(double x=-2.0;x<=2.0;x+=1.0/16.0)
@@ -257,14 +263,15 @@ findTransform2<OGTransformFitter>(std::vector<OGTransformFitter::Point>& points0
 		std::cout<<x<<": "<<p1<<", "<<p2<<std::endl;
 		}
 	
-	
 	#endif
 	
 	std::pair<Math::Matrix,Math::Matrix> jacobi=k.jacobiIteration();
+	#if 0
 	std::cout<<"Eigenvalues of key matrix: ";
 	for(int i=0;i<4;++i)
 		std::cout<<", "<<jacobi.second(i);
 	std::cout<<std::endl;
+	#endif
 	double maxE=jacobi.second(0);
 	int maxEIndex=0;
 	for(int i=1;i<4;++i)
@@ -273,13 +280,44 @@ findTransform2<OGTransformFitter>(std::vector<OGTransformFitter::Point>& points0
 			maxE=jacobi.second(i);
 			maxEIndex=i;
 			}
-	std::cout<<"Largest eigenvector: "<<jacobi.first(0,maxEIndex)<<", "<<jacobi.first(1,maxEIndex)<<", "<<jacobi.first(2,maxEIndex)<<", "<<jacobi.first(3,maxEIndex)<<std::endl;
+	// std::cout<<"Largest eigenvector: "<<jacobi.first(0,maxEIndex)<<", "<<jacobi.first(1,maxEIndex)<<", "<<jacobi.first(2,maxEIndex)<<", "<<jacobi.first(3,maxEIndex)<<std::endl;
 	Transform::Rotation rotation=Transform::Rotation::fromQuaternion(jacobi.first(1,maxEIndex),jacobi.first(2,maxEIndex),jacobi.first(3,maxEIndex),jacobi.first(0,maxEIndex));
-	std::cout<<"Result rotation: "<<rotation<<std::endl;
+	// std::cout<<"Result rotation: "<<rotation<<std::endl;
 	
+	#if 1 // Run Levenberg-Marquardt iteration to improve analytic result
+	
+	/* Run a few steps of the iterative alignment method to potentially improve the result: */
+	typename OGTransformFitter::Transform bestTransform=OGTransformFitter::Transform::rotate(rotation);
+	typename OGTransformFitter::Scalar bestDistance=Math::Constants<typename OGTransformFitter::Scalar>::max;
+	
+	for(int i=0;i<5;++i)
+		{
+		/* Minimize the distance: */
+		Geometry::LevenbergMarquardtMinimizer<OGTransformFitter> minimizer;
+		minimizer.maxNumIterations=500000;
+		OGTransformFitter tf(numPoints,&cPoints0[0],&cPoints1[0]);
+		tf.setTransform(bestTransform);
+		typename OGTransformFitter::Scalar result=minimizer.minimize(tf);
+		if(bestDistance>result)
+			{
+			bestTransform=tf.getTransform();
+			bestDistance=result;
+			}
+		}
+	
+	/* Assemble the result transformation: */
+	Transform result=Geometry::invert(centroidTransform1);
+	result*=bestTransform;
+	result*=centroidTransform0;
+	
+	#else // Report analytic result
+	
+	/* Assemble the result transformation: */
 	Transform result=Geometry::invert(centroidTransform1);
 	result*=Transform::rotate(rotation);
 	result*=centroidTransform0;
+	
+	#endif
 	
 	/* Transform the first point set: */
 	for(std::vector<Point>::iterator pIt=points0.begin();pIt!=points0.end();++pIt)
@@ -287,7 +325,7 @@ findTransform2<OGTransformFitter>(std::vector<OGTransformFitter::Point>& points0
 	double rmsd=0.0;
 	for(size_t i=0;i<numPoints;++i)
 		rmsd+=Geometry::sqrDist(points0[i],points1[i]);
-	std::cout<<"Best distance: "<<Math::sqrt(rmsd/double(numPoints))<<std::endl;
+	// std::cout<<"Best distance: "<<Math::sqrt(rmsd/double(numPoints))<<std::endl;
 	
 	return result;
 	}
@@ -302,6 +340,105 @@ transform(
 	/* Transform all points: */
 	for(typename std::vector<PointParam>::iterator pIt=points.begin();pIt!=points.end();++pIt)
 		*pIt=transform.transform(*pIt);
+	}
+
+Geometry::OrthogonalTransformation<double,3> ransac(int maxIterations,double maxInlierDist,int minNumInliersPercent,std::vector<Geometry::Point<double,3> >& points0,std::vector<Geometry::Point<double,3> >& points1)
+	{
+	typedef double Scalar;
+	typedef Geometry::Point<Scalar,3> Point;
+	typedef std::vector<Point> PointList;
+	typedef Geometry::OrthogonalTransformation<Scalar,3> OGTransform;
+	
+	int numPoints=points0.size();
+	double maxInlierDist2=Math::sqr(maxInlierDist);
+	int minNumInliers=(numPoints*minNumInliersPercent+50)/100;
+	int bestNumInliers=0;
+	double bestRmsd2=Math::Constants<double>::max;
+	double bestMax2=Math::Constants<double>::max;
+	OGTransform bestTransform;
+	for(int iteration=0;iteration<maxIterations;++iteration)
+		{
+		/* Randomly pick a subset of 3 non-collinear tie points: */
+		PointList subPoints0;
+		subPoints0.reserve(3);
+		PointList subPoints1;
+		subPoints1.reserve(3);
+		
+		/* Pick the first point pair at random: */
+		int index0=Math::randUniformCO(0,numPoints);
+		subPoints0.push_back(points0[index0]);
+		subPoints1.push_back(points1[index0]);
+		
+		/* Pick the second point pair such that it is not identical to the first: */
+		while(true)
+			{
+			int index1=Math::randUniformCO(0,numPoints);
+			if(points0[index1]!=subPoints0[0]&&points1[index1]!=subPoints1[0])
+				{
+				subPoints0.push_back(points0[index1]);
+				subPoints1.push_back(points1[index1]);
+				break;
+				}
+			}
+		
+		/* Pick the third point pair such that it is not collinear with the first two: */
+		Point::Vector d0=subPoints0[1]-subPoints0[0];
+		Point::Vector d1=subPoints1[1]-subPoints1[0];
+		while(true)
+			{
+			int index2=Math::randUniformCO(0,numPoints);
+			if((points0[index2]-subPoints0[0])*d0!=0.0&&(points1[index2]-subPoints1[0])*d1!=0.0)
+				{
+				subPoints0.push_back(points0[index2]);
+				subPoints1.push_back(points1[index2]);
+				break;
+				}
+			}
+		
+		/* Align the two point subsets: */
+		OGTransform subsetAlign=findTransform2<OGTransformFitter>(subPoints0,subPoints1);
+		
+		/* Find inliers based on the subset alignment: */
+		subPoints0.clear();
+		subPoints1.clear();
+		int numInliers=0;
+		for(int i=0;i<numPoints;++i)
+			{
+			double d2=Geometry::sqrDist(subsetAlign.transform(points0[i]),points1[i]);
+			if(d2<=maxInlierDist2)
+				{
+				subPoints0.push_back(points0[i]);
+				subPoints1.push_back(points1[i]);
+				++numInliers;
+				}
+			}
+		if(numInliers>=minNumInliers)
+			{
+			/* Align the inlier points and calculate the alignment residual: */
+			OGTransform inlierAlign=findTransform2<OGTransformFitter>(subPoints0,subPoints1);
+			double rmsd2=0.0;
+			double max2=0.0;
+			for(int i=0;i<numInliers;++i)
+				{
+				double dist2=Geometry::sqrDist(subPoints0[i],subPoints1[i]);
+				rmsd2+=dist2;
+				if(max2<dist2)
+					max2=dist2;
+				}
+			
+			if(bestRmsd2*double(numInliers)>rmsd2*double(bestNumInliers))
+				{
+				bestNumInliers=numInliers;
+				bestRmsd2=rmsd2;
+				bestMax2=max2;
+				bestTransform=inlierAlign;
+				}
+			}
+		}
+	
+	std::cout<<"RANSAC with "<<bestNumInliers<<" inliers ("<<(bestNumInliers*100+numPoints/2)/numPoints<<"%), RMS = "<<Math::sqrt(bestRmsd2/double(bestNumInliers))<<", Linf = "<<Math::sqrt(bestMax2)<<std::endl;
+	transform(points0,bestTransform);
+	return bestTransform;
 	}
 
 class AlignPoints:public Vrui::Application
@@ -320,18 +457,22 @@ class AlignPoints:public Vrui::Application
 	
 	/* Constructors and destructors: */
 	public:
-	AlignPoints(int& argc,char**& argv,char**& appDefaults);
+	AlignPoints(int& argc,char**& argv);
 	
 	/* Methods from Vrui::Application: */
 	virtual void display(GLContextData& contextData) const;
 	};
 
-AlignPoints::AlignPoints(int& argc,char**& argv,char**& appDefaults)
-	:Vrui::Application(argc,argv,appDefaults)
+AlignPoints::AlignPoints(int& argc,char**& argv)
+	:Vrui::Application(argc,argv)
 	{
 	/* Parse the command line: */
 	const char* fileName[2]={0,0};
 	int transformMode=1;
+	bool runRansac=false;
+	int ransacIterations=1000;
+	double ransacMaxInlierDist=1.0;
+	int ransacMinInliersPercent=50;
 	Scalar preScale=Scalar(1);
 	OGTransform preTransform=OGTransform::identity;
 	const char* outputFileName=0;
@@ -354,6 +495,16 @@ AlignPoints::AlignPoints(int& argc,char**& argv,char**& appDefaults)
 				{
 				++i;
 				preTransform=Misc::ValueCoder<OGTransform>::decode(argv[i],argv[i]+strlen(argv[i]),0);
+				}
+			else if(strcasecmp(argv[i]+1,"RANSAC")==0)
+				{
+				runRansac=true;
+				++i;
+				ransacIterations=atoi(argv[i]);
+				++i;
+				ransacMaxInlierDist=atof(argv[i]);
+				++i;
+				ransacMinInliersPercent=atoi(argv[i]);
 				}
 			else if(strcasecmp(argv[i]+1,"O")==0)
 				{
@@ -449,11 +600,26 @@ AlignPoints::AlignPoints(int& argc,char**& argv,char**& appDefaults)
 		case 2: // Orthogonal transformation
 			{
 			OGTransform finalTransform=preTransform;
-			#if 1
-			finalTransform*=findTransform2<OGTransformFitter>(points[0],points[1]);
-			#else
-			finalTransform*=findTransform<OGTransformFitter>(points[0],points[1]);
-			#endif
+			if(runRansac)
+				{
+				finalTransform*=ransac(ransacIterations,ransacMaxInlierDist,ransacMinInliersPercent,points[0],points[1]);
+				}
+			else
+				{
+				finalTransform*=findTransform2<OGTransformFitter>(points[0],points[1]);
+
+				/* Calculate RMS and Linf: */
+				double rms2=0.0;
+				double linf2=0.0;
+				for(size_t i=0;i<numPoints;++i)
+					{
+					double dist2=Geometry::sqrDist(points[0][i],points[1][i]);
+					rms2+=dist2;
+					if(linf2<dist2)
+						linf2=dist2;
+					}
+				std::cout<<"Alignment RMS = "<<Math::sqrt(rms2/double(numPoints))<<", Linf = "<<Math::sqrt(linf2)<<std::endl;
+				}
 			std::cout<<"Best transformation: "<<Misc::ValueCoder<OGTransform>::encode(finalTransform)<<std::endl;
 			break;
 			}
@@ -525,11 +691,4 @@ void AlignPoints::display(GLContextData& contextData) const
 	glPopAttrib();
 	}
 
-int main(int argc,char* argv[])
-	{
-	char** appDefaults=0;
-	AlignPoints app(argc,argv,appDefaults);
-	app.run();
-	
-	return 0;
-	}
+VRUI_APPLICATION_RUN(AlignPoints)

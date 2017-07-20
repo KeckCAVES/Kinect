@@ -1,7 +1,7 @@
 /***********************************************************************
 KinectViewer - Vislet to draw 3D reconstructions captured from a Kinect
 device in 3D space.
-Copyright (c) 2010-2016 Oliver Kreylos
+Copyright (c) 2010-2017 Oliver Kreylos
 
 This file is part of the Kinect 3D Video Capture Project (Kinect).
 
@@ -48,10 +48,7 @@ Software Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA
 #include <Kinect/Config.h>
 #include <Kinect/FunctionCalls.h>
 #include <Kinect/Camera.h>
-#include <Kinect/CameraV2.h>
-#if KINECT_CONFIG_HAVE_LIBREALSENSE
-#include <Kinect/CameraRealSense.h>
-#endif
+#include <Kinect/OpenDirectFrameSource.h>
 #include <Kinect/DepthFrameReader.h>
 #if VIDEO_CONFIG_HAVE_THEORA
 #include <Kinect/LossyDepthFrameReader.h>
@@ -173,9 +170,6 @@ void KinectViewer::LiveRenderer::colorStreamingCallback(const Kinect::FrameBuffe
 
 void KinectViewer::LiveRenderer::depthStreamingCallback(const Kinect::FrameBuffer& frameBuffer)
 	{
-	// DEBUGGING
-	std::cout<<'D'<<std::flush;
-	
 	if(paused)
 		return;
 	
@@ -201,9 +195,6 @@ void KinectViewer::LiveRenderer::depthStreamingCallback(const Kinect::FrameBuffe
 
 void KinectViewer::LiveRenderer::meshStreamingCallback(const Kinect::MeshBuffer& meshBuffer)
 	{
-	// DEBUGGING
-	std::cout<<'M'<<std::flush;
-	
 	if(paused)
 		return;
 	
@@ -251,17 +242,11 @@ void KinectViewer::LiveRenderer::startStreaming(const Kinect::FrameSource::Time&
 	source->setTimeBase(timeBase);
 	source->startStreaming(Misc::createFunctionCall(this,&KinectViewer::LiveRenderer::colorStreamingCallback),Misc::createFunctionCall(this,&KinectViewer::LiveRenderer::depthStreamingCallback));
 	
-	// DEBUGGING
-	std::cout<<"Started streaming"<<std::endl;
-	
 	started=true;
 	}
 
 void KinectViewer::LiveRenderer::frame(double newTimeStamp)
 	{
-	// DEBUGGING
-	std::cout<<'F'<<std::flush;
-	
 	/* Update the projector: */
 	projector->updateFrames();
 	
@@ -487,6 +472,11 @@ KinectViewer::SynchedRenderer::SynchedRenderer(const std::string& fileName)
 		{
 		/* Read new B-spline based depth correction parameters: */
 		depthCorrection=new Kinect::FrameSource::DepthCorrection(*depthFile);
+		if(!depthCorrection->isValid())
+			{
+			delete depthCorrection;
+			depthCorrection=0;
+			}
 		}
 	else
 		{
@@ -755,6 +745,7 @@ KinectViewer::KinectViewer(int numArguments,const char* const arguments[])
 	bool highres=false;
 	bool compressDepth=false;
 	bool applyPreTransform=false;
+	unsigned int triangleDepthRange=5;
 	Kinect::FrameSource::ExtrinsicParameters preTransform;
 	Vrui::InputDevice* cameraTrackingDevice=0;
 	const char* saveFileNameBase=0;
@@ -789,6 +780,16 @@ KinectViewer::KinectViewer(int numArguments,const char* const arguments[])
 			else
 				std::cerr<<"KinectViewer: Ignoring dangling -preTransform argument"<<std::endl;
 			}
+		else if(strcasecmp(arguments[i],"-triangleDepthRange")==0)
+			{
+			++i;
+			if(i<numArguments)
+				{
+				triangleDepthRange=atoi(arguments[i]);
+				}
+			else
+				std::cerr<<"KinectViewer: Ignoring dangling -triangleDepthRange argument"<<std::endl;
+			}
 		else if(strcasecmp(arguments[i],"-trackDevice")==0)
 			{
 			++i;
@@ -814,18 +815,26 @@ KinectViewer::KinectViewer(int numArguments,const char* const arguments[])
 			++i;
 			if(i<numArguments)
 				{
-				/* Connect to a local Kinect device: */
+				/* Connect to a local 3D camera device: */
 				if(Vrui::getClusterMultiplexer()==0)
 					{
-					/* Open the camera of the given index: */
+					/* Open the 3D camera of the given index: */
 					int cameraIndex=atoi(arguments[i]);
-					Kinect::Camera* camera=new Kinect::Camera(cameraIndex);
+					Kinect::DirectFrameSource* camera=Kinect::openDirectFrameSource(cameraIndex);
+					std::cout<<"KinectViewer: Connected to 3D camera with serial number "<<camera->getSerialNumber()<<std::endl;
 					
-					/* Set the camera's frame size and compression flag: */
-					camera->setFrameSize(Kinect::FrameSource::COLOR,highres?Kinect::Camera::FS_1280_1024:Kinect::Camera::FS_640_480);
-					camera->setCompressDepthFrames(compressDepth);
+					/* Check if it's a first-generation Kinect to apply type-specific settings: */
+					Kinect::Camera* kinectV1=dynamic_cast<Kinect::Camera*>(camera);
+					if(kinectV1!=0)
+						{
+						/* Set the color camera's frame size: */
+						kinectV1->setFrameSize(Kinect::FrameSource::COLOR,highres?Kinect::Camera::FS_1280_1024:Kinect::Camera::FS_640_480);
+						
+						/* Set depth frame compression: */
+						kinectV1->setCompressDepthFrames(compressDepth);
+						}
 					
-					/* Load the camera's default background image: */
+					/* Enable background removal if the camera has a default background image: */
 					if(camera->loadDefaultBackground())
 						camera->setRemoveBackground(true);
 					
@@ -841,6 +850,7 @@ KinectViewer::KinectViewer(int numArguments,const char* const arguments[])
 						}
 					else
 						newRenderer=new LiveRenderer(camera);
+					newRenderer->getProjector().setTriangleDepthRange(triangleDepthRange);
 					renderers.push_back(newRenderer);
 					
 					/* Check if the camera's stream needs to be saved: */
@@ -859,126 +869,11 @@ KinectViewer::KinectViewer(int numArguments,const char* const arguments[])
 				else if(Vrui::isMaster())
 					{
 					/* Can't stream from local camera in cluster mode: */
-					std::cerr<<"KinectViewer: Ignoring -c "<<arguments[i]<<" argument: Streaming from local Kinect camera(s) is not supported in cluster environments"<<std::endl;
+					std::cerr<<"KinectViewer: Ignoring -c "<<arguments[i]<<" argument: Streaming from local 3D camera(s) is not supported in cluster environments"<<std::endl;
 					}
 				}
 			else
 				std::cerr<<"KinectViewer: Ignoring dangling -c argument"<<std::endl;
-			}
-		else if(strcasecmp(arguments[i],"-c2")==0)
-			{
-			++i;
-			if(i<numArguments)
-				{
-				/* Connect to a local Kinect V2 device: */
-				if(Vrui::getClusterMultiplexer()==0)
-					{
-					/* Open the camera of the given index: */
-					int cameraIndex=atoi(arguments[i]);
-					Kinect::CameraV2* camera=new Kinect::CameraV2(cameraIndex);
-					
-					// DEBUGGING
-					std::cout<<"Created Kinect V2 camera for index "<<cameraIndex<<std::endl;
-					
-					/* Load the camera's default background image: */
-					if(camera->loadDefaultBackground())
-						camera->setRemoveBackground(true);
-					
-					/* Add a renderer for the camera: */
-					LiveRenderer* newRenderer=0;
-					if(cameraTrackingDevice!=0)
-						{
-						/* Create a tracked renderer: */
-						newRenderer=new TrackedRenderer(camera,cameraTrackingDevice);
-						
-						/* Only use the tracker for this camera: */
-						cameraTrackingDevice=0;
-						}
-					else
-						newRenderer=new LiveRenderer(camera);
-					renderers.push_back(newRenderer);
-					
-					/* Check if the camera's stream needs to be saved: */
-					if(saveFileNameBase!=0)
-						{
-						/* Construct the save file name: */
-						std::string saveFileName=saveFileNameBase;
-						char index[10];
-						saveFileName.append(Misc::print(saveFileIndex,index+sizeof(index)-1));
-						newRenderer->saveStreams(saveFileName);
-						++saveFileIndex;
-						
-						synched=true;
-						}
-					}
-				else if(Vrui::isMaster())
-					{
-					/* Can't stream from local camera in cluster mode: */
-					std::cerr<<"KinectViewer: Ignoring -c2 "<<arguments[i]<<" argument: Streaming from local Kinect camera(s) is not supported in cluster environments"<<std::endl;
-					}
-				}
-			else
-				std::cerr<<"KinectViewer: Ignoring dangling -c2 argument"<<std::endl;
-			}
-		else if(strcasecmp(arguments[i],"-rs")==0)
-			{
-			++i;
-			if(i<numArguments)
-				{
-				#if KINECT_CONFIG_HAVE_LIBREALSENSE
-				
-				/* Connect to a local Intel RealSense device: */
-				if(Vrui::getClusterMultiplexer()==0)
-					{
-					/* Open the RealSense camera of the given index: */
-					int cameraIndex=atoi(arguments[i]);
-					Kinect::CameraRealSense* camera=new Kinect::CameraRealSense(cameraIndex);
-					
-					/* Load the camera's default background image: */
-					if(camera->loadDefaultBackground())
-						camera->setRemoveBackground(true);
-					
-					/* Add a renderer for the camera: */
-					LiveRenderer* newRenderer=0;
-					if(cameraTrackingDevice!=0)
-						{
-						/* Create a tracked renderer: */
-						newRenderer=new TrackedRenderer(camera,cameraTrackingDevice);
-						
-						/* Only use the tracker for this camera: */
-						cameraTrackingDevice=0;
-						}
-					else
-						newRenderer=new LiveRenderer(camera);
-					renderers.push_back(newRenderer);
-					
-					/* Check if the camera's stream needs to be saved: */
-					if(saveFileNameBase!=0)
-						{
-						/* Construct the save file name: */
-						std::string saveFileName=saveFileNameBase;
-						char index[10];
-						saveFileName.append(Misc::print(saveFileIndex,index+sizeof(index)-1));
-						newRenderer->saveStreams(saveFileName);
-						++saveFileIndex;
-						
-						synched=true;
-						}
-					}
-				else if(Vrui::isMaster())
-					{
-					/* Can't stream from local camera in cluster mode: */
-					std::cerr<<"KinectViewer: Ignoring -rs "<<arguments[i]<<" argument: Streaming from local Intel RealSense camera(s) is not supported in cluster environments"<<std::endl;
-					}
-				
-				#else
-				
-				std::cerr<<"KinectViewer: Intel RealSense cameras not supported on host"<<std::endl;
-				
-				#endif
-				}
-			else
-				std::cerr<<"KinectViewer: Ignoring dangling -rs argument"<<std::endl;
 			}
 		else if(strcasecmp(arguments[i],"-f")==0)
 			{
@@ -987,7 +882,9 @@ KinectViewer::KinectViewer(int numArguments,const char* const arguments[])
 			if(i<numArguments)
 				{
 				/* Add a synchronized renderer for the given video file: */
-				renderers.push_back(new SynchedRenderer(arguments[i]));
+				SynchedRenderer* newRenderer=new SynchedRenderer(arguments[i]);
+				newRenderer->getProjector().setTriangleDepthRange(triangleDepthRange);
+				renderers.push_back(newRenderer);
 				
 				synched=true;
 				}
@@ -1006,6 +903,7 @@ KinectViewer::KinectViewer(int numArguments,const char* const arguments[])
 				for(unsigned int i=0;i<source->getNumStreams();++i)
 					{
 					LiveRenderer* newRenderer=new LiveRenderer(source->getStream(i));
+					newRenderer->getProjector().setTriangleDepthRange(triangleDepthRange);
 					renderers.push_back(newRenderer);
 					
 					/* Check if the camera's stream needs to be saved: */
@@ -1037,21 +935,9 @@ KinectViewer::KinectViewer(int numArguments,const char* const arguments[])
 				Misc::ConfigurationFileSection cfg=Vrui::getVisletManager()->getVisletClassSection("KinectViewer").getSection(arguments[i]);
 				
 				/* Query the camera type: */
-				std::string cameraType=cfg.retrieveString("./cameraType");
 				unsigned int cameraIndex=cfg.retrieveValue<unsigned int>("./cameraIndex",0U);
-				Kinect::DirectFrameSource* source=0;
-				if(cameraType=="Kinect")
-					source=new Kinect::Camera(cameraIndex);
-				else if(cameraType=="KinectV2")
-					source=new Kinect::CameraV2(cameraIndex);
-				#if KINECT_CONFIG_HAVE_LIBREALSENSE
-				else if(cameraType=="RealSense")
-					source=new Kinect::CameraRealSense(cameraIndex);
-				#endif
-				else
-					Misc::throwStdErr("KinectViewer: Unsupported camera type %s",cameraType.c_str());
-				
-				std::cout<<"Loaded camera of type "<<cameraType<<std::endl;
+				Kinect::DirectFrameSource* source=Kinect::openDirectFrameSource(cameraIndex);
+				std::cout<<"KinectViewer: Loaded 3D camera with serial number "<<source->getSerialNumber()<<std::endl;
 				
 				/* Try loading the sources's default background image: */
 				if(source->loadDefaultBackground())
@@ -1178,6 +1064,12 @@ void KinectViewer::frame(void)
 
 void KinectViewer::display(GLContextData& contextData) const
 	{
+	#if 0
+	/* Evil hack: only draw if on the first window: */
+	if(Vrui::getDisplayState(contextData).window!=Vrui::getWindow(0))
+		return;
+	#endif
+	
 	if(!enabled)
 		return;
 	

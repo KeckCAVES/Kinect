@@ -40,6 +40,9 @@ Software Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA
 #include <GL/GLTransformationWrappers.h>
 #include <Kinect/Internal/Config.h>
 
+// DEBUGGING
+#include <iostream>
+
 namespace Kinect {
 
 /*************************************
@@ -144,7 +147,7 @@ void* Projector2::depthFrameProcessingThreadMethod(void)
 							*mPtr=*fdfPtr=*dfPtr;
 						}
 				}
-			else
+			else // filteredDepthFrame==0
 				{
 				/* Initialize the filtered depth frame with the current raw depth frame: */
 				filteredDepthFrame=new FrameSource::DepthPixel[depthSize[1]*depthSize[0]];
@@ -155,7 +158,7 @@ void* Projector2::depthFrameProcessingThreadMethod(void)
 						*mPtr=*fdfPtr=*dfPtr;
 				}
 			}
-		else
+		else // !filterDepthFrames
 			{
 			/* Release the filtered depth frame buffer if it still exists: */
 			if(filteredDepthFrame!=0)
@@ -246,7 +249,7 @@ void Projector2::initContext(GLContextData& contextData) const
 	contextData.addDataItem(this,dataItem);
 	
 	/* Create the template vertex buffer: */
-	typedef GLVertex<void,0,void,0,void,GLfloat,3> Vertex; // Type for vertices
+	typedef GLVertex<GLfloat,2,void,0,void,GLfloat,3> Vertex; // Type for vertices
 	glBindBufferARB(GL_ARRAY_BUFFER_ARB,dataItem->vertexBufferId);
 	glBufferDataARB(GL_ARRAY_BUFFER_ARB,size_t(depthSize[1])*size_t(depthSize[0])*sizeof(Vertex),0,GL_STATIC_DRAW_ARB);
 	Vertex* vPtr=static_cast<Vertex*>(glMapBufferARB(GL_ARRAY_BUFFER_ARB,GL_WRITE_ONLY_ARB));
@@ -267,6 +270,10 @@ void Projector2::initContext(GLContextData& contextData) const
 		for(unsigned int y=0;y<depthSize[1];++y)
 			for(unsigned int x=0;x<depthSize[0];++x,++vPtr)
 				{
+				/* Store the undistorted pixel position for depth texture look-up: */
+				vPtr->texCoord[0]=GLfloat(x)+0.5f;
+				vPtr->texCoord[1]=GLfloat(y)+0.5f;
+				
 				/* Calculate the distorted pixel position in normalized camera space: */
 				LensDistortion::Point dp;
 				dp[1]=(double(y)+0.5-cy)/fy;
@@ -287,6 +294,8 @@ void Projector2::initContext(GLContextData& contextData) const
 			for(unsigned int x=0;x<depthSize[0];++x,++vPtr)
 				{
 				/* Intrinsic calibration matrices expect depth space vertices at integer pixel-center positions: */
+				vPtr->texCoord[0]=GLfloat(x)+0.5f;
+				vPtr->texCoord[1]=GLfloat(y)+0.5f;
 				vPtr->position[0]=GLfloat(x)+0.5f;
 				vPtr->position[1]=GLfloat(y)+0.5f;
 				vPtr->position[2]=0.0f;
@@ -818,7 +827,7 @@ void Projector2::glRenderAction(GLContextData& contextData) const
 	dataItem->renderingShader.useProgram();
 	
 	/* Bind the vertex and index buffers: */
-	typedef GLVertex<void,0,void,0,void,GLfloat,3> Vertex;
+	typedef GLVertex<GLfloat,2,void,0,void,GLfloat,3> Vertex;
 	glBindBufferARB(GL_ARRAY_BUFFER_ARB,dataItem->vertexBufferId);
 	glBindBufferARB(GL_ELEMENT_ARRAY_BUFFER_ARB,dataItem->indexBufferId);
 	

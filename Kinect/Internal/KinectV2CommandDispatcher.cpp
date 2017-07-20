@@ -1,7 +1,7 @@
 /***********************************************************************
 KinectV2CommandDispatcher - Class to exchange commands and command
 replies with a Kinect v2 device via USB bulk transfers.
-Copyright (c) 2014-2015 Oliver Kreylos
+Copyright (c) 2014-2017 Oliver Kreylos
 
 This file is part of the Kinect 3D Video Capture Project (Kinect).
 
@@ -218,7 +218,7 @@ void KinectV2CommandDispatcher::initInterfaces(void)
 	device.writeControl(LIBUSB_RECIPIENT_INTERFACE,LIBUSB_REQUEST_SET_FEATURE,0U,0x300U,0,0,1000U);
 	}
 
-void KinectV2CommandDispatcher::downloadTables(KinectV2DepthStreamReader& depthStreamReader)
+void KinectV2CommandDispatcher::downloadTables(KinectV2DepthStreamReader* depthStreamReader)
 	{
 	/* Read first data block: */
 	execute(0x02U,0x00U,0x200U);
@@ -256,12 +256,13 @@ void KinectV2CommandDispatcher::downloadTables(KinectV2DepthStreamReader& depthS
 	/* Read depth camera P0 tables: */
 	execute(0x22U,0x02U,0x1c0000U);
 	
-	/* Forward the P0 table block to the depth stream reader: */
-	{
-	IO::FixedMemoryFile p0TableBlock(detachReply(),getReplySize());
-	p0TableBlock.ref();
-	depthStreamReader.loadP0Tables(&p0TableBlock);
-	}
+	/* Forward the P0 table block to the depth stream reader if it exists: */
+	if(depthStreamReader!=0)
+		{
+		IO::FixedMemoryFile p0TableBlock(detachReply(),getReplySize());
+		p0TableBlock.ref();
+		depthStreamReader->loadP0Tables(&p0TableBlock);
+		}
 	
 	/* Read color camera parameters: */
 	execute(0x22U,0x04U,0x1c0000U);
@@ -271,6 +272,41 @@ void KinectV2CommandDispatcher::downloadTables(KinectV2DepthStreamReader& depthS
 	IO::FixedMemoryFile colorCameraParamsTableBlock(detachReply(),getReplySize());
 	colorCameraParamsTableBlock.ref();
 	colorCameraParamsTableBlock.setEndianness(Misc::LittleEndian);
+	
+	/* Extract projection parameters: */
+	colorCameraParamsTableBlock.skip<Misc::UInt8>(1);
+	colorCameraParams.sx=colorCameraParamsTableBlock.read<Misc::Float32>();
+	colorCameraParams.sy=colorCameraParams.sx;
+	colorCameraParams.cx=colorCameraParamsTableBlock.read<Misc::Float32>();
+	colorCameraParams.cy=colorCameraParamsTableBlock.read<Misc::Float32>();
+	
+	/* Extract shift between color and depth cameras: */
+	colorCameraParams.shiftD=colorCameraParamsTableBlock.read<Misc::Float32>();
+	colorCameraParams.shiftM=colorCameraParamsTableBlock.read<Misc::Float32>();
+	
+	/* Coefficients of bivariate cubic polynomial to map depth pixels to color pixels in x: */
+	colorCameraParams.pxx3y0=colorCameraParamsTableBlock.read<Misc::Float32>();
+	colorCameraParams.pxx0y3=colorCameraParamsTableBlock.read<Misc::Float32>();
+	colorCameraParams.pxx2y1=colorCameraParamsTableBlock.read<Misc::Float32>();
+	colorCameraParams.pxx1y2=colorCameraParamsTableBlock.read<Misc::Float32>();
+	colorCameraParams.pxx2y0=colorCameraParamsTableBlock.read<Misc::Float32>();
+	colorCameraParams.pxx0y2=colorCameraParamsTableBlock.read<Misc::Float32>();
+	colorCameraParams.pxx1y1=colorCameraParamsTableBlock.read<Misc::Float32>();
+	colorCameraParams.pxx1y0=colorCameraParamsTableBlock.read<Misc::Float32>();
+	colorCameraParams.pxx0y1=colorCameraParamsTableBlock.read<Misc::Float32>();
+	colorCameraParams.pxx0y0=colorCameraParamsTableBlock.read<Misc::Float32>();
+	
+	/* Coefficients of bivariate cubic polynomial to map depth pixels to color pixels in y: */
+	colorCameraParams.pyx3y0=colorCameraParamsTableBlock.read<Misc::Float32>();
+	colorCameraParams.pyx0y3=colorCameraParamsTableBlock.read<Misc::Float32>();
+	colorCameraParams.pyx2y1=colorCameraParamsTableBlock.read<Misc::Float32>();
+	colorCameraParams.pyx1y2=colorCameraParamsTableBlock.read<Misc::Float32>();
+	colorCameraParams.pyx2y0=colorCameraParamsTableBlock.read<Misc::Float32>();
+	colorCameraParams.pyx0y2=colorCameraParamsTableBlock.read<Misc::Float32>();
+	colorCameraParams.pyx1y1=colorCameraParamsTableBlock.read<Misc::Float32>();
+	colorCameraParams.pyx1y0=colorCameraParamsTableBlock.read<Misc::Float32>();
+	colorCameraParams.pyx0y1=colorCameraParamsTableBlock.read<Misc::Float32>();
+	colorCameraParams.pyx0y0=colorCameraParamsTableBlock.read<Misc::Float32>();
 	}
 	}
 

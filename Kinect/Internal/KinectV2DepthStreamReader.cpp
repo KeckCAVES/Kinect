@@ -33,6 +33,9 @@ Software Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA
 #include <Kinect/LensDistortion.h>
 #include <Kinect/CameraV2.h>
 
+// DEBUGGING
+// #include <iostream>
+
 namespace Kinect {
 
 /******************************************
@@ -623,6 +626,9 @@ void KinectV2DepthStreamReader::postTransfer(USB::TransferPool::Transfer* newTra
 	int numIsoPackets=newTransfer->getTransfer().num_iso_packets;
 	for(int i=0;i<numIsoPackets;++i,++packetDescriptorPtr)
 		{
+		// DEBUGGING
+		// std::cout<<packetDescriptorPtr->actual_length<<std::endl;
+		
 		/* Check if the packet is valid: */
 		if(packetDescriptorPtr->status==LIBUSB_TRANSFER_COMPLETED
 		   &&(packetDescriptorPtr->actual_length==33792
@@ -700,7 +706,7 @@ void KinectV2DepthStreamReader::postTransfer(USB::TransferPool::Transfer* newTra
 					Misc::UInt32 flags; // Flag array? Bits 16 and 18 determine gated vs background exposure; rest is 0x3331
 					Misc::UInt32 timeStamp2[2]; // Another time stamp, as a double? Changes between image indices 8 and 9, oddly
 					Misc::UInt32 frameNumber2; // Another frame number? Changes between image indices 8 and 9, increments by 38 or 39
-					Misc::UInt32 reserved2[2]; // Two reserved values, {0x80008000, 0}
+					Misc::UInt32 reserved2[2]; // Two reserved values, {0x80008000, 0} normally, but sometimes {0xc3ff8000, 0}
 					Misc::UInt32 unknown; // Some value fluctuating between 491 and 528
 					Misc::UInt32 flags2; // Flag array? Bit 1 indicates background exposure
 					Misc::UInt32 reserved3; // Reserved value, 0x4bba0014
@@ -712,7 +718,7 @@ void KinectV2DepthStreamReader::postTransfer(USB::TransferPool::Transfer* newTra
 				
 				/* Check the image footer for correctness: */
 				memcpy(&footer,packetDataPtr+(packetDescriptorPtr->actual_length-sizeof(footer)),sizeof(footer));
-				if(footer.reserved1[0]==0&&footer.reserved1[1]==9&&footer.reserved2[0]==0x80008000U&&footer.reserved2[1]==0)
+				if(footer.reserved1[0]==0&&footer.reserved1[1]==9&&footer.reserved2[1]==0&&footer.reserved3==0x4bba0014U)
 					{
 					// DEBUGGING
 					// std::cout<<"Read image "<<footer.imageIndex<<" of frame "<<footer.frameNumber<<std::endl;
@@ -728,7 +734,14 @@ void KinectV2DepthStreamReader::postTransfer(USB::TransferPool::Transfer* newTra
 						}
 					}
 				else
+					{
+					// DEBUGGING
+					// std::cout<<"Invalid frame "<<footer.reserved1[0]<<", "<<footer.reserved1[1]<<", "<<footer.reserved2[0]<<", "<<footer.reserved2[1];
+					// std::cout<<", "<<footer.frameNumber<<", "<<footer.imageIndex<<", "<<footer.frameSize;
+					// std::cout<<", "<<footer.reserved3<<std::endl;
+					
 					frameValid=false;
+					}
 				
 				if(frameValid)
 					{

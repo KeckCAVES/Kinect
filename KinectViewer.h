@@ -98,6 +98,9 @@ class KinectViewer:public Vrui::Application
 		GLMotif::PopupWindow* createStreamerDialog(void); // Creates a dialog box to control parameters of this streamer
 		void showFacadeCallback(GLMotif::ToggleButton::ValueChangedCallbackData* cbData);
 		void showFromCameraCallback(Misc::CallbackData* cbData);
+		#if KINECT_CONFIG_USE_PROJECTOR2
+		void mapTextureCallback(GLMotif::ToggleButton::ValueChangedCallbackData* cbData);
+		#endif
 		#if !KINECT_CONFIG_USE_SHADERPROJECTOR
 		void filterDepthFramesCallback(GLMotif::ToggleButton::ValueChangedCallbackData* cbData);
 		#endif
