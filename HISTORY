@@ -220,3 +220,52 @@ Kinect-3.3:
   connect to local 3D cameras of any type by their index in a shared
   list. Command line arguments -v2, -c2, and -rs are no longer
   recognized.
+
+Kinect-3.4:
+- Added projection parameters to Kinect::LensDistortion to simplify
+  client code dealing with depth image points in pixel space.
+  - Added distortPixel() and undistortPixel() methods.
+- Removed evil calibration hack from Kinect::CameraV2.
+- Set lens distortion projection parameters in
+  Kinect::CameraV2::getIntrinsicParameters.
+- Set lens distortion projection parameters in
+  Kinect::FileFrameSource::initialize() and
+  Kinect::MultiplexedFrameSource::Stream::Stream.
+- Cleaned up depth image handling and lens distortion correction in
+  RawKinectViewer.
+- Cleaned up lens distortion handling in Kinect::DiskExtractor.
+- Cleaned up lens distortion handling in Kinect::Projector,
+  Kinect::Projector2, and Kinect::ShaderProjector.
+- Added experimental full calibration routine to ExtrinsicCalibrator
+  that no longer requires measuring the disk center position in
+  controller space.
+  - Added RANSAC optimization to make calibration robust against
+    outliers. Post-calibration clean-up via AlignPoints no longer
+    required.
+  - Added inverse calibration routine for cameras rigidly attached to
+    a controller or tracker, for free-camera mixed reality recording.
+- Added normal vector flipping to Kinect::DiskExtractor so that disks
+  always point towards the camera.
+- Added proper illumination support through dynamically-generated
+  shaders to Kinect::Projector2.
+- Added illumination button to streamer dialog in KinectViewer
+  application when using Kinect::Projector2 projector class.
+- Tweaked USB transfer pool sizes in Kinect::CameraV2 for better buffer
+  overflow handling.
+- Added rough latency mitigation to Kinect v2's low-level streaming
+  handlers.
+  - Removed hacky latency mitigation from KinectViewer vislet.
+- Added texture mapping and illumination toggles to KinectViewer vislet
+  and adapted file stream initialization to new Kinect::LensDistortion
+  interface.
+- Improved time stamp handling in Kinect v2 camera driver and
+  KinectViewer vislet. Playing back recorded streams now has close to
+  zero relative latency.
+- Added ability to track one controller and use button events from
+  another to ExtrinsicCalibrator, to calibrate a button-less Vive
+  tracker.
+- Added ability to play back files recorded from a tracked 3D camera to
+  KinectViewer vislet.
+- Fixed location of RealSense library dso in BuildRoot/Packages.Kinect
+  to use .../$(LIBEXT) instead of .../lib, which should fix run-time
+  search paths again.

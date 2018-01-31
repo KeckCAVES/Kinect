@@ -1,7 +1,7 @@
 /***********************************************************************
 KinectViewer - Vislet to draw 3D reconstructions captured from a Kinect
 device in 3D space.
-Copyright (c) 2010-2016 Oliver Kreylos
+Copyright (c) 2010-2017 Oliver Kreylos
 
 This file is part of the Kinect 3D Video Capture Project (Kinect).
 
@@ -109,7 +109,6 @@ class KinectViewer:public Vrui::Vislet
 		bool started; // Flag whether streaming has been started
 		bool paused; // Flag if the renderer is currently paused
 		Kinect::FrameSaver* frameSaver;
-		double timeStamp; // Current timestamp when saving 3D video streams
 		
 		/* Private methods: */
 		void colorStreamingCallback(const Kinect::FrameBuffer& frameBuffer); // Callback receiving color frames from the frame source
@@ -167,6 +166,9 @@ class KinectViewer:public Vrui::Vislet
 		Threads::Thread colorReaderThread; // Thread to read color frames from the color stream file
 		Threads::Thread depthReaderThread; // Thread to read depth frames from the depth stream file
 		bool started; // Flag whether streaming has been started
+		double timeStampBase; // Application time of first frame, which serves as synchronization point for saved streams
+		double colorFrameOffset; // Time offset applied to color frames to fix synchronization
+		double depthFrameOffset; // Time offset applied to depth frames to fix synchronization
 		
 		double timeStamp; // Current display time stamp
 		static const int numQueueSlots=3; // Number of frames that can be read ahead from the input files
@@ -190,6 +192,7 @@ class KinectViewer:public Vrui::Vislet
 		#if !KINECT_CONFIG_USE_SHADERPROJECTOR
 		Kinect::MeshBuffer nextMesh; // The next mesh
 		#endif
+		bool newDepth; // Flag if the renderer has a new depth image for the current frame
 		
 		/* Private methods: */
 		void* colorReaderThreadMethod(void);
@@ -197,12 +200,34 @@ class KinectViewer:public Vrui::Vislet
 		
 		/* Constructors and destructors: */
 		public:
-		SynchedRenderer(const std::string& fileName); // Creates a renderer for the given 3D video stream file
+		SynchedRenderer(const std::string& fileName,double sColorFrameOffset,double sDepthFrameOffset); // Creates a renderer for the given 3D video stream file and time offsets
 		virtual ~SynchedRenderer(void);
 		
 		/* Methods from Renderer: */
 		virtual void startStreaming(const Kinect::FrameSource::Time& timeBase);
 		virtual void frame(double newTimeStamp);
+		
+		/* New methods: */
+		bool haveNewDepth(void) const
+			{
+			return newDepth;
+			}
+		};
+	
+	class TrackedSynchedRenderer:public SynchedRenderer // Class to render 3D video recorded with a tracked camera from a time-synchronized 3D video stream file
+		{
+		/* Elements: */
+		private:
+		Vrui::InputDevice* trackingDevice; // Pointer to the tracking device to which the synched source is attached
+		Vrui::TrackerState trackingState; // State of the tracking device at the time the current depth frame appeared
+		
+		/* Constructors and destructors: */
+		public:
+		TrackedSynchedRenderer(const std::string& fileName,Vrui::InputDevice* sTrackingDevice,double sColorFrameOffset,double sDepthFrameOffset); // Creates a renderer for the given 3D video stream file and tracked input device
+		
+		/* Methods from Renderer: */
+		virtual void frame(double newTimeStamp);
+		virtual void glRenderAction(GLContextData& contextData) const;
 		};
 	
 	/* Embedded classes: */
@@ -278,12 +303,13 @@ class KinectViewer:public Vrui::Vislet
 	static KinectViewerFactory* factory; // Pointer to the class' factory object
 	
 	bool navigational; // Flag whether to render 3D video in navigational space
-	Kinect::FrameSource::Time timeBase; // Common time base for all 3D video stream renderers
 	std::vector<Renderer*> renderers; // List of 3D video stream renderers
 	bool synched; // Flag if the vislet has to stay synched to recorded or played video streams even while disabled
 	bool startDisabled; // Flag if the vislet starts in disabled state
 	bool firstEnable; // Flag to indicate the first time the vislet is enabled at start-up
-	bool enabled; // Flag whether the vislet is enabled; class cannot use the active flag
+	bool enabled; // Flag whether the vislet is enabled; class cannot use the active flag if it needs to stay synched
+	bool firstFrame; // Flag to indicate the first time the frame method is called
+	bool* windowFlags; // Array of rendering flags for each window defined in the environment
 	
 	/* Private methods: */
 	void toolCreationCallback(Vrui::ToolManager::ToolCreationCallbackData* cbData); // Callback called when a new tool is created

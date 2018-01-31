@@ -541,7 +541,10 @@ void* DiskExtractor::diskExtractorThreadMethod(void)
 					Disk disk;
 					disk.center=depthProjection.transform(centroid);
 					disk.normal=axes[0]^axes[1];
-					disk.normal.normalize();
+					Scalar nLen=Geometry::mag(disk.normal);
+					if(disk.normal[2]>Scalar(0))
+						nLen=-nLen;
+					disk.normal/=nLen;
 					
 					disk.numPixels=bIt->numPixels;
 					disk.radius=Math::sqrt(axisLengths[0]*axisLengths[1]);
@@ -610,42 +613,21 @@ DiskExtractor::DiskExtractor(const unsigned int sFrameSize[2],const FrameSource:
 		}
 	else
 		{
-		/* Derive depth camera's 2D intrinsic parameters for lens distortion correction: */
-		typedef LensDistortion::Point::Scalar LDScalar;
-		const FrameSource::IntrinsicParameters::PTransform::Matrix& dpMat=ips.depthProjection.getMatrix();
-		LDScalar fxfy=-dpMat(2,3);
-		LDScalar fy=fxfy/dpMat(1,1);
-		LDScalar cy=-dpMat(1,3)*fy/fxfy;
-		LDScalar fx=fxfy/dpMat(0,0);
-		LDScalar sk=-dpMat(0,1)*fx*fy/fxfy;
-		LDScalar cx=(-dpMat(0,3)/fxfy+sk*cy/(fx*fy))*fx;
-		
-		// DEBUGGING
-		std::cout<<"Lens distortion parameters:"<<std::endl;
-		std::cout<<ips.depthLensDistortion.getCenter()[0]<<", "<<ips.depthLensDistortion.getCenter()[1]<<", ";
-		std::cout<<ips.depthLensDistortion.getKappa(0)<<", "<<ips.depthLensDistortion.getKappa(1)<<", "<<ips.depthLensDistortion.getKappa(2)<<", ";
-		std::cout<<ips.depthLensDistortion.getRho(0)<<", "<<ips.depthLensDistortion.getRho(0)<<std::endl;
-		std::cout<<"Intrinsic camera parameters:"<<std::endl;
-		std::cout<<fx<<", "<<sk<<", "<<cx<<"; "<<fy<<", "<<cy<<std::endl;
-		
 		/* Create lens distortion-corrected pixel positions: */
 		ImagePoint* fpPtr=framePixels;
 		for(unsigned int y=0;y<frameSize[1];++y)
 			for(unsigned int x=0;x<frameSize[0];++x,++fpPtr)
 				{
-				LensDistortion::Point dp;
-				dp[1]=(LDScalar(y)+LDScalar(0.5)-cy)/fy;
-				dp[0]=(LDScalar(x)+LDScalar(0.5)-sk*dp[1]-cx)/fx;
-				
 				/* Undistort the image point: */
-				LensDistortion::Point up=ips.depthLensDistortion.undistort(dp);
+				LensDistortion::Point dp(LensDistortion::Scalar(x)+LensDistortion::Scalar(0.5),LensDistortion::Scalar(y)+LensDistortion::Scalar(0.5));
+				LensDistortion::Point up=ips.depthLensDistortion.undistortPixel(dp);
 				
-				/* Transform the undistorted point back to depth image pixel space: */
-				(*fpPtr)[0]=Scalar(up[0]*fx+up[1]*sk+cx);
-				(*fpPtr)[1]=Scalar(up[1]*fy+cy);
+				/* Store the undistorted point: */
+				(*fpPtr)[0]=Scalar(up[0]);
+				(*fpPtr)[1]=Scalar(up[1]);
 				
 				/* Calculate the inverse distortion scale at the undistorted position: */
-				fpPtr->value=LensDistortion::Scalar(1)/ips.depthLensDistortion.distortScale(up);
+				fpPtr->value=LensDistortion::Scalar(1)/ips.depthLensDistortion.distortScalePixel(up);
 				}
 		}
 	
@@ -682,42 +664,21 @@ DiskExtractor::DiskExtractor(const unsigned int sFrameSize[2],const DiskExtracto
 		}
 	else
 		{
-		/* Derive depth camera's 2D intrinsic parameters for lens distortion correction: */
-		typedef LensDistortion::Point::Scalar LDScalar;
-		const FrameSource::IntrinsicParameters::PTransform::Matrix& dpMat=ips.depthProjection.getMatrix();
-		LDScalar fxfy=-dpMat(2,3);
-		LDScalar fy=fxfy/dpMat(1,1);
-		LDScalar cy=-dpMat(1,3)*fy/fxfy;
-		LDScalar fx=fxfy/dpMat(0,0);
-		LDScalar sk=-dpMat(0,1)*fx*fy/fxfy;
-		LDScalar cx=(-dpMat(0,3)/fxfy+sk*cy/(fx*fy))*fx;
-		
-		// DEBUGGING
-		std::cout<<"Lens distortion parameters:"<<std::endl;
-		std::cout<<ips.depthLensDistortion.getCenter()[0]<<", "<<ips.depthLensDistortion.getCenter()[1]<<", ";
-		std::cout<<ips.depthLensDistortion.getKappa(0)<<", "<<ips.depthLensDistortion.getKappa(1)<<", "<<ips.depthLensDistortion.getKappa(2)<<", ";
-		std::cout<<ips.depthLensDistortion.getRho(0)<<", "<<ips.depthLensDistortion.getRho(0)<<std::endl;
-		std::cout<<"Intrinsic camera parameters:"<<std::endl;
-		std::cout<<fx<<", "<<sk<<", "<<cx<<"; "<<fy<<", "<<cy<<std::endl;
-		
 		/* Create lens distortion-corrected pixel positions: */
 		ImagePoint* fpPtr=framePixels;
 		for(unsigned int y=0;y<frameSize[1];++y)
 			for(unsigned int x=0;x<frameSize[0];++x,++fpPtr)
 				{
-				LensDistortion::Point dp;
-				dp[1]=(LDScalar(y)+LDScalar(0.5)-cy)/fy;
-				dp[0]=(LDScalar(x)+LDScalar(0.5)-sk*dp[1]-cx)/fx;
-				
 				/* Undistort the image point: */
-				LensDistortion::Point up=ips.depthLensDistortion.undistort(dp);
+				LensDistortion::Point dp(LensDistortion::Scalar(x)+LensDistortion::Scalar(0.5),LensDistortion::Scalar(y)+LensDistortion::Scalar(0.5));
+				LensDistortion::Point up=ips.depthLensDistortion.undistortPixel(dp);
 				
-				/* Transform the undistorted point back to depth image pixel space: */
-				(*fpPtr)[0]=Scalar(up[0]*fx+up[1]*sk+cx);
-				(*fpPtr)[1]=Scalar(up[1]*fy+cy);
+				/* Store the undistorted point: */
+				(*fpPtr)[0]=Scalar(up[0]);
+				(*fpPtr)[1]=Scalar(up[1]);
 				
 				/* Calculate the inverse distortion scale at the undistorted position: */
-				fpPtr->value=LensDistortion::Scalar(1)/ips.depthLensDistortion.distortScale(up);
+				fpPtr->value=LensDistortion::Scalar(1)/ips.depthLensDistortion.distortScalePixel(up);
 				}
 		}
 	
@@ -861,7 +822,10 @@ DiskExtractor::DiskList DiskExtractor::processFrame(const FrameBuffer& frame) co
 				Disk disk;
 				disk.center=depthProjection.transform(centroid);
 				disk.normal=axes[0]^axes[1];
-				disk.normal.normalize();
+				Scalar nLen=Geometry::mag(disk.normal);
+				if(disk.normal[2]>Scalar(0))
+					nLen=-nLen;
+				disk.normal/=nLen;
 				
 				disk.numPixels=bIt->numPixels;
 				disk.radius=Math::sqrt(axisLengths[0]*axisLengths[1]);

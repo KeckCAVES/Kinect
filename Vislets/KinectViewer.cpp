@@ -159,12 +159,8 @@ void KinectViewer::LiveRenderer::colorStreamingCallback(const Kinect::FrameBuffe
 	
 	if(frameSaver!=0)
 		{
-		/* Time-stamp the incoming frame: */
-		Kinect::FrameBuffer saveFrame(frameBuffer);
-		saveFrame.timeStamp=timeStamp;
-		
-		/* Forward the time-stamped frame to the frame saver: */
-		frameSaver->saveColorFrame(saveFrame);
+		/* Forward the newly-arrived frame to the frame saver: */
+		frameSaver->saveColorFrame(frameBuffer);
 		}
 	}
 
@@ -182,12 +178,8 @@ void KinectViewer::LiveRenderer::depthStreamingCallback(const Kinect::FrameBuffe
 	
 	if(frameSaver!=0)
 		{
-		/* Time-stamp the incoming frame: */
-		Kinect::FrameBuffer saveFrame(frameBuffer);
-		saveFrame.timeStamp=timeStamp;
-		
-		/* Forward the time-stamped frame to the frame saver: */
-		frameSaver->saveDepthFrame(saveFrame);
+		/* Forward the newly-arrived frame to the frame saver: */
+		frameSaver->saveDepthFrame(frameBuffer);
 		}
 	}
 
@@ -195,17 +187,15 @@ void KinectViewer::LiveRenderer::depthStreamingCallback(const Kinect::FrameBuffe
 
 void KinectViewer::LiveRenderer::meshStreamingCallback(const Kinect::MeshBuffer& meshBuffer)
 	{
-	if(paused)
-		return;
-	
-	Vrui::requestUpdate();
+	if(!paused)
+		Vrui::requestUpdate();
 	}
 
 #endif
 
 KinectViewer::LiveRenderer::LiveRenderer(Kinect::FrameSource* sSource)
 	:source(sSource),started(false),paused(false),
-	 frameSaver(0),timeStamp(0.0)
+	 frameSaver(0)
 	{
 	/* Create the projector: */
 	projector=new Kinect::ProjectorType(*source);
@@ -249,9 +239,6 @@ void KinectViewer::LiveRenderer::frame(double newTimeStamp)
 	{
 	/* Update the projector: */
 	projector->updateFrames();
-	
-	/* Update the time stamp: */
-	timeStamp=newTimeStamp;
 	}
 
 void KinectViewer::LiveRenderer::saveStreams(const std::string& saveFileName)
@@ -369,6 +356,10 @@ void* KinectViewer::SynchedRenderer::colorReaderThreadMethod(void)
 		/* Read the next color frame: */
 		Kinect::FrameBuffer nextFrame=colorReader->readNextFrame();
 		
+		/* Check if it's the last frame and adjust for latency: */
+		bool done=nextFrame.timeStamp>=Math::Constants<double>::max;
+		nextFrame.timeStamp+=colorFrameOffset;
+		
 		/* Put the new color frame into the queue: */
 		{
 		Threads::Mutex::Lock frameQueueLock(frameQueueMutex);
@@ -380,7 +371,7 @@ void* KinectViewer::SynchedRenderer::colorReaderThreadMethod(void)
 			frameQueuesEmptyCond.broadcast();
 		}
 		
-		if(nextFrame.timeStamp>=Math::Constants<double>::max)
+		if(done)
 			break;
 		}
 	
@@ -398,6 +389,10 @@ void* KinectViewer::SynchedRenderer::depthReaderThreadMethod(void)
 		/* Read the next depth frame: */
 		Kinect::FrameBuffer nextFrame=depthReader->readNextFrame();
 		
+		/* Check if it's the last frame and adjust for latency: */
+		bool done=nextFrame.timeStamp>=Math::Constants<double>::max;
+		nextFrame.timeStamp+=depthFrameOffset;
+		
 		#if KINECT_CONFIG_USE_SHADERPROJECTOR
 		
 		/* Put the new depth frame into the queue: */
@@ -407,12 +402,10 @@ void* KinectViewer::SynchedRenderer::depthReaderThreadMethod(void)
 			depthFrameQueueFullCond.wait(frameQueueMutex);
 		mostRecentDepthFrame=(mostRecentDepthFrame+1)%numQueueSlots;
 		depthFrames[mostRecentDepthFrame]=nextFrame;
+		
 		if(++numDepthFrames==1)
 			frameQueuesEmptyCond.broadcast();
 		}
-		
-		if(nextFrame.timeStamp>=Math::Constants<double>::max)
-			break;
 		
 		#else
 		
@@ -432,18 +425,19 @@ void* KinectViewer::SynchedRenderer::depthReaderThreadMethod(void)
 			frameQueuesEmptyCond.broadcast();
 		}
 		
-		if(nextMesh.timeStamp>=Math::Constants<double>::max)
-			break;
-		
 		#endif
+		
+		if(done)
+			break;
 		}
 	
 	return 0;
 	}
 
-KinectViewer::SynchedRenderer::SynchedRenderer(const std::string& fileName)
+KinectViewer::SynchedRenderer::SynchedRenderer(const std::string& fileName,double sColorFrameOffset,double sDepthFrameOffset)
 	:colorReader(0),depthReader(0),
 	 started(false),
+	 timeStampBase(0.0),colorFrameOffset(sColorFrameOffset),depthFrameOffset(sDepthFrameOffset),
 	 timeStamp(0.0),
 	 numColorFrames(0),mostRecentColorFrame(0),
 	 numDepthFrames(0),mostRecentDepthFrame(0)
@@ -510,6 +504,9 @@ KinectViewer::SynchedRenderer::SynchedRenderer(const std::string& fileName)
 	ips.colorProjection=Misc::Marshaller<Kinect::FrameSource::IntrinsicParameters::PTransform>::read(*colorFile);
 	ips.depthProjection=Misc::Marshaller<Kinect::FrameSource::IntrinsicParameters::PTransform>::read(*depthFile);
 	
+	/* Set projection parameters in the lens distortion corrector: */
+	ips.depthLensDistortion.setProjection(ips.depthProjection);
+	
 	/* Read the camera transformation from the depth file: */
 	Kinect::FrameSource::ExtrinsicParameters eps;
 	eps=Misc::Marshaller<Kinect::FrameSource::ExtrinsicParameters>::read(*depthFile);
@@ -557,6 +554,9 @@ KinectViewer::SynchedRenderer::~SynchedRenderer(void)
 
 void KinectViewer::SynchedRenderer::startStreaming(const Kinect::FrameSource::Time& timeBase)
 	{
+	/* Save the current application time to synchronize with saved streams: */
+	timeStampBase=Vrui::getApplicationTime();
+	
 	/* Start the color and depth reader threads: */
 	colorReaderThread.start(this,&KinectViewer::SynchedRenderer::colorReaderThreadMethod);
 	depthReaderThread.start(this,&KinectViewer::SynchedRenderer::depthReaderThreadMethod);
@@ -566,12 +566,13 @@ void KinectViewer::SynchedRenderer::startStreaming(const Kinect::FrameSource::Ti
 
 void KinectViewer::SynchedRenderer::frame(double newTimeStamp)
 	{
-	timeStamp=newTimeStamp;
+	/* Calculate the new time stamp relative to the time stamp base: */
+	timeStamp=newTimeStamp-timeStampBase;
 	
-	/* Wait until the next frame is newer than the new time step: */
+	/* Wait until the next frame is newer than the new time stamp: */
 	bool newColor=false;
 	Kinect::FrameBuffer currentColorFrame;
-	bool newDepth=false;
+	newDepth=false;
 	Kinect::FrameBuffer currentDepthFrame;
 	#if !KINECT_CONFIG_USE_SHADERPROJECTOR
 	Kinect::MeshBuffer currentMesh;
@@ -620,6 +621,41 @@ void KinectViewer::SynchedRenderer::frame(double newTimeStamp)
 		projector->setMesh(currentMesh);
 	#endif
 	projector->updateFrames();
+	}
+
+/*****************************************************
+Methods of class KinectViewer::TrackedSynchedRenderer:
+*****************************************************/
+
+KinectViewer::TrackedSynchedRenderer::TrackedSynchedRenderer(const std::string& fileName,Vrui::InputDevice* sTrackingDevice,double sColorFrameOffset,double sDepthFrameOffset)
+	:SynchedRenderer(fileName,sColorFrameOffset,sDepthFrameOffset),
+	 trackingDevice(sTrackingDevice)
+	{
+	}
+
+void KinectViewer::TrackedSynchedRenderer::frame(double newTimeStamp)
+	{
+	/* Call the base class method: */
+	SynchedRenderer::frame(newTimeStamp);
+	
+	/* Check if there is new depth data for this frame: */
+	// if(haveNewDepth())
+		{
+		/* Sample the tracking device and keep its state until a new depth frame arrives: */
+		trackingState=trackingDevice->getTransformation();
+		}
+	}
+
+void KinectViewer::TrackedSynchedRenderer::glRenderAction(GLContextData& contextData) const
+	{
+	/* Transform the projector by the tracking device's current transformation: */
+	glPushMatrix();
+	glMultMatrix(trackingState);
+	
+	/* Draw the current 3D video frame: */
+	projector->glRenderAction(contextData);
+	
+	glPopMatrix();
 	}
 
 /******************************************************
@@ -739,13 +775,25 @@ void KinectViewer::toolCreationCallback(Vrui::ToolManager::ToolCreationCallbackD
 KinectViewer::KinectViewer(int numArguments,const char* const arguments[])
 	:navigational(false),
 	 synched(false),
-	 startDisabled(false),firstEnable(true),enabled(false)
+	 startDisabled(false),firstEnable(true),enabled(false),firstFrame(true),
+	 windowFlags(0)
 	{
+	/* Initialize the per-window rendering flag array: */
+	windowFlags=new bool[Vrui::getNumWindows()];
+	for(int i=0;i<Vrui::getNumWindows();++i)
+		windowFlags[i]=true; // Render to all windows by default
+	
 	/* Parse the command line: */
 	bool highres=false;
 	bool compressDepth=false;
 	bool applyPreTransform=false;
 	unsigned int triangleDepthRange=5;
+	#if KINECT_CONFIG_USE_PROJECTOR2
+	bool illuminate=false;
+	bool mapTexture=true;
+	#endif
+	double colorFrameOffset=0.0;
+	double depthFrameOffset=0.0;
 	Kinect::FrameSource::ExtrinsicParameters preTransform;
 	Vrui::InputDevice* cameraTrackingDevice=0;
 	const char* saveFileNameBase=0;
@@ -780,7 +828,27 @@ KinectViewer::KinectViewer(int numArguments,const char* const arguments[])
 			else
 				std::cerr<<"KinectViewer: Ignoring dangling -preTransform argument"<<std::endl;
 			}
-		else if(strcasecmp(arguments[i],"-triangleDepthRange")==0)
+		else if(strcasecmp(arguments[i],"-colorFrameOffset")==0||strcasecmp(arguments[i],"-cfo")==0)
+			{
+			++i;
+			if(i<numArguments)
+				{
+				colorFrameOffset=atof(arguments[i]);
+				}
+			else
+				std::cerr<<"KinectViewer: Ignoring dangling "<<arguments[i]<<" argument"<<std::endl;
+			}
+		else if(strcasecmp(arguments[i],"-depthFrameOffset")==0||strcasecmp(arguments[i],"-dfo")==0)
+			{
+			++i;
+			if(i<numArguments)
+				{
+				depthFrameOffset=atof(arguments[i]);
+				}
+			else
+				std::cerr<<"KinectViewer: Ignoring dangling "<<arguments[i]<<" argument"<<std::endl;
+			}
+		else if(strcasecmp(arguments[i],"-triangleDepthRange")==0||strcasecmp(arguments[i],"-tdr")==0)
 			{
 			++i;
 			if(i<numArguments)
@@ -788,8 +856,18 @@ KinectViewer::KinectViewer(int numArguments,const char* const arguments[])
 				triangleDepthRange=atoi(arguments[i]);
 				}
 			else
-				std::cerr<<"KinectViewer: Ignoring dangling -triangleDepthRange argument"<<std::endl;
+				std::cerr<<"KinectViewer: Ignoring dangling "<<arguments[i]<<" argument"<<std::endl;
 			}
+		#if KINECT_CONFIG_USE_PROJECTOR2
+		else if(strcasecmp(arguments[i],"-mapTexture")==0)
+			mapTexture=true;
+		else if(strcasecmp(arguments[i],"-noMapTexture")==0)
+			mapTexture=false;
+		else if(strcasecmp(arguments[i],"-illuminate")==0)
+			illuminate=true;
+		else if(strcasecmp(arguments[i],"-noIlluminate")==0)
+			illuminate=false;
+		#endif
 		else if(strcasecmp(arguments[i],"-trackDevice")==0)
 			{
 			++i;
@@ -851,6 +929,10 @@ KinectViewer::KinectViewer(int numArguments,const char* const arguments[])
 					else
 						newRenderer=new LiveRenderer(camera);
 					newRenderer->getProjector().setTriangleDepthRange(triangleDepthRange);
+					#if KINECT_CONFIG_USE_PROJECTOR2
+					newRenderer->getProjector().setMapTexture(mapTexture);
+					newRenderer->getProjector().setIlluminate(illuminate);
+					#endif
 					renderers.push_back(newRenderer);
 					
 					/* Check if the camera's stream needs to be saved: */
@@ -882,8 +964,22 @@ KinectViewer::KinectViewer(int numArguments,const char* const arguments[])
 			if(i<numArguments)
 				{
 				/* Add a synchronized renderer for the given video file: */
-				SynchedRenderer* newRenderer=new SynchedRenderer(arguments[i]);
+				SynchedRenderer* newRenderer;
+				if(cameraTrackingDevice!=0)
+					{
+					/* Create a tracked synched renderer: */
+					newRenderer=new TrackedSynchedRenderer(arguments[i],cameraTrackingDevice,colorFrameOffset,depthFrameOffset);
+					
+					/* Only use the tracker for this camera: */
+					cameraTrackingDevice=0;
+					}
+				else
+					newRenderer=new SynchedRenderer(arguments[i],colorFrameOffset,depthFrameOffset);
 				newRenderer->getProjector().setTriangleDepthRange(triangleDepthRange);
+				#if KINECT_CONFIG_USE_PROJECTOR2
+				newRenderer->getProjector().setMapTexture(mapTexture);
+				newRenderer->getProjector().setIlluminate(illuminate);
+				#endif
 				renderers.push_back(newRenderer);
 				
 				synched=true;
@@ -904,6 +1000,10 @@ KinectViewer::KinectViewer(int numArguments,const char* const arguments[])
 					{
 					LiveRenderer* newRenderer=new LiveRenderer(source->getStream(i));
 					newRenderer->getProjector().setTriangleDepthRange(triangleDepthRange);
+					#if KINECT_CONFIG_USE_PROJECTOR2
+					newRenderer->getProjector().setMapTexture(mapTexture);
+					newRenderer->getProjector().setIlluminate(illuminate);
+					#endif
 					renderers.push_back(newRenderer);
 					
 					/* Check if the camera's stream needs to be saved: */
@@ -974,6 +1074,8 @@ KinectViewer::KinectViewer(int numArguments,const char* const arguments[])
 				#if KINECT_CONFIG_USE_PROJECTOR2
 				if(cfg.hasTag("./mapTexture"))
 					renderer->getProjector().setMapTexture(cfg.retrieveValue<bool>("./mapTexture"));
+				if(cfg.hasTag("./illuminate"))
+					renderer->getProjector().setIlluminate(cfg.retrieveValue<bool>("./illuminate"));
 				#endif
 				
 				/* Check if the camera's stream needs to be saved: */
@@ -996,6 +1098,18 @@ KinectViewer::KinectViewer(int numArguments,const char* const arguments[])
 			}
 		else if(strcasecmp(arguments[i],"-startDisabled")==0||strcasecmp(arguments[i],"-sd")==0)
 			startDisabled=true;
+		else if(strcasecmp(arguments[i],"-disableWindow")==0||strcasecmp(arguments[i],"-dw")==0)
+			{
+			/* Disable rendering to the window of the given index: */
+			++i;
+			if(i<numArguments)
+				{
+				int windowIndex=atoi(arguments[i]);
+				windowFlags[windowIndex]=false;
+				}
+			else
+				std::cerr<<"KinectViewer: Ignoring dangling "<<arguments[i-1]<<" argument"<<std::endl;
+			}
 		}
 	
 	if(applyPreTransform)
@@ -1035,28 +1149,40 @@ void KinectViewer::disable(void)
 
 void KinectViewer::enable(void)
 	{
-	/* Call the base class method: */
-	Vislet::enable();
-	
 	if(firstEnable)
 		{
-		/* Establish a time base: */
-		timeBase.set();
+		
+		if(!startDisabled)
+			{
+			/* Call the base class method: */
+			Vislet::enable();
+			enabled=true;
+			}
+		
+		firstEnable=false;
+		}
+	else
+		{
+		/* Call the base class method: */
+		Vislet::enable();
+		enabled=true;
+		}
+	}
+
+void KinectViewer::frame(void)
+	{
+	if(firstFrame)
+		{
+		/* Establish a common time base for all renderers: */
+		Kinect::FrameSource::Time timeBase;
 		
 		/* Start streaming on all renderers: */
 		for(std::vector<Renderer*>::iterator rIt=renderers.begin();rIt!=renderers.end();++rIt)
 			(*rIt)->startStreaming(timeBase);
 		
-		enabled=!startDisabled;
-		
-		firstEnable=false;
+		firstFrame=false;
 		}
-	else
-		enabled=true;
-	}
-
-void KinectViewer::frame(void)
-	{
+	
 	/* Update all renderers: */
 	for(std::vector<Renderer*>::iterator rIt=renderers.begin();rIt!=renderers.end();++rIt)
 		(*rIt)->frame(Vrui::getApplicationTime());
@@ -1064,13 +1190,12 @@ void KinectViewer::frame(void)
 
 void KinectViewer::display(GLContextData& contextData) const
 	{
-	#if 0
-	/* Evil hack: only draw if on the first window: */
-	if(Vrui::getDisplayState(contextData).window!=Vrui::getWindow(0))
-		return;
-	#endif
-	
+	/* Bail out if the vislet is disabled: */
 	if(!enabled)
+		return;
+	
+	/* Bail out if rendering to the current window is disabled: */
+	if(!windowFlags[Vrui::getDisplayState(contextData).windowIndex])
 		return;
 	
 	if(navigational)

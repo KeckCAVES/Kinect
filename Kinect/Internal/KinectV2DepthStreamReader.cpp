@@ -1,7 +1,7 @@
 /***********************************************************************
 KinectV2DepthStreamReader - Class to extract depth images from raw gated
 IR images read from a stream of USB transfer buffers.
-Copyright (c) 2015-2016 Oliver Kreylos
+Copyright (c) 2015-2017 Oliver Kreylos
 
 This file is part of the Kinect 3D Video Capture Project (Kinect).
 
@@ -62,6 +62,7 @@ void* KinectV2DepthStreamReader::phaseThreadMethod(int exposure)
 		// DEBUGGING
 		// std::cout<<"Phase "<<nextFrameNumber<<':'<<exposure<<": "<<std::flush;
 		// Realtime::TimePointMonotonic start;
+		// std::cout<<"Phase "<<exposure<<": Frame "<<nextFrameNumber<<" at time "<<phaseFrameTimeStamp<<std::endl;
 		
 		/* Process the image triplet: */
 		const IRPixel* i0Ptr=inputBuffers[exposure*3+0];
@@ -189,6 +190,7 @@ void* KinectV2DepthStreamReader::depthThreadMethod(void)
 		// DEBUGGING
 		// std::cout<<nextFrameNumber<<std::endl;
 		// Realtime::TimePointMonotonic start;
+		// std::cout<<"Depth: Frame "<<nextFrameNumber<<" at time "<<nextFrameTimeStamp<<std::endl;
 		
 		const float* pi0Ptr=phaseImages[0];
 		const float* pi1Ptr=phaseImages[1];
@@ -646,7 +648,10 @@ void KinectV2DepthStreamReader::postTransfer(USB::TransferPool::Transfer* newTra
 				*************************************************************/
 				
 				/* Calculate the time stamp for the new frame: */
-				frameTimeStamp=double(now-camera.timeBase);
+				nextFrameTimeStamp=double(now-camera.timeBase);
+				
+				/* Subtract approximate depth image capture latency: */
+				nextFrameTimeStamp-=0.030;
 				
 				frameStart=false;
 				}
@@ -726,6 +731,9 @@ void KinectV2DepthStreamReader::postTransfer(USB::TransferPool::Transfer* newTra
 					/* Assign the frame number: */
 					frameNumber=footer.frameNumber;
 					
+					// DEBUGGING
+					// std::cout<<"Transfer: Frame "<<frameNumber<<" with time stamp "<<nextFrameTimeStamp<<std::endl;
+					
 					/* Check if the image we just extracted is in the right input slot: */
 					if(currentImage!=footer.imageIndex)
 						{
@@ -769,6 +777,7 @@ void KinectV2DepthStreamReader::postTransfer(USB::TransferPool::Transfer* newTra
 						{
 						/* Wake up the respective image processing thread after a complete image triplet is read: */
 						Threads::MutexCond::Lock phaseThreadLock(phaseThreadConds[(currentImage/3)-1]);
+						frameTimeStamp=nextFrameTimeStamp;
 						phaseThreadConds[(currentImage/3)-1].signal();
 						}
 					}

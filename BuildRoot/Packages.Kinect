@@ -1,7 +1,7 @@
 ########################################################################
 # Packages.Kinect - List of Kinect sub-packages that can be included/
 # linked into projects.
-# Copyright (c) 2011-2017 Oliver Kreylos
+# Copyright (c) 2011-2018 Oliver Kreylos
 #
 # This file is part of the WhyTools Build Environment.
 # 
@@ -27,7 +27,7 @@ REALSENSE_DEPENDS =
 REALSENSE_INCLUDE = -I$(REALSENSE_BASEDIR)/$(INCLUDEEXT)
 REALSENSE_LIBDIR  = -L$(REALSENSE_BASEDIR)/lib
 REALSENSE_LIBS    = -lrealsense
-REALSENSE_LINKLIBFLAGS = -Wl,-rpath $(REALSENSE_BASEDIR)/lib
+REALSENSE_LINKLIBFLAGS = -Wl,-rpath $(REALSENSE_BASEDIR)/$(LIBEXT)
 
 ifneq ($(strip $(REALSENSE_BASEDIR)),)
   SYSTEM_HAVE_REALSENSE = 1

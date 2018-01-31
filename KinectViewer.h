@@ -100,6 +100,7 @@ class KinectViewer:public Vrui::Application
 		void showFromCameraCallback(Misc::CallbackData* cbData);
 		#if KINECT_CONFIG_USE_PROJECTOR2
 		void mapTextureCallback(GLMotif::ToggleButton::ValueChangedCallbackData* cbData);
+		void illuminateCallback(GLMotif::ToggleButton::ValueChangedCallbackData* cbData);
 		#endif
 		#if !KINECT_CONFIG_USE_SHADERPROJECTOR
 		void filterDepthFramesCallback(GLMotif::ToggleButton::ValueChangedCallbackData* cbData);

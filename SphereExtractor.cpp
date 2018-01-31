@@ -1,7 +1,7 @@
 /***********************************************************************
 SphereExtractor - Helper class to identify and extract spheres of known
 radii in depth images.
-Copyright (c) 2014-2015 Oliver Kreylos
+Copyright (c) 2014-2017 Oliver Kreylos
 
 This file is part of the Kinect 3D Video Capture Project (Kinect).
 
@@ -29,6 +29,7 @@ Software Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA
 #define GEOMETRY_NONSTANDARD_TEMPLATES
 #include <Geometry/LevenbergMarquardtMinimizer.h>
 #include <Images/ExtractBlobs.h>
+#include <Kinect/LensDistortion.h>
 
 namespace {
 
@@ -41,6 +42,7 @@ typedef Kinect::FrameSource::DepthCorrection::PixelCorrection PixelDepthCorrecti
 typedef Kinect::FrameSource::ColorPixel ColorPixel; // Pixel type for Kinect color images
 typedef Kinect::FrameSource::IntrinsicParameters::PTransform PTransform; // Type for depth unprojection transformations
 typedef PTransform::Scalar Scalar; // Scalar type of depth unprojection transformation
+typedef Geometry::Point<Scalar,2> PixelPos; // Type for lens distortion-corrected depth frame pixel center positions
 typedef PTransform::Point Point; // Point type compatible with depth unprojection transformation
 typedef Geometry::Sphere<Scalar,3> Sphere; // Type for extracted spheres
 
@@ -56,6 +58,7 @@ struct SphereBlob:public Images::Blob<DepthPixel> // Structure to fit spheres to
 		/* Elements: */
 		public:
 		unsigned int depthFrameSize[2];
+		const PixelPos* depthPixels;
 		const PixelDepthCorrection* pixelDepthCorrection;
 		PTransform depthProjection;
 		unsigned int colorFrameSize[2];
@@ -74,7 +77,9 @@ struct SphereBlob:public Images::Blob<DepthPixel> // Structure to fit spheres to
 		:Base(x,y,pixel,creator)
 		{
 		/* Calculate the pixel's depth-corrected depth image space position: */
-		Point dp(Scalar(x),Scalar(y),creator.pixelDepthCorrection!=0?Scalar(creator.pixelDepthCorrection[y*creator.depthFrameSize[0]+x].correct(float(pixel))):Scalar(pixel));
+		unsigned int pixelOffset=y*creator.depthFrameSize[0]+x;
+		const PixelPos& pPos=creator.depthPixels[pixelOffset];
+		Point dp(pPos[0],pPos[1],creator.pixelDepthCorrection!=0?Scalar(creator.pixelDepthCorrection[pixelOffset].correct(float(pixel))):Scalar(pixel));
 		
 		/* Unproject the depth image-space point: */
 		Point cp=creator.depthProjection.transform(dp);
@@ -111,7 +116,9 @@ struct SphereBlob:public Images::Blob<DepthPixel> // Structure to fit spheres to
 		Base::addPixel(x,y,pixel,creator);
 		
 		/* Calculate the pixel's depth-corrected depth image space position: */
-		Point dp(Scalar(x),Scalar(y),creator.pixelDepthCorrection!=0?Scalar(creator.pixelDepthCorrection[y*creator.depthFrameSize[0]+x].correct(float(pixel))):Scalar(pixel));
+		unsigned int pixelOffset=y*creator.depthFrameSize[0]+x;
+		const PixelPos& pPos=creator.depthPixels[pixelOffset];
+		Point dp(pPos[0],pPos[1],creator.pixelDepthCorrection!=0?Scalar(creator.pixelDepthCorrection[pixelOffset].correct(float(pixel))):Scalar(pixel));
 		
 		/* Unproject the depth image-space point: */
 		Point cp=creator.depthProjection.transform(dp);
@@ -330,15 +337,9 @@ void* SphereExtractor::frameProcessingThreadMethod(void)
 	SphereBlob::Creator blobCreator;
 	for(int i=0;i<2;++i)
 		blobCreator.depthFrameSize[i]=depthFrameSize[i];
+	blobCreator.depthPixels=depthPixels;
 	blobCreator.pixelDepthCorrection=dcBuffer;
-	
-	/* Shift the depth projection matrix by half a pixel in both directions to use integer pixel coordinates: */
 	blobCreator.depthProjection=depthProjection;
-	PTransform shift=PTransform::identity;
-	PTransform::Matrix& shm=shift.getMatrix();
-	shm(0,3)=Scalar(0.5);
-	shm(1,3)=Scalar(0.5);
-	blobCreator.depthProjection*=shift;
 	
 	/* Calculate a direct transformation matrix from depth image space to color image space: */
 	for(int i=0;i<2;++i)
@@ -348,7 +349,6 @@ void* SphereExtractor::frameProcessingThreadMethod(void)
 	cdpm(0,0)=Scalar(colorFrameSize[0]);
 	cdpm(1,1)=Scalar(colorFrameSize[1]);
 	blobCreator.colorDepthProjection*=colorProjection;
-	blobCreator.colorDepthProjection*=shift;
 	
 	while(true)
 		{
@@ -435,7 +435,7 @@ void* SphereExtractor::frameProcessingThreadMethod(void)
 	}
 
 SphereExtractor::SphereExtractor(Kinect::FrameSource& frameSource,const SphereExtractor::PixelDepthCorrection* sDcBuffer)
-	:dcBuffer(sDcBuffer),depthProjection(frameSource.getIntrinsicParameters().depthProjection),colorProjection(frameSource.getIntrinsicParameters().colorProjection),
+	:depthPixels(0),dcBuffer(sDcBuffer),depthProjection(frameSource.getIntrinsicParameters().depthProjection),colorProjection(frameSource.getIntrinsicParameters().colorProjection),
 	 sphereRadius(0),
 	 minWhite(192),maxSpread(32),minBlobSize(10),radiusTolerance(0.2),maxResidual(0.1),
 	 inDepthFrameVersion(0),
@@ -447,12 +447,40 @@ SphereExtractor::SphereExtractor(Kinect::FrameSource& frameSource,const SphereEx
 		depthFrameSize[i]=frameSource.getActualFrameSize(Kinect::FrameSource::DEPTH)[i];
 		colorFrameSize[i]=frameSource.getActualFrameSize(Kinect::FrameSource::COLOR)[i];
 		}
+	
+	/* Initialize the depth frame pixel buffer: */
+	depthPixels=new PixelPos[depthFrameSize[1]*depthFrameSize[0]];
+	
+	/* Check if the depth camera requires lens distortion correction: */
+	const Kinect::LensDistortion& dld=frameSource.getIntrinsicParameters().depthLensDistortion;
+	if(!dld.isIdentity())
+		{
+		/* Create a grid of lens distortion-corrected pixel positions: */
+		PixelPos* dpPtr=depthPixels;
+		for(unsigned int y=0;y<depthFrameSize[1];++y)
+			for(unsigned int x=0;x<depthFrameSize[0];++x,++dpPtr)
+				{
+				/* Undistort the grid point in pixel space: */
+				*dpPtr=PixelPos(dld.undistortPixel(x,y));
+				}
+		}
+	else
+		{
+		/* Create a regular grid of pixel positions: */
+		PixelPos* dpPtr=depthPixels;
+		for(unsigned int y=0;y<depthFrameSize[1];++y)
+			for(unsigned int x=0;x<depthFrameSize[0];++x,++dpPtr)
+				*dpPtr=PixelPos(Scalar(x)+Scalar(0.5),Scalar(y)+Scalar(0.5));
+		}
 	}
 
 SphereExtractor::~SphereExtractor(void)
 	{
 	/* Stop background processing, just in case: */
 	stopStreaming();
+	
+	/* Clean up: */
+	delete[] depthPixels;
 	}
 
 void SphereExtractor::setMaxBlobMergeDist(int newMaxBlobMergeDist)
