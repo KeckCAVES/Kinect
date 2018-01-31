@@ -232,28 +232,30 @@ void KinectServer::newFrameCallback(void)
 			#endif
 			
 			/* Send the camera's new depth frame to all connected clients: */
-			unsigned int numClients=clients.size();
-			for(unsigned int i=0;i<numClients;++i)
-				if(clients[i]->streaming)
+			for(ClientStateList::iterator csIt=clients.begin();csIt!=clients.end();++csIt)
+				if((*csIt)->streaming)
 					{
 					try
 						{
 						/* Write the meta frame index and frame identifier: */
-						clients[i]->pipe.write<Misc::UInt32>(metaFrameIndex);
-						clients[i]->pipe.write<Misc::UInt32>(frameIndex);
+						(*csIt)->pipe.write<Misc::UInt32>(metaFrameIndex);
+						(*csIt)->pipe.write<Misc::UInt32>(frameIndex);
 						
 						/* Write the compressed depth frame: */
-						cameraStates[cameraIndex]->depthFrames.getLockedValue().data.writeToSink(clients[i]->pipe);
-						clients[i]->pipe.flush();
+						cameraStates[cameraIndex]->depthFrames.getLockedValue().data.writeToSink((*csIt)->pipe);
+						(*csIt)->pipe.flush();
 						}
 					catch(std::runtime_error err)
 						{
 						#ifdef VERBOSE
-						std::cout<<"KinectServer: Disconnecting client "<<clients[i]->clientName<<" due to exception "<<err.what()<<std::endl;
+						std::cout<<"KinectServer: Disconnecting client "<<(*csIt)->clientName<<" due to exception "<<err.what()<<std::endl;
 						#endif
-						disconnectClient(clients[i],false,true);
-						--numClients;
-						--i;
+						disconnectClient(*csIt,true,false);
+						
+						/* Remove the client from the list by moving the last element forward: */
+						*csIt=clients.back();
+						--csIt;
+						clients.pop_back();
 						}
 					}
 			
@@ -272,28 +274,30 @@ void KinectServer::newFrameCallback(void)
 			#endif
 			
 			/* Send the camera's new color frame to all connected clients: */
-			unsigned int numClients=clients.size();
-			for(unsigned int i=0;i<numClients;++i)
-				if(clients[i]->streaming)
+			for(ClientStateList::iterator csIt=clients.begin();csIt!=clients.end();++csIt)
+				if((*csIt)->streaming)
 					{
 					try
 						{
 						/* Write the meta frame index and frame identifier: */
-						clients[i]->pipe.write<Misc::UInt32>(metaFrameIndex);
-						clients[i]->pipe.write<Misc::UInt32>(frameIndex);
+						(*csIt)->pipe.write<Misc::UInt32>(metaFrameIndex);
+						(*csIt)->pipe.write<Misc::UInt32>(frameIndex);
 						
 						/* Write the compressed color frame: */
-						cameraStates[cameraIndex]->colorFrames.getLockedValue().data.writeToSink(clients[i]->pipe);
-						clients[i]->pipe.flush();
+						cameraStates[cameraIndex]->colorFrames.getLockedValue().data.writeToSink((*csIt)->pipe);
+						(*csIt)->pipe.flush();
 						}
 					catch(std::runtime_error err)
 						{
 						#ifdef VERBOSE
-						std::cout<<"KinectServer: Disconnecting client "<<clients[i]->clientName<<" due to exception "<<err.what()<<std::endl;
+						std::cout<<"KinectServer: Disconnecting client "<<(*csIt)->clientName<<" due to exception "<<err.what()<<std::endl;
 						#endif
-						disconnectClient(clients[i],false,true);
-						--numClients;
-						--i;
+						disconnectClient(*csIt,true,false);
+						
+						/* Remove the client from the list by moving the last element forward: */
+						*csIt=clients.back();
+						--csIt;
+						clients.pop_back();
 						}
 					}
 			

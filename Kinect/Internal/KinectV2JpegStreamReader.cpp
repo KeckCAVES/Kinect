@@ -1,7 +1,7 @@
 /***********************************************************************
 KinectV2JpegStreamReader - Class to read JPEG-compressed RGB images
 asynchronously from a stream of USB transfer buffers.
-Copyright (c) 2014-2016 Oliver Kreylos
+Copyright (c) 2014-2017 Oliver Kreylos
 
 This file is part of the Kinect 3D Video Capture Project (Kinect).
 
@@ -189,6 +189,9 @@ void* KinectV2JpegStreamReader::decompressionThreadMethod(void)
 		
 		/* Time-stamp the new frame: */
 		decompressedFrame.timeStamp=double(now-camera.timeBase);
+		
+		/* Subtract approximate color image capture latency: */
+		decompressedFrame.timeStamp-=0.090;
 		
 		/* Create row pointers to flip the image during reading: */
 		if(imageHeight!=decompressedFrame.getSize(1))

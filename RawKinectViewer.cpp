@@ -152,27 +152,19 @@ Vrui::Point RawKinectViewer::calcImagePoint(const Vrui::Ray& physicalRay) const
 
 RawKinectViewer::CPoint RawKinectViewer::calcDepthImagePoint(const Vrui::Point& imagePoint) const
 	{
-	/* Apply lens distortion correction: */
-	CPoint diPoint;
-	if(intrinsicParameters.depthLensDistortion.isIdentity())
-		diPoint=CPoint(CPoint::Scalar(imagePoint[0])+depthImageOffset,CPoint::Scalar(imagePoint[1]),CPoint::Scalar(0));
-	else
+	/* Offset the image point to depth image space: */
+	CPoint dip=CPoint(CPoint::Scalar(imagePoint[0])+depthImageOffset,CPoint::Scalar(imagePoint[1]),CPoint::Scalar(0));
+	
+	/* Apply lens distortion correction if necessary: */
+	if(!intrinsicParameters.depthLensDistortion.isIdentity())
 		{
-		/* Transform the image point to undistorted depth image space: */
-		Kinect::LensDistortion::Point up;
-		up[1]=(imagePoint[1]-cy)/fy;
-		up[0]=(imagePoint[0]+depthImageOffset-cx-sk*up[1])/fx;
-		
-		/* Distort the image point: */
-		Kinect::LensDistortion::Point dp=intrinsicParameters.depthLensDistortion.distort(up);
-		
-		/* Transform the distorted point back to depth image pixel space: */
-		diPoint[0]=CPoint::Scalar(dp[0]*fx+dp[1]*sk+cx);
-		diPoint[1]=CPoint::Scalar(dp[1]*fy+cy);
-		diPoint[2]=CPoint::Scalar(0);
+		/* Distort the depth image point: */
+		Kinect::LensDistortion::Point ddip=intrinsicParameters.depthLensDistortion.distortPixel(Kinect::LensDistortion::Point(Kinect::LensDistortion::Scalar(dip[0]),Kinect::LensDistortion::Scalar(dip[1])));
+		dip[0]=CPoint::Scalar(ddip[0]);
+		dip[1]=CPoint::Scalar(ddip[1]);
 		}
 	
-	return diPoint;
+	return dip;
 	}
 
 float RawKinectViewer::getDepthImagePixel(unsigned int x,unsigned int y) const
@@ -207,63 +199,45 @@ float RawKinectViewer::getDepthImagePixel(unsigned int x,unsigned int y) const
 
 RawKinectViewer::CPoint RawKinectViewer::getDepthImagePoint(unsigned int x,unsigned int y) const
 	{
-	CPoint result;
+	/* Convert pixel index to depth image space with the given pixel's depth value: */
+	CPoint dip(CPoint::Scalar(x)+CPoint::Scalar(0.5),CPoint::Scalar(y)+CPoint::Scalar(0.5),CPoint::Scalar(getDepthImagePixel(x,y)));
 	
-	if(intrinsicParameters.depthLensDistortion.isIdentity())
+	/* Apply lens distortion correction if necessary: */
+	if(!intrinsicParameters.depthLensDistortion.isIdentity())
 		{
-		result[0]=CPoint::Scalar(x)+CPoint::Scalar(0.5);
-		result[1]=CPoint::Scalar(y)+CPoint::Scalar(0.5)-depthImageOffset;
-		}
-	else
-		{
-		/* Convert the pixel position to distorted normalized projection space: */
-		Kinect::LensDistortion::Point dp;
-		dp[1]=(double(y)+0.5-cy)/fy;
-		dp[0]=(double(x)+0.5-cx-sk*dp[1])/fx;
-		
-		/* Undistort the image point: */
-		Kinect::LensDistortion::Point up=intrinsicParameters.depthLensDistortion.undistort(dp);
-		
-		/* Transform the undistorted point back to depth image pixel space: */
-		result[0]=CPoint::Scalar(up[0]*fx+up[1]*sk+cx-depthImageOffset);
-		result[1]=CPoint::Scalar(up[1]*fy+cy);
+		/* Undistort the depth image point: */
+		Kinect::LensDistortion::Point udip=intrinsicParameters.depthLensDistortion.undistortPixel(Kinect::LensDistortion::Point(Kinect::LensDistortion::Scalar(dip[0]),Kinect::LensDistortion::Scalar(dip[1])));
+		dip[0]=CPoint::Scalar(udip[0]);
+		dip[1]=CPoint::Scalar(udip[1]);
 		}
 	
-	/* Get the depth value of the given pixel: */
-	result[2]=CPoint::Scalar(getDepthImagePixel(x,y));
+	/* Transform the point from depth image space to image-plane space: */
+	dip[0]-=depthImageOffset;
 	
-	return result;
+	return dip;
 	}
 
 RawKinectViewer::CPoint RawKinectViewer::getDepthImagePoint(const Vrui::Point& imagePoint) const
 	{
 	/* Transform the image-plane point to depth image space: */
-	CPoint diPoint;
-	if(intrinsicParameters.depthLensDistortion.isIdentity())
-		diPoint=CPoint(CPoint::Scalar(imagePoint[0])+depthImageOffset,CPoint::Scalar(imagePoint[1]),CPoint::Scalar(0));
-	else
+	CPoint dip=CPoint(CPoint::Scalar(imagePoint[0])+depthImageOffset,CPoint::Scalar(imagePoint[1]),CPoint::Scalar(0));
+	
+	/* Apply lens distortion correction if necessary: */
+	if(!intrinsicParameters.depthLensDistortion.isIdentity())
 		{
-		/* Transform the image point to undistorted depth image space: */
-		Kinect::LensDistortion::Point up;
-		up[1]=(imagePoint[1]-cy)/fy;
-		up[0]=(imagePoint[0]+depthImageOffset-cx-sk*up[1])/fx;
-		
-		/* Distort the image point: */
-		Kinect::LensDistortion::Point dp=intrinsicParameters.depthLensDistortion.distort(up);
-		
-		/* Transform the distorted point back to depth image pixel space: */
-		diPoint[0]=CPoint::Scalar(dp[0]*fx+dp[1]*sk+cx);
-		diPoint[1]=CPoint::Scalar(dp[1]*fy+cy);
-		diPoint[2]=CPoint::Scalar(0);
+		/* Distort the depth image point: */
+		Kinect::LensDistortion::Point ddip=intrinsicParameters.depthLensDistortion.distortPixel(Kinect::LensDistortion::Point(Kinect::LensDistortion::Scalar(dip[0]),Kinect::LensDistortion::Scalar(dip[1])));
+		dip[0]=CPoint::Scalar(ddip[0]);
+		dip[1]=CPoint::Scalar(ddip[1]);
 		}
 	
 	/* Check if the depth image point is inside the depth image: */
-	if(diPoint[0]>=CPoint::Scalar(0)&&diPoint[0]<CPoint::Scalar(depthFrameSize[0])&&
-	   diPoint[1]>=CPoint::Scalar(0)&&diPoint[1]<CPoint::Scalar(depthFrameSize[1]))
+	if(dip[0]>=CPoint::Scalar(0)&&dip[0]<CPoint::Scalar(depthFrameSize[0])&&
+	   dip[1]>=CPoint::Scalar(0)&&dip[1]<CPoint::Scalar(depthFrameSize[1]))
 		{
 		/* Calculate the depth image point's pixel coordinates: */
-		unsigned int diX=(unsigned int)diPoint[0];
-		unsigned int diY=(unsigned int)diPoint[1];
+		unsigned int diX=(unsigned int)dip[0];
+		unsigned int diY=(unsigned int)dip[1];
 		
 		/* Create the result point in undistorted depth image space: */
 		CPoint result;
@@ -274,7 +248,10 @@ RawKinectViewer::CPoint RawKinectViewer::getDepthImagePoint(const Vrui::Point& i
 		return result;
 		}
 	else
+		{
+		/* Return some invalid point: */
 		return CPoint(0,0,-1);
+		}
 	}
 
 void RawKinectViewer::registerColorCallback(RawKinectViewer::FrameStreamingCallback* newCallback)
@@ -486,12 +463,16 @@ void RawKinectViewer::requestAverageFrame(RawKinectViewer::AverageFrameReadyCall
 
 void RawKinectViewer::locatorButtonPressCallback(Vrui::LocatorTool::ButtonPressCallbackData* cbData)
 	{
-	Vrui::Point pos=cbData->currentTransformation.getOrigin();
-	if(pos[0]>=-depthFrameSize[0]&&pos[0]<0.0&&pos[1]>=0.0&&pos[1]<depthFrameSize[1])
+	/* Transform the tools' origin to distorted depth image space: */
+	CPoint dip=calcDepthImagePoint(cbData->currentTransformation.getOrigin());
+	
+	/* Check if the depth image point is inside the depth image: */
+	if(dip[0]>=CPoint::Scalar(0)&&dip[0]<CPoint::Scalar(depthFrameSize[0])&&
+	   dip[1]>=CPoint::Scalar(0)&&dip[1]<CPoint::Scalar(depthFrameSize[1]))
 		{
-		/* Select the pixel under the locator: */
-		selectedPixel[0]=int(pos[0]+double(depthFrameSize[0]));
-		selectedPixel[1]=int(pos[1]);
+		/* Select the pixel under the locator for tracking: */
+		selectedPixel[0]=int(dip[0]);
+		selectedPixel[1]=int(dip[1]);
 		
 		/* Start the selected pixel's EKG: */
 		selectedPixelCurrentIndex=0;
@@ -728,8 +709,8 @@ GLMotif::PopupWindow* RawKinectViewer::createAverageDepthFrameDialog(void)
 	return averageDepthFrameDialogPopup;
 	}
 
-RawKinectViewer::RawKinectViewer(int& argc,char**& argv,char**& appDefaults)
-	:Vrui::Application(argc,argv,appDefaults),
+RawKinectViewer::RawKinectViewer(int& argc,char**& argv)
+	:Vrui::Application(argc,argv),
 	 camera(0),
 	 colorFrameSize(0),
 	 backgroundCaptureNumFrames(0),colorBackground(0),
@@ -870,15 +851,6 @@ RawKinectViewer::RawKinectViewer(int& argc,char**& argv,char**& appDefaults)
 	
 	/* Get the camera's intrinsic parameters: */
 	intrinsicParameters=camera->getIntrinsicParameters();
-	
-	/* Derive depth camera's 2D intrinsic parameters for lens distortion correction: */
-	const IntrinsicParameters::PTransform::Matrix& dpMat=intrinsicParameters.depthProjection.getMatrix();
-	double fxfy=-dpMat(2,3);
-	fy=fxfy/dpMat(1,1);
-	cy=-dpMat(1,3)*fy/fxfy;
-	fx=fxfy/dpMat(0,0);
-	sk=-dpMat(0,1)*fx*fy/fxfy;
-	cx=(-dpMat(0,3)/fxfy+sk*cy/(fx*fy))*fx;
 	
 	/* Calculate the depth image offset: */
 	if(intrinsicParameters.depthLensDistortion.isIdentity())
@@ -1132,23 +1104,11 @@ void RawKinectViewer::display(GLContextData& contextData) const
 			glBegin(GL_QUAD_STRIP);
 			for(unsigned int x=0;x<=gridSizeX;++x)
 				{
-				/* Calculate the distorted pixel position in normalized camera space: */
-				Kinect::LensDistortion::Point dp0;
-				dp0[0]=(double(x)*double(depthFrameSize[0])/double(gridSizeX)-cx)/fx;
-				dp0[1]=(double(y-1)*double(depthFrameSize[1])/double(gridSizeY)-cy)/fy;
-				Kinect::LensDistortion::Point dp1;
-				dp1[0]=(double(x)*double(depthFrameSize[0])/double(gridSizeX)-cx)/fx;
-				dp1[1]=(double(y)*double(depthFrameSize[1])/double(gridSizeY)-cy)/fy;
-				
-				/* Calculate the undistorted pixel position in normalized camera space: */
-				Kinect::LensDistortion::Point up0=intrinsicParameters.depthLensDistortion.undistort(dp0);
-				Kinect::LensDistortion::Point up1=intrinsicParameters.depthLensDistortion.undistort(dp1);
-				
-				/* Calculate the undistorted pixel position in pixel space: */
-				up0[0]=fx*up0[0]+cx;
-				up0[1]=fy*up0[1]+cy;
-				up1[0]=fx*up1[0]+cx;
-				up1[1]=fy*up1[1]+cy;
+				/* Calculate the quad vertex positions in distortion-corrected depth image space: */
+				Kinect::LensDistortion::Point dp0(double(x)*double(depthFrameSize[0])/double(gridSizeX),double(y-1)*double(depthFrameSize[1])/double(gridSizeY));
+				Kinect::LensDistortion::Point up0=intrinsicParameters.depthLensDistortion.undistortPixel(dp0);
+				Kinect::LensDistortion::Point dp1(double(x)*double(depthFrameSize[0])/double(gridSizeX),double(y)*double(depthFrameSize[1])/double(gridSizeY));
+				Kinect::LensDistortion::Point up1=intrinsicParameters.depthLensDistortion.undistortPixel(dp1);
 				
 				/* Draw the next quad: */
 				glTexCoord2f(float(x)*float(depthFrameSize[0])/float(gridSizeX*float(dataItem->depthTextureSize[0])),float(y)*float(depthFrameSize[1])/float(gridSizeY*float(dataItem->depthTextureSize[1])));
@@ -1222,14 +1182,13 @@ void RawKinectViewer::display(GLContextData& contextData) const
 		glDisable(GL_TEXTURE_2D);
 		glDisable(GL_LIGHTING);
 		
+		CPoint dip=getDepthImagePoint(selectedPixel[0],selectedPixel[1]);
 		glBegin(GL_LINES);
 		glColor3f(0.0f,1.0f,0.0f);
-		GLfloat spx=GLfloat(selectedPixel[0])-GLfloat(depthFrameSize[0])+0.5f;
-		GLfloat spy=GLfloat(selectedPixel[1])+0.5f;
-		glVertex3f(spx-5.0f,spy,0.1f);
-		glVertex3f(spx+5.0f,spy,0.1f);
-		glVertex3f(spx,spy-5.0f,0.1f);
-		glVertex3f(spx,spy+5.0f,0.1f);
+		glVertex3f(dip[0]-5.0f,dip[1],0.1f);
+		glVertex3f(dip[0]+5.0f,dip[1],0.1f);
+		glVertex3f(dip[0],dip[1]-5.0f,0.1f);
+		glVertex3f(dip[0],dip[1]+5.0f,0.1f);
 		glEnd();
 		
 		/* Draw the selected pixel's EKG: */
@@ -1292,19 +1251,4 @@ void RawKinectViewer::initContext(GLContextData& contextData) const
 	glBindTexture(GL_TEXTURE_2D,0);
 	}
 
-int main(int argc,char* argv[])
-	{
-	try
-		{
-		char** appDefaults=0;
-		RawKinectViewer app(argc,argv,appDefaults);
-		app.run();
-		}
-	catch(std::runtime_error err)
-		{
-		std::cerr<<"Caught exception "<<err.what()<<std::endl;
-		return 1;
-		}
-	
-	return 0;
-	}
+VRUI_APPLICATION_RUN(RawKinectViewer)

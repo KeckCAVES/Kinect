@@ -95,6 +95,9 @@ MultiplexedFrameSource::Stream::Stream(MultiplexedFrameSource* sOwner,unsigned i
 	ips.depthProjection=Misc::Marshaller<IntrinsicParameters::PTransform>::read(source);
 	eps=Misc::Marshaller<ExtrinsicParameters>::read(source);
 	
+	/* Apply projection parameters to the depth lens distortion corrector: */
+	ips.depthLensDistortion.setProjection(ips.depthProjection);
+	
 	/* Create the frame readers: */
 	owner->colorFrameReaders[index]=new ColorFrameReader(source);
 	if(depthIsLossy)

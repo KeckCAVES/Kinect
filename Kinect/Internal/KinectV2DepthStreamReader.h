@@ -68,11 +68,12 @@ class KinectV2DepthStreamReader
 	IRPixel* inputBufferBlock; // Block of memory to hold the 10 raw gated IR images comprising a depth frame
 	IRPixel* inputBuffers[10]; // Pointer to the individual IR images in the memory block
 	bool frameStart; // Flag to indicate the first USB transfer packet of a new depth frame
-	double frameTimeStamp; // Time stamp for the currently processed frame
+	double nextFrameTimeStamp; // Time stamp of the frame that is currently being received over USB
 	unsigned int frameNumber; // Index of currently processed depth frame, as assigned by the camera
 	unsigned int currentImage; // Index of the raw gated IR image that is currently being received
 	unsigned int nextRow; // Next pixel row in the current frame to be received
 	bool frameValid; // Flag to keep track of errors during frame processing
+	double frameTimeStamp; // Time stamp for the frame that was just received over USB
 	RawImageReadyCallback* rawImageReadyCallback; // Function called whenever a raw range-gated IR image has been decompressed
 	float* trigonometryTables[3]; // Three arrays of coefficients to convert a range-gated IR image triple into a 2D phase vector
 	float* arctanTable; // Table to calculate phase angles from orthogonal vectors

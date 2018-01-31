@@ -2,7 +2,7 @@
 Projector2 - Class to project a depth frame captured from a 3D camera
 back into calibrated 3D camera space, and texture-map it with a matching
 color frame, using a combination of shader and CPU work.
-Copyright (c) 2016 Oliver Kreylos
+Copyright (c) 2016-2017 Oliver Kreylos
 
 This file is part of the Kinect 3D Video Capture Project (Kinect).
 
@@ -44,6 +44,7 @@ namespace Misc {
 template <class ParameterParam>
 class FunctionCall;
 }
+class GLLightTracker;
 
 namespace Kinect {
 
@@ -69,6 +70,8 @@ class Projector2:public GLObject
 		GLuint colorTextureId; // ID of texture object holding the current color frame
 		unsigned int colorFrameVersion; // Version number of color currently in texture object
 		GLShader renderingShader; // The facade rendering shader
+		unsigned int renderingShaderSettingsVersion; // Version number of settings built into the current rendering shader
+		unsigned int lightStateVersion; // Version number of OpenGL lighting state
 		int renderingShaderUniforms[6]; // The uniform variable locations of the facade rendering shader
 		
 		/* Constructors and destructors: */
@@ -93,6 +96,8 @@ class Projector2:public GLObject
 	mutable FrameSource::DepthPixel* filteredDepthFrame; // Temporally filtered depth frame, same version number as current depth frame
 	mutable GLfloat* spatialFilterBuffer; // Intermediate buffer to filter depth frames spatially
 	bool mapTexture; // Flag whether to map the color texture onto the 3D geometry, or render as raw lit surfaces
+	bool illuminate; // Flag whether to illuminate the 3D geometry from all active light sources
+	unsigned int renderingShaderSettingsVersion; // Version number of rendering shader settings
 	int quadCaseVertexOffsets[16][6]; // Offsets of triangle vertices to be used for each quad corner validity case
 	FrameSource::DepthPixel triangleDepthRange; // Maximum depth distance between a triangle's vertices
 	Threads::Thread depthFrameProcessingThread; // Background thread to process incoming depth frames for rendering
@@ -104,6 +109,7 @@ class Projector2:public GLObject
 	
 	/* Private methods: */
 	void* depthFrameProcessingThreadMethod(void); // Thread method for background depth frame processing
+	void buildRenderingShader(DataItem* dataItem,GLLightTracker* lightTracker) const; // Builds the rendering shader based on current settings or OpenGL state
 	
 	/* Constructors and destructors: */
 	public:
@@ -153,6 +159,7 @@ class Projector2:public GLObject
 		}
 	void setFilterDepthFrames(bool newFilterDepthFrames,bool newLowpassDepthFrames); // Enables or disables temporal and spatial depth frame filtering
 	void setMapTexture(bool newMapTexture); // Sets the texture mapping flag
+	void setIlluminate(bool newIlluminate); // Sets the illumination flag
 	FrameSource::DepthPixel getTriangleDepthRange(void) const // Returns the maximum depth range for generated triangles
 		{
 		return triangleDepthRange;

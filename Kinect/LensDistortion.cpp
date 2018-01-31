@@ -1,6 +1,6 @@
 /***********************************************************************
 LensDistortion - Lens distortion formula used by Kinect v2.
-Copyright (c) 2015 Oliver Kreylos
+Copyright (c) 2015-2017 Oliver Kreylos
 
 This file is part of the Kinect 3D Video Capture Project (Kinect).
 
@@ -25,6 +25,7 @@ Software Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA
 #include <Misc/SizedTypes.h>
 #include <IO/File.h>
 #include <Math/Math.h>
+#include <Geometry/ProjectiveTransformation.h>
 
 namespace Kinect {
 
@@ -34,7 +35,8 @@ Methods of class LensDistortion:
 
 LensDistortion::LensDistortion(void)
 	:center(Point::origin),
-	 undistortMaxError(1.0e-32),undistortMaxSteps(20) // These are ridiculous values
+	 undistortMaxError(1.0e-32),undistortMaxSteps(20), // These are ridiculous values
+	 fx(1),sk(0),cx(0),fy(1),cy(0)
 	{
 	for(int i=0;i<3;++i)
 		kappas[i]=Scalar(0);
@@ -43,7 +45,8 @@ LensDistortion::LensDistortion(void)
 	}
 
 LensDistortion::LensDistortion(IO::File& file)
-	:undistortMaxError(1.0e-32),undistortMaxSteps(20) // These are ridiculous values
+	:undistortMaxError(1.0e-32),undistortMaxSteps(20), // These are ridiculous values
+	 fx(1),sk(0),cx(0),fy(1),cy(0)
 	{
 	/* Read lens distortion correction parameters from file: */
 	read(file);
@@ -104,6 +107,20 @@ void LensDistortion::read(IO::File& file)
 	/* Read tangential distortion coefficients: */
 	for(int i=0;i<2;++i)
 		rhos[i]=Scalar(file.read<Misc::Float64>());
+	}
+
+void LensDistortion::setProjection(Geometry::ProjectiveTransformation<LensDistortion::Scalar,3>& unprojection)
+	{
+	/* Access the depth unprojection's matrix: */
+	const Geometry::ProjectiveTransformation<LensDistortion::Scalar,3>::Matrix& upMat=unprojection.getMatrix();
+	
+	/* Calculate 2D projection parameters: */
+	Scalar fxfy=-upMat(2,3);
+	fy=fxfy/upMat(1,1);
+	cy=-upMat(1,3)*fy/fxfy;
+	fx=fxfy/upMat(0,0);
+	sk=-upMat(0,1)*fx*fy/fxfy;
+	cx=(-upMat(0,3)/fxfy+sk*cy/(fx*fy))*fx;
 	}
 
 LensDistortion::Scalar LensDistortion::distortScale(const LensDistortion::Point& undistorted) const

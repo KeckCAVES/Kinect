@@ -2,7 +2,7 @@
 ShaderProjector - Class to project a depth frame captured from a Kinect
 camera back into calibrated 3D camera space, and texture-map it with a
 matching color frame using a custom shader to perform most processing on
-the GPU. Copyright (c) 2013-2015 Oliver Kreylos
+the GPU. Copyright (c) 2013-2017 Oliver Kreylos
 
 This file is part of the Kinect 3D Video Capture Project (Kinect).
 
@@ -236,30 +236,14 @@ void ShaderProjector::initContext(GLContextData& contextData) const
 	/* Check if the depth camera requires lens distortion correction: */
 	if(!depthLensDistortion.isIdentity())
 		{
-		/* Extract the depth camera's 2D intrinsic parameters from the depth unprojection matrix: */
-		const PTransform::Matrix& dpMat=depthProjection.getMatrix();
-		double fxfy=-dpMat(2,3);
-		double fy=fxfy/dpMat(1,1);
-		double cy=-dpMat(1,3)*fy/fxfy;
-		double fx=fxfy/dpMat(0,0);
-		double sk=-dpMat(0,1)*fx*fy/fxfy;
-		double cx=(-dpMat(0,3)/fxfy+sk*cy/(fx*fy))*fx;
-		
 		/* Create a grid of undistorted pixel positions: */
 		for(unsigned int y=0;y<depthSize[1];++y)
 			for(unsigned int x=0;x<depthSize[0];++x,++vPtr)
 				{
-				/* Calculate the distorted pixel position in normalized camera space: */
-				LensDistortion::Point dp;
-				dp[1]=(double(y)+0.5-cy)/fy;
-				dp[0]=(double(x)+0.5-cx-sk*dp[1])/fx;
-				
-				/* Calculate the undistorted pixel position in normalized camera space: */
-				LensDistortion::Point up=depthLensDistortion.undistort(dp);
-				
 				/* Calculate the undistorted pixel position in pixel space: */
-				vPtr->position[0]=GLfloat(fx*up[0]+sk*up[1]+cx);
-				vPtr->position[1]=GLfloat(fy*up[1]+cy);
+				LensDistortion::Point up=depthLensDistortion.undistortPixel(x,y);
+				vPtr->position[0]=GLfloat(up[0]);
+				vPtr->position[1]=GLfloat(up[1]);
 				vPtr->position[2]=0.0f;
 				}
 		}

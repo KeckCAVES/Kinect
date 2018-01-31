@@ -1,7 +1,7 @@
 /***********************************************************************
 RawKinectViewer - Simple application to view color and depth images
 captured from a Kinect device.
-Copyright (c) 2010-2016 Oliver Kreylos
+Copyright (c) 2010-2017 Oliver Kreylos
 
 This file is part of the Kinect 3D Video Capture Project (Kinect).
 
@@ -98,7 +98,6 @@ class RawKinectViewer:public Vrui::Application,public GLObject
 	const unsigned int* depthFrameSize; // Size of depth frames in pixels
 	PixelCorrection* depthCorrection; // Buffer containing per-pixel depth correction coefficients
 	IntrinsicParameters intrinsicParameters; // Intrinsic parameters of the Kinect camera
-	double fx,fy,sk,cx,cy; // Depth camera's 2D intrinsic parameters
 	double depthImageOffset; // Offset to display depth image
 	float depthValueRange[2]; // Range of depth values mapped to the depth color map
 	float depthPlaneDistMax; // Range of depth plane color map around depth plane
@@ -124,9 +123,9 @@ class RawKinectViewer:public Vrui::Application,public GLObject
 	/* Private methods: */
 	void mapDepth(unsigned int x,unsigned int y,float depth,GLubyte* colorPtr) const; // Maps a depth value to a color
 	Vrui::Point calcImagePoint(const Vrui::Ray& physicalRay) const; // Returns image-space point at which the given physical-space ray intersects the image plane
-	CPoint calcDepthImagePoint(const Vrui::Point& imagePoint) const; // Returns the position of the given image-space point in depth image pixel space
+	CPoint calcDepthImagePoint(const Vrui::Point& imagePoint) const; // Returns the position of the given image-space point in distorted depth image pixel space
 	float getDepthImagePixel(unsigned int x,unsigned int y) const; // Returns the average or current depth value of the given depth image pixel
-	CPoint getDepthImagePoint(unsigned int x,unsigned int y) const; // Returns the image-space position of the given depth image pixel
+	CPoint getDepthImagePoint(unsigned int x,unsigned int y) const; // Returns the distortion-corrected image-space position of the given depth image pixel
 	CPoint getDepthImagePoint(const Vrui::Point& imagePoint) const; // Returns the image-space point at the given image-plane position
 	void registerColorCallback(FrameStreamingCallback* newCallback); // Registers a callback to be called when a new color frame arrives; does not adopt callback object
 	void unregisterColorCallback(FrameStreamingCallback* callback); // Unregisters a color streaming callback
@@ -148,7 +147,7 @@ class RawKinectViewer:public Vrui::Application,public GLObject
 	
 	/* Constructors and destructors: */
 	public:
-	RawKinectViewer(int& argc,char**& argv,char**& appDefaults);
+	RawKinectViewer(int& argc,char**& argv);
 	virtual ~RawKinectViewer(void);
 	
 	/* Methods from Vrui::Application: */

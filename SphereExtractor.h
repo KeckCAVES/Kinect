@@ -1,7 +1,7 @@
 /***********************************************************************
 SphereExtractor - Helper class to identify and extract spheres of known
 radii in depth images.
-Copyright (c) 2014-2015 Oliver Kreylos
+Copyright (c) 2014-2017 Oliver Kreylos
 
 This file is part of the Kinect 3D Video Capture Project (Kinect).
 
@@ -29,6 +29,7 @@ Software Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA
 #include <Threads/MutexCond.h>
 #include <Threads/Thread.h>
 #include <Threads/TripleBuffer.h>
+#include <Geometry/Point.h>
 #include <Geometry/ProjectiveTransformation.h>
 #include <Geometry/Sphere.h>
 #include <Kinect/FrameBuffer.h>
@@ -50,6 +51,7 @@ class SphereExtractor
 	typedef Kinect::FrameSource::IntrinsicParameters::PTransform PTransform;
 	public:
 	typedef PTransform::Scalar Scalar;
+	typedef Geometry::Point<Scalar,2> PixelPos; // Type for lens distortion-corrected depth frame pixel center positions
 	typedef Geometry::Sphere<Scalar,3> Sphere;
 	typedef std::vector<Sphere> SphereList;
 	typedef Misc::FunctionCall<const SphereList&> StreamingCallback; // Function call type for streaming callbacks
@@ -57,8 +59,9 @@ class SphereExtractor
 	/* Elements: */
 	private:
 	unsigned int depthFrameSize[2]; // Width and height of source's depth frames
+	PixelPos* depthPixels; // 2D array of (lens distortion-corrected) depth frame pixel center positions
 	const PixelDepthCorrection* dcBuffer; // Pointer to frame source's per-pixel depth correction buffer
-	PTransform depthProjection; // Frame source's depth unprojection matrix, shifted by 0.5 pixels to be able to use integer pixel positions
+	PTransform depthProjection; // Frame source's depth unprojection matrix
 	unsigned int colorFrameSize[2]; // Width and height of source's color frames
 	PTransform colorProjection; // Frame source's color projection matrix
 	int maxBlobMergeDist; // Maximum depth distance between adjacent pixels to merge their respective blobs

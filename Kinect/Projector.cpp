@@ -259,29 +259,26 @@ Projector::Point Projector::projectPoint(const Projector::Point& p) const
 	/* Transform the point from world space to depth image space: */
 	Point dip=worldDepthProjection.inverseTransform(p);
 	
-	/* Apply inverse lens distortion correction: */
+	/* Apply inverse lens distortion correction if necessary: */
 	if(!depthLensDistortion.isIdentity())
 		{
-		/* Extract the depth camera's 2D intrinsic parameters from the depth unprojection matrix: */
-		const PTransform::Matrix& dpMat=depthProjection.getMatrix();
-		double fxfy=-dpMat(2,3);
-		double fy=fxfy/dpMat(1,1);
-		double cy=-dpMat(1,3)*fy/fxfy;
-		double fx=fxfy/dpMat(0,0);
-		double sk=-dpMat(0,1)*fx*fy/fxfy;
-		double cx=(-dpMat(0,3)/fxfy+sk*cy/(fx*fy))*fx;
-		
-		/* Calculate the distorted pixel position in normalized camera space: */
-		LensDistortion::Point dp;
-		dp[1]=(dip[1]-cy)/fy;
-		dp[0]=(dip[0]-cx-sk*dp[1])/fx;
-		
-		/* Calculate the undistorted pixel position in normalized camera space: */
-		LensDistortion::Point up=depthLensDistortion.undistort(dp);
-		
 		/* Calculate the undistorted pixel position in pixel space: */
-		dip[0]=Point::Scalar(fx*up[0]+sk*up[1]+cx);
-		dip[1]=Point::Scalar(fy*up[1]+cy);
+		LensDistortion::Point dp=LensDistortion::Point(LensDistortion::Scalar(dip[0]),LensDistortion::Scalar(dip[1]));
+		LensDistortion::Point up=depthLensDistortion.undistortPixel(dp);
+		dip[0]=up[0];
+		dip[1]=up[1];
+		}
+	
+	if(depthCorrection!=0)
+		{
+		/* Apply per-pixel depth correction to the depth-image point: */
+		int dipx=int(Math::floor(dip[0]));
+		int dipy=int(Math::floor(dip[1]));
+		if(dipx>=0&&(unsigned int)dipx<depthSize[0]&&dipy>=0&&(unsigned int)dipy<depthSize[1])
+			{
+			const PixelCorrection* dcPtr=depthCorrection+(dipy*depthSize[0]+dipx);
+			dip[2]=(dip[2]-dcPtr->offset)/dcPtr->scale;
+			}
 		}
 	
 	return dip;
@@ -314,30 +311,14 @@ void Projector::processDepthFrame(const FrameBuffer& depthFrame,MeshBuffer& mesh
 		/* Check if the depth camera requires lens distortion correction: */
 		if(!depthLensDistortion.isIdentity())
 			{
-			/* Extract the depth camera's 2D intrinsic parameters from the depth unprojection matrix: */
-			const PTransform::Matrix& dpMat=depthProjection.getMatrix();
-			double fxfy=-dpMat(2,3);
-			double fy=fxfy/dpMat(1,1);
-			double cy=-dpMat(1,3)*fy/fxfy;
-			double fx=fxfy/dpMat(0,0);
-			double sk=-dpMat(0,1)*fx*fy/fxfy;
-			double cx=(-dpMat(0,3)/fxfy+sk*cy/(fx*fy))*fx;
-			
 			/* Create a grid of undistorted pixel positions: */
 			for(unsigned int y=0;y<depthSize[1];++y)
 				for(unsigned int x=0;x<depthSize[0];++x,++vPtr)
 					{
-					/* Calculate the distorted pixel position in normalized camera space: */
-					LensDistortion::Point dp;
-					dp[1]=(double(y)+0.5-cy)/fy;
-					dp[0]=(double(x)+0.5-cx-sk*dp[1])/fx;
-					
-					/* Calculate the undistorted pixel position in normalized camera space: */
-					LensDistortion::Point up=depthLensDistortion.undistort(dp);
-					
-					/* Calculate the undistorted pixel position in pixel space: */
-					vPtr->position[0]=GLfloat(fx*up[0]+sk*up[1]+cx);
-					vPtr->position[1]=GLfloat(fy*up[1]+cy);
+					/* Undistort the grid point in pixel space: */
+					LensDistortion::Point up=depthLensDistortion.undistortPixel(x,y);
+					vPtr->position[0]=GLfloat(up[0]);
+					vPtr->position[1]=GLfloat(up[1]);
 					}
 			}
 		else

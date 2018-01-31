@@ -1,7 +1,24 @@
 /***********************************************************************
 MeshRendererNoDepthCorrection.vs - Vertex shader to render a 3D video
 facade using a triangle index buffer.
-Copyright (c) 2016 Oliver Kreylos
+Copyright (c) 2016-2017 Oliver Kreylos
+
+This file is part of the Kinect 3D Video Capture Project (Kinect).
+
+The Kinect 3D Video Capture Project is free software; you can
+redistribute it and/or modify it under the terms of the GNU General
+Public License as published by the Free Software Foundation; either
+version 2 of the License, or (at your option) any later version.
+
+The Kinect 3D Video Capture Project is distributed in the hope that it
+will be useful, but WITHOUT ANY WARRANTY; without even the implied
+warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See
+the GNU General Public License for more details.
+
+You should have received a copy of the GNU General Public License along
+with the Kinect 3D Video Capture Project; if not, write to the Free
+Software Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA
+02111-1307 USA
 ***********************************************************************/
 
 #extension GL_ARB_texture_rectangle : enable
@@ -42,32 +59,35 @@ void main()
 	/* Transform the normal plane to eye space: */
 	vec3 eyeNormal=normalize((inverseTransposedDepthProjection*diPlane).xyz);
 	
-	/* Calculate per-source ambient light term: */
-	vec4 color=gl_LightSource[0].ambient*gl_FrontMaterial.ambient;
-	
-	/* Compute the diffuse lighting angle: */
-	float nl=dot(eyeNormal,lightDir);
-	if(nl>0.0)
-		{
-		/* Calculate per-source diffuse light term: */
-		color+=(gl_LightSource[0].diffuse*gl_FrontMaterial.diffuse)*nl;
-		
-		/* Compute the eye direction: */
-		vec3 eyeDir=normalize(-eyeVertex.xyz);
-		
-		/* Compute the specular lighting angle: */
-		float nhv=max(dot(eyeNormal,normalize(eyeDir+lightDir)),0.0);
-		
-		/* Calculate per-source specular lighting term: */
-		color+=(gl_LightSource[0].specular*gl_FrontMaterial.specular)*pow(nhv,gl_FrontMaterial.shininess);
-		}
-	
-	/* Attenuate the per-source light terms: */
-	float att=(gl_LightSource[0].quadraticAttenuation*lightDist+gl_LightSource[0].linearAttenuation)*lightDist+gl_LightSource[0].constantAttenuation;
-	color=color*(1.0/att);
-	
 	/* Calculate global ambient light term: */
-	color+=gl_LightModel.ambient*gl_FrontMaterial.ambient;
+	vec4 color=gl_LightModel.ambient*gl_FrontMaterial.ambient;
+	
+	for(int lightIndex=0;lightIndex<8;++lightIndex)
+		{
+		/* Calculate per-source ambient light term: */
+		vec4 sourceColor=gl_LightSource[lightIndex].ambient*gl_FrontMaterial.ambient;
+		
+		/* Compute the diffuse lighting angle: */
+		float nl=dot(eyeNormal,lightDir);
+		if(nl>0.0)
+			{
+			/* Calculate per-source diffuse light term: */
+			sourceColor+=(gl_LightSource[lightIndex].diffuse*gl_FrontMaterial.diffuse)*nl;
+			
+			/* Compute the eye direction: */
+			vec3 eyeDir=normalize(-eyeVertex.xyz);
+			
+			/* Compute the specular lighting angle: */
+			float nhv=max(dot(eyeNormal,normalize(eyeDir+lightDir)),0.0);
+			
+			/* Calculate per-source specular lighting term: */
+			sourceColor+=(gl_LightSource[lightIndex].specular*gl_FrontMaterial.specular)*pow(nhv,gl_FrontMaterial.shininess);
+			}
+		
+		/* Attenuate the per-source light terms and accumulate the light source's contribution: */
+		float att=(gl_LightSource[lightIndex].quadraticAttenuation*lightDist+gl_LightSource[lightIndex].linearAttenuation)*lightDist+gl_LightSource[lightIndex].constantAttenuation;
+		color+=sourceColor*(1.0/att);
+		}
 	
 	/* Assign final vertex color: */
 	gl_FrontColor=color;

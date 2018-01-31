@@ -1,7 +1,7 @@
 /***********************************************************************
 FileFrameSource - Class to stream depth and color frames from a pair of
 time-stamped depth and color stream files.
-Copyright (c) 2010-2016 Oliver Kreylos
+Copyright (c) 2010-2017 Oliver Kreylos
 
 This file is part of the Kinect 3D Video Capture Project (Kinect).
 
@@ -87,6 +87,9 @@ void FileFrameSource::initialize(void)
 	/* Read the color and depth projections from their respective files: */
 	intrinsicParameters.colorProjection=Misc::Marshaller<FrameSource::IntrinsicParameters::PTransform>::read(*colorFrameFile);
 	intrinsicParameters.depthProjection=Misc::Marshaller<FrameSource::IntrinsicParameters::PTransform>::read(*depthFrameFile);
+	
+	/* Set projection parameters in the lens distortion corrector: */
+	intrinsicParameters.depthLensDistortion.setProjection(intrinsicParameters.depthProjection);
 	
 	/* Read the camera transformation from the depth file: */
 	extrinsicParameters=Misc::Marshaller<FrameSource::ExtrinsicParameters>::read(*depthFrameFile);

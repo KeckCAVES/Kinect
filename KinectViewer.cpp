@@ -214,6 +214,12 @@ GLMotif::PopupWindow* KinectViewer::KinectStreamer::createStreamerDialog(void)
 	mapTextureToggle->setToggle(true);
 	mapTextureToggle->getValueChangedCallbacks().add(this,&KinectViewer::KinectStreamer::mapTextureCallback);
 	
+	GLMotif::ToggleButton* illuminateToggle=new GLMotif::ToggleButton("IlluminateToggle",showBox,"Illuminate");
+	illuminateToggle->setBorderWidth(0.0f);
+	illuminateToggle->setBorderType(GLMotif::Widget::PLAIN);
+	illuminateToggle->setToggle(false);
+	illuminateToggle->getValueChangedCallbacks().add(this,&KinectViewer::KinectStreamer::illuminateCallback);
+	
 	#endif
 	
 	showBox->manageChild();
@@ -292,6 +298,12 @@ void KinectViewer::KinectStreamer::mapTextureCallback(GLMotif::ToggleButton::Val
 	{
 	/* Set the projector's texture mapping flag: */
 	projector->setMapTexture(cbData->set);
+	}
+
+void KinectViewer::KinectStreamer::illuminateCallback(GLMotif::ToggleButton::ValueChangedCallbackData* cbData)
+	{
+	/* Set the projector's texture mapping flag: */
+	projector->setIlluminate(cbData->set);
 	}
 
 #endif

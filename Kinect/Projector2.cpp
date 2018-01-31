@@ -2,7 +2,7 @@
 Projector2 - Class to project a depth frame captured from a 3D camera
 back into calibrated 3D camera space, and texture-map it with a matching
 color frame, using a combination of shader and CPU work.
-Copyright (c) 2016 Oliver Kreylos
+Copyright (c) 2016-2017 Oliver Kreylos
 
 This file is part of the Kinect 3D Video Capture Project (Kinect).
 
@@ -24,6 +24,8 @@ Software Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA
 
 #include <Kinect/Projector2.h>
 
+#include <string>
+#include <Misc/PrintInteger.h>
 #include <Misc/FunctionCalls.h>
 #include <GL/gl.h>
 #include <GL/GLMaterialTemplates.h>
@@ -37,6 +39,7 @@ Software Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA
 #include <GL/Extensions/GLARBTextureRectangle.h>
 #include <GL/Extensions/GLARBTextureRg.h>
 #include <GL/Extensions/GLEXTGpuShader4.h>
+#include <GL/GLLightTracker.h>
 #include <GL/GLTransformationWrappers.h>
 #include <Kinect/Internal/Config.h>
 
@@ -52,7 +55,8 @@ Methods of class Projector2::DataItem:
 Projector2::DataItem::DataItem(void)
 	:vertexBufferId(0),depthCorrectionTextureId(0),
 	 depthTextureId(0),indexBufferId(0),meshVersion(0),
-	 colorTextureId(0),colorFrameVersion(0)
+	 colorTextureId(0),colorFrameVersion(0),
+	 renderingShaderSettingsVersion(0),lightStateVersion(0)
 	{
 	/* Initialize the required OpenGL extensions: */
 	GLARBMultitexture::initExtension();
@@ -181,11 +185,226 @@ void* Projector2::depthFrameProcessingThreadMethod(void)
 	return 0;
 	}
 
+void Projector2::buildRenderingShader(DataItem* dataItem,GLLightTracker* lightTracker) const
+	{
+	/* Rebuild the rendering shader: */
+	dataItem->renderingShader.reset();
+	
+	/* Start vertex shader's declarations: */
+	std::string vertexShaderDeclarations="\
+		#extension GL_ARB_texture_rectangle : enable\n\
+		#extension GL_EXT_gpu_shader4 : enable\n\
+		\n\
+		uniform usampler2DRect depthSampler; // Sampler for depth image texture\n";
+	
+	/* Start vertex shader's main function: */
+	std::string vertexShaderMain="\
+		void main()\n\
+			{\n\
+			/* Get the pixel's depth value: */\n\
+			float depth=float(texture2DRect(depthSampler,gl_MultiTexCoord0.xy).r);\n";
+	
+	/* Check if per-pixel depth correction is required: */
+	if(depthCorrection!=0)
+		{
+		/* Add to vertex shader's declarations: */
+		vertexShaderDeclarations+="\
+			uniform sampler2DRect depthCorrectionSampler; // Sampler for per-pixel depth correction texture\n";
+		
+		/* Add to vertex shader's main function: */
+		vertexShaderMain+="\
+				\n\
+				/* Get the pixel's depth correction coefficients: */\n\
+				vec2 depthCorrection=texture2DRect(depthCorrectionSampler,gl_MultiTexCoord0.xy).rg;\n\
+				\n\
+				/* Correct the pixel's depth: */\n\
+				depth=depth*depthCorrection.x+depthCorrection.y;\n";
+		}
+	
+	/* Continue vertex shader's main function: */
+	vertexShaderMain+="\
+			\n\
+			/* Create the pixel's position in depth image space: */\n\
+			vec4 diPixel=vec4(gl_Vertex.xy,depth,1.0);\n";
+	
+	/* Check if color texture mapping was requested: */
+	if(mapTexture)
+		{
+		/* Add to vertex shader's declarations: */
+		vertexShaderDeclarations+="\
+			uniform mat4 colorProjection; // Projection from depth image space to color image space\n";
+		
+		/* Add to vertex shader's main function: */
+		vertexShaderMain+="\
+				\n\
+				/* Project the pixel from depth image space to color image space: */\n\
+				gl_TexCoord[0]=colorProjection*diPixel;\n";
+		}
+	
+	/* Check if illumination was requested: */
+	std::string vertexShaderFunctions;
+	if(illuminate)
+		{
+		/* Add to vertex shader's declarations: */
+		vertexShaderDeclarations+="\
+			uniform mat4 depthProjection; // Projection from depth image space to eye space\n\
+			uniform mat4 inverseTransposedDepthProjection; // Inverse transposed projection from depth image space into eye space for illumination\n\
+			varying vec4 frontColor;\n";
+		
+		/* Add to vertex shader's main function: */
+		vertexShaderMain+="\
+				\n\
+				/* Calculate the pixel's normal vector in depth image space, ignoring per-pixel depth correction: */\n\
+				vec3 diNormal=vec3(float(texture2DRect(depthSampler,gl_MultiTexCoord0.xy+vec2(1.0,0.0)).r)-float(texture2DRect(depthSampler,gl_MultiTexCoord0.xy-vec2(1.0,0.0)).r),\n\
+				                   float(texture2DRect(depthSampler,gl_MultiTexCoord0.xy+vec2(0.0,1.0)).r)-float(texture2DRect(depthSampler,gl_MultiTexCoord0.xy-vec2(0.0,1.0)).r),\n\
+				                   -2.0);\n\
+				\n\
+				/* Calculate the pixel's normal plane in depth image space: */\n\
+				vec4 diPlane=vec4(diNormal,-dot(diPixel.xyz,diNormal));\n\
+				\n\
+				/* Project the pixel to eye space: */\n\
+				vec4 eyePixel=depthProjection*diPixel;\n\
+				\n\
+				/* Transform the normal plane to eye space: */\n\
+				vec3 eyeNormal=normalize((inverseTransposedDepthProjection*diPlane).xyz);\n\
+				\n\
+				/* Initialize the color accumulators: */\n\
+				vec4 ambientDiffuseAccumulator=gl_LightModel.ambient*gl_FrontMaterial.ambient;\n\
+				vec4 specularAccumulator=vec4(0.0,0.0,0.0,0.0);\n\
+				\n\
+				/* Call light accumulation functions for all enabled light sources: */\n";
+		
+		/* Call the appropriate light accumulation function for every enabled light source: */
+		for(int lightIndex=0;lightIndex<lightTracker->getMaxNumLights();++lightIndex)
+			if(lightTracker->getLightState(lightIndex).isEnabled())
+				{
+				/* Create the light accumulation function: */
+				vertexShaderFunctions+=lightTracker->createAccumulateLightFunction(lightIndex);
+				
+				/* Call the light accumulation function from the vertex shader's main function: */
+				vertexShaderMain+="\
+						accumulateLight";
+				char liBuffer[12];
+				vertexShaderMain.append(Misc::print(lightIndex,liBuffer+11));
+				vertexShaderMain+="(eyePixel,eyeNormal,gl_FrontMaterial.ambient,gl_FrontMaterial.diffuse,gl_FrontMaterial.specular,gl_FrontMaterial.shininess,ambientDiffuseAccumulator,specularAccumulator);\n";
+				}
+		
+		/* Finish vertex shader's main function: */
+		vertexShaderMain+="\
+				\n\
+				/* Assign the final accumulated vertex color: */\n\
+				frontColor=ambientDiffuseAccumulator+specularAccumulator;\n\
+				\n\
+				/* Project the pixel from eye space to clip space: */\n\
+				gl_Position=gl_ProjectionMatrix*eyePixel;\n\
+				}\n";
+		}
+	else
+		{
+		/* Add to vertex shader's declarations: */
+		vertexShaderDeclarations+="\
+			uniform mat4 depthProjection; // Projection from depth image space to clip space, bypassing eye space\n";
+		
+		if(!mapTexture)
+			{
+			/* Add to vertex shader's declarations: */
+			vertexShaderDeclarations+="\
+				varying vec4 frontColor;\n";
+			
+			/* Add to vertex shader's main function: */
+			vertexShaderMain+="\
+					\n\
+					/* Assign uniform fragment color: */\n\
+					frontColor=gl_Color;\n";
+			}
+		
+		/* Finish vertex shader's main function: */
+		vertexShaderMain+="\
+				\n\
+				/* Project the pixel from depth image space to clip space: */\n\
+				gl_Position=depthProjection*diPixel;\n\
+				}\n";
+		}
+	
+	/* Compile the vertex shader: */
+	dataItem->renderingShader.compileVertexShaderFromString((vertexShaderDeclarations+vertexShaderFunctions+vertexShaderMain).c_str());
+	
+	/* Start fragment shader's main function: */
+	std::string fragmentShaderMain="\
+		void main()\n\
+			{\n";
+	
+	std::string fragmentShaderDeclarations;
+	if(mapTexture)
+		{
+		/* Add to fragment shader's declarations: */
+		fragmentShaderDeclarations+="\
+			uniform sampler2D colorSampler; // Sampler for color image texture\n";
+		
+		if(illuminate)
+			{
+			/* Add to fragment shader's declarations: */
+			fragmentShaderDeclarations+="\
+				varying vec4 frontColor;\n";
+			
+			/* Finish fragment shader's main function: */
+			fragmentShaderMain+="\
+					gl_FragColor=texture2DProj(colorSampler,gl_TexCoord[0])*frontColor;\n\
+					}\n";
+			}
+		else
+			{
+			/* Finish fragment shader's main function: */
+			fragmentShaderMain+="\
+					gl_FragColor=texture2DProj(colorSampler,gl_TexCoord[0]);\n\
+					}\n";
+			}
+		}
+	else
+		{
+		/* Add to fragment shader's declarations: */
+		fragmentShaderDeclarations+="\
+			varying vec4 frontColor;\n";
+		
+		/* Finish fragment shader's main function: */
+		fragmentShaderMain+="\
+				gl_FragColor=frontColor;\n\
+				}\n";
+		}
+	
+	/* Compile the fragment shader: */
+	dataItem->renderingShader.compileFragmentShaderFromString((fragmentShaderDeclarations+fragmentShaderMain).c_str());
+	
+	/* Link the shader: */
+	dataItem->renderingShader.linkShader();
+	
+	/* Query the rendering shader's uniform variable locations: */
+	int* rsuPtr=dataItem->renderingShaderUniforms;
+	*(rsuPtr++)=dataItem->renderingShader.getUniformLocation("depthSampler");
+	if(depthCorrection!=0)
+		*(rsuPtr++)=dataItem->renderingShader.getUniformLocation("depthCorrectionSampler");
+	if(mapTexture)
+		*(rsuPtr++)=dataItem->renderingShader.getUniformLocation("colorProjection");
+	if(illuminate)
+		{
+		*(rsuPtr++)=dataItem->renderingShader.getUniformLocation("depthProjection");
+		*(rsuPtr++)=dataItem->renderingShader.getUniformLocation("inverseTransposedDepthProjection");
+		}
+	else
+		*(rsuPtr++)=dataItem->renderingShader.getUniformLocation("depthProjection");
+	if(mapTexture)
+		*(rsuPtr++)=dataItem->renderingShader.getUniformLocation("colorSampler");
+	
+	/* Mark the rendering shader as up-to-date: */
+	dataItem->renderingShaderSettingsVersion=renderingShaderSettingsVersion;
+	dataItem->lightStateVersion=lightTracker->getVersion();
+	}
+
 Projector2::Projector2(void)
 	:depthCorrection(0),
 	 inDepthFrameVersion(0),
 	 filterDepthFrames(false),lowpassDepthFrames(false),filteredDepthFrame(0),spatialFilterBuffer(0),
-	 mapTexture(true),
+	 mapTexture(true),illuminate(false),renderingShaderSettingsVersion(1),
 	 triangleDepthRange(5),
 	 meshVersion(0),streamingCallback(0),colorFrameVersion(0)
 	{
@@ -199,7 +418,7 @@ Projector2::Projector2(FrameSource& frameSource)
 	 depthCorrection(0),
 	 inDepthFrameVersion(0),
 	 filterDepthFrames(false),lowpassDepthFrames(false),filteredDepthFrame(0),spatialFilterBuffer(0),
-	 mapTexture(true),
+	 mapTexture(true),illuminate(false),renderingShaderSettingsVersion(1),
 	 triangleDepthRange(5),
 	 meshVersion(0),streamingCallback(0),colorFrameVersion(0)
 	{
@@ -257,15 +476,6 @@ void Projector2::initContext(GLContextData& contextData) const
 	/* Check if the depth camera requires lens distortion correction: */
 	if(!depthLensDistortion.isIdentity())
 		{
-		/* Extract the depth camera's 2D intrinsic parameters from the depth unprojection matrix: */
-		const PTransform::Matrix& dpMat=depthProjection.getMatrix();
-		double fxfy=-dpMat(2,3);
-		double fy=fxfy/dpMat(1,1);
-		double cy=-dpMat(1,3)*fy/fxfy;
-		double fx=fxfy/dpMat(0,0);
-		double sk=-dpMat(0,1)*fx*fy/fxfy;
-		double cx=(-dpMat(0,3)/fxfy+sk*cy/(fx*fy))*fx;
-		
 		/* Create a grid of undistorted pixel positions: */
 		for(unsigned int y=0;y<depthSize[1];++y)
 			for(unsigned int x=0;x<depthSize[0];++x,++vPtr)
@@ -274,17 +484,10 @@ void Projector2::initContext(GLContextData& contextData) const
 				vPtr->texCoord[0]=GLfloat(x)+0.5f;
 				vPtr->texCoord[1]=GLfloat(y)+0.5f;
 				
-				/* Calculate the distorted pixel position in normalized camera space: */
-				LensDistortion::Point dp;
-				dp[1]=(double(y)+0.5-cy)/fy;
-				dp[0]=(double(x)+0.5-cx-sk*dp[1])/fx;
-				
-				/* Calculate the undistorted pixel position in normalized camera space: */
-				LensDistortion::Point up=depthLensDistortion.undistort(dp);
-				
 				/* Calculate the undistorted pixel position in pixel space: */
-				vPtr->position[0]=GLfloat(fx*up[0]+sk*up[1]+cx);
-				vPtr->position[1]=GLfloat(fy*up[1]+cy);
+				LensDistortion::Point up=depthLensDistortion.undistortPixel(x,y);
+				vPtr->position[0]=GLfloat(up[0]);
+				vPtr->position[1]=GLfloat(up[1]);
 				vPtr->position[2]=0.0f;
 				}
 		}
@@ -339,26 +542,6 @@ void Projector2::initContext(GLContextData& contextData) const
 	glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MIN_FILTER,GL_LINEAR);
 	glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MAG_FILTER,GL_LINEAR);
 	glBindTexture(GL_TEXTURE_2D,0);
-	
-	/* Build the facade rendering shader: */
-	std::string shaderDir=KINECT_INTERNAL_CONFIG_SHADERDIR;
-	if(depthCorrection!=0)
-		dataItem->renderingShader.compileVertexShader((shaderDir+"/MeshRenderer.vs").c_str());
-	else
-		dataItem->renderingShader.compileVertexShader((shaderDir+"/MeshRendererNoDepthCorrection.vs").c_str());
-	dataItem->renderingShader.compileFragmentShader((shaderDir+"/MeshRenderer.fs").c_str());
-	dataItem->renderingShader.linkShader();
-	
-	/* Retrieve the texture shader's uniform variables: */
-	dataItem->renderingShaderUniforms[0]=dataItem->renderingShader.getUniformLocation("depthSampler");
-	if(depthCorrection!=0)
-		dataItem->renderingShaderUniforms[1]=dataItem->renderingShader.getUniformLocation("depthCorrectionSampler");
-	else
-		dataItem->renderingShaderUniforms[1]=dataItem->renderingShader.getUniformLocation("inverseTransposedDepthProjection");
-	dataItem->renderingShaderUniforms[2]=dataItem->renderingShader.getUniformLocation("depthProjection");
-	dataItem->renderingShaderUniforms[3]=dataItem->renderingShader.getUniformLocation("colorProjection");
-	dataItem->renderingShaderUniforms[4]=dataItem->renderingShader.getUniformLocation("colorSampler");
-	dataItem->renderingShaderUniforms[5]=dataItem->renderingShader.getUniformLocation("mapTexture");
 	}
 
 void Projector2::setDepthFrameSize(const unsigned int newDepthFrameSize[2])
@@ -444,7 +627,20 @@ void Projector2::setFilterDepthFrames(bool newFilterDepthFrames,bool newLowpassD
 
 void Projector2::setMapTexture(bool newMapTexture)
 	{
+	/* Set the texture mapping flag: */
 	mapTexture=newMapTexture;
+	
+	/* Invalidate the rendering shader: */
+	++renderingShaderSettingsVersion;
+	}
+
+void Projector2::setIlluminate(bool newIlluminate)
+	{
+	/* Set the illumination flag: */
+	illuminate=newIlluminate;
+	
+	/* Invalidate the rendering shader: */
+	++renderingShaderSettingsVersion;
 	}
 
 void Projector2::setTriangleDepthRange(FrameSource::DepthPixel newTriangleDepthRange)
@@ -823,8 +1019,17 @@ void Projector2::glRenderAction(GLContextData& contextData) const
 	glPushAttrib(GL_ENABLE_BIT);
 	glDisable(GL_CULL_FACE);
 	
+	/* Check if the facade rendering shader is outdated: */
+	GLLightTracker* lightTracker=contextData.getLightTracker();
+	if(dataItem->renderingShaderSettingsVersion!=renderingShaderSettingsVersion||dataItem->lightStateVersion!=lightTracker->getVersion())
+		{
+		/* Rebuild the facade rendering shader: */
+		buildRenderingShader(dataItem,lightTracker);
+		}
+	
 	/* Activate the facade rendering shader: */
 	dataItem->renderingShader.useProgram();
+	int* rsuPtr=dataItem->renderingShaderUniforms;
 	
 	/* Bind the vertex and index buffers: */
 	typedef GLVertex<GLfloat,2,void,0,void,GLfloat,3> Vertex;
@@ -850,31 +1055,42 @@ void Projector2::glRenderAction(GLContextData& contextData) const
 		/* Mark the cached mesh as valid: */
 		dataItem->meshVersion=meshVersion;
 		}
-	glUniformARB(dataItem->renderingShaderUniforms[0],0);
+	glUniformARB(*(rsuPtr++),0);
 	
 	if(depthCorrection!=0)
 		{
 		/* Bind the depth correction texture: */
 		glActiveTextureARB(GL_TEXTURE1_ARB);
 		glBindTexture(GL_TEXTURE_RECTANGLE_ARB,dataItem->depthCorrectionTextureId);
-		glUniformARB(dataItem->renderingShaderUniforms[1],1);
-		
-		/* Calculate and upload the full depth projection matrix: */
-		PTransform fullDP=glGetProjectionMatrix<GLfloat>();
-		fullDP*=glGetModelviewMatrix<GLfloat>();
-		fullDP*=worldDepthProjection;
-		glUniformARB(dataItem->renderingShaderUniforms[2],fullDP);
+		glUniformARB(*(rsuPtr++),1);
 		}
-	else
+	
+	if(mapTexture)
 		{
-		glMaterialAmbientAndDiffuse(GLMaterialEnums::FRONT_AND_BACK,GLColor<GLfloat,4>(0.3f,0.5f,1.0f));
-		glMaterialSpecular(GLMaterialEnums::FRONT_AND_BACK,GLColor<GLfloat,4>(1.0f,1.0f,1.0f));
-		glMaterialShininess(GLMaterialEnums::FRONT_AND_BACK,128.0f);
+		/* Upload the color projection matrix: */
+		glUniformARB(*(rsuPtr++),colorProjection);
+		}
+	
+	if(illuminate)
+		{
+		/* Set surface material properties (this should be done by caller, ideally): */
+		if(mapTexture)
+			{
+			glMaterialAmbientAndDiffuse(GLMaterialEnums::FRONT_AND_BACK,GLColor<GLfloat,4>(1.0f,1.0f,1.0f));
+			glMaterialSpecular(GLMaterialEnums::FRONT_AND_BACK,GLColor<GLfloat,4>(0.0f,0.0f,0.0f));
+			glMaterialShininess(GLMaterialEnums::FRONT_AND_BACK,0.0f);
+			}
+		else
+			{
+			glMaterialAmbientAndDiffuse(GLMaterialEnums::FRONT_AND_BACK,GLColor<GLfloat,4>(0.3f,0.5f,1.0f));
+			glMaterialSpecular(GLMaterialEnums::FRONT_AND_BACK,GLColor<GLfloat,4>(1.0f,1.0f,1.0f));
+			glMaterialShininess(GLMaterialEnums::FRONT_AND_BACK,128.0f);
+			}
 		
 		/* Calculate and upload the depth projection matrix from depth image space to eye space: */
 		PTransform fullDP=glGetModelviewMatrix<GLfloat>();
 		fullDP*=worldDepthProjection;
-		glUniformARB(dataItem->renderingShaderUniforms[2],fullDP);
+		glUniformARB(*(rsuPtr++),fullDP);
 		
 		/* Calculate and upload the transposed inverse depth projection matrix from depth image space to eye space: */
 		PTransform invFullDP=Geometry::invert(fullDP);
@@ -882,33 +1098,38 @@ void Projector2::glRenderAction(GLContextData& contextData) const
 		for(int i=0;i<4;++i)
 			for(int j=i+1;j<4;++j)
 				std::swap(ifdpm(i,j),ifdpm(j,i));
-		glUniformARB(dataItem->renderingShaderUniforms[1],invFullDP);
+		glUniformARB(*(rsuPtr++),invFullDP);
 		}
-	
-	/* Set the texture mapping flag: */
-	glUniformARB(dataItem->renderingShaderUniforms[5],mapTexture);
-	
-	/* Upload the color projection matrix: */
-	glUniformARB(dataItem->renderingShaderUniforms[3],colorProjection);
-	
-	/* Bind the current color frame texture: */
-	glActiveTextureARB(GL_TEXTURE2_ARB);
-	glBindTexture(GL_TEXTURE_2D,dataItem->colorTextureId);
-	if(dataItem->colorFrameVersion!=colorFrameVersion)
+	else
 		{
-		/* Get the currently locked color frame: */
-		const FrameBuffer& colorFrame=colorFrames.getLockedValue();
-		
-		/* Upload the color frame into the texture object: */
-		unsigned int width=colorFrame.getSize(0);
-		unsigned int height=colorFrame.getSize(1);
-		const GLubyte* cfPtr=colorFrame.getData<GLubyte>();
-		glTexImage2D(GL_TEXTURE_2D,0,GL_RGB8,width,height,0,GL_RGB,GL_UNSIGNED_BYTE,cfPtr);
-		
-		/* Mark the cached color frame as up-to-date: */
-		dataItem->colorFrameVersion=colorFrameVersion;
+		/* Calculate and upload the full depth projection matrix: */
+		PTransform fullDP=glGetProjectionMatrix<GLfloat>();
+		fullDP*=glGetModelviewMatrix<GLfloat>();
+		fullDP*=worldDepthProjection;
+		glUniformARB(*(rsuPtr++),fullDP);
 		}
-	glUniformARB(dataItem->renderingShaderUniforms[4],2);
+	
+	if(mapTexture)
+		{
+		/* Bind the current color frame texture: */
+		glActiveTextureARB(GL_TEXTURE2_ARB);
+		glBindTexture(GL_TEXTURE_2D,dataItem->colorTextureId);
+		if(dataItem->colorFrameVersion!=colorFrameVersion)
+			{
+			/* Get the currently locked color frame: */
+			const FrameBuffer& colorFrame=colorFrames.getLockedValue();
+			
+			/* Upload the color frame into the texture object: */
+			unsigned int width=colorFrame.getSize(0);
+			unsigned int height=colorFrame.getSize(1);
+			const GLubyte* cfPtr=colorFrame.getData<GLubyte>();
+			glTexImage2D(GL_TEXTURE_2D,0,GL_RGB8,width,height,0,GL_RGB,GL_UNSIGNED_BYTE,cfPtr);
+			
+			/* Mark the cached color frame as up-to-date: */
+			dataItem->colorFrameVersion=colorFrameVersion;
+			}
+		glUniformARB(*(rsuPtr++),2);
+		}
 	
 	/* Draw the cached indexed triangle set: */
 	GLVertexArrayParts::enable(Vertex::getPartsMask());
@@ -917,7 +1138,8 @@ void Projector2::glRenderAction(GLContextData& contextData) const
 	GLVertexArrayParts::disable(Vertex::getPartsMask());
 	
 	/* Protect the texture objects: */
-	glBindTexture(GL_TEXTURE_2D,0);
+	if(mapTexture)
+		glBindTexture(GL_TEXTURE_2D,0);
 	if(depthCorrection!=0)
 		{
 		glActiveTextureARB(GL_TEXTURE1_ARB);

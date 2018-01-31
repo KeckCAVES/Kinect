@@ -244,49 +244,10 @@ FrameSource::IntrinsicParameters CameraV2::getIntrinsicParameters(void)
 		
 		/* Initialize the color projection matrix: */
 		result.colorProjection=FrameSource::IntrinsicParameters::PTransform::identity;
-		
-		#if 0 // Evil temporary hack
-		
-		IO::FilePtr colorMatrixFile=IO::Directory::getCurrent()->openFile("/home/okreylos/Projects/Kinect/ColorMatrix.dat");
-		colorMatrixFile->setEndianness(Misc::LittleEndian);
-		double colorMatrix[16];
-		colorMatrixFile->read(colorMatrix,16);
-		#if 0
-		for(int i=0;i<4;++i)
-			colorMatrix[i]=(colorMatrix[i+12]-colorMatrix[i])*1920.0;
-		for(int i=4;i<8;++i)
-			colorMatrix[i]*=1080.0;
-		#endif
-		
-		for(int i=4;i<8;++i)
-			colorMatrix[i]=(colorMatrix[i+8]-colorMatrix[i]);
-		
-		result.colorProjection=FrameSource::IntrinsicParameters::PTransform::fromRowMajor(colorMatrix);
-		result.colorProjection*=result.depthProjection;
-		
-		/* Write the constructed calibration data to a calibration data file: */
-		std::cout<<"Writing intrinsic calibration parameters to file "<<intrinsicParameterFileName<<std::endl;
-		IO::FilePtr parameterFile(IO::Directory::getCurrent()->openFile(intrinsicParameterFileName.c_str(),IO::File::WriteOnly));
-		parameterFile->setEndianness(Misc::LittleEndian);
-		
-		/* Write lens distortion correction parameters: */
-		for(int i=0;i<3;++i)
-			parameterFile->write<Misc::Float64>(result.depthLensDistortion.getKappa(i));
-		for(int i=0;i<2;++i)
-			parameterFile->write<Misc::Float64>(result.depthLensDistortion.getRho(i));
-		
-		/* Write the depth unprojection matrix: */
-		for(int i=0;i<4;++i)
-			for(int j=0;j<4;++j)
-				parameterFile->write<Misc::Float64>(result.depthProjection.getMatrix()(i,j));
-		
-		/* Write the color projection matrix: */
-		for(int i=0;i<4;++i)
-			for(int j=0;j<4;++j)
-				parameterFile->write<Misc::Float64>(result.colorProjection.getMatrix()(i,j));
-		
-		#endif
 		}
+	
+	/* Set projection parameters for the lens distortion corrector: */
+	result.depthLensDistortion.setProjection(result.depthProjection);
 	
 	return result;
 	}
@@ -303,7 +264,7 @@ void CameraV2::startStreaming(FrameSource::StreamingCallback* newColorStreamingC
 	if(newColorStreamingCallback!=0)
 		{
 		/* Set up a bulk transfer pool to receive color data: */
-		colorTransfers=new USB::TransferPool(30,0x8000);
+		colorTransfers=new USB::TransferPool(50,0x8000); // Allocate 20 extra buffers to prevent underrun
 		
 		/* Set up the color image processing pipeline: */
 		colorTransferCallback=colorStreamReader->startStreaming(colorTransfers,newColorStreamingCallback);
@@ -313,8 +274,8 @@ void CameraV2::startStreaming(FrameSource::StreamingCallback* newColorStreamingC
 	if(newDepthStreamingCallback!=0)
 		{
 		/* Set up an isochronous transfer pool to receive depth data: */
-		// depthTransfers=new USB::TransferPool(20,8,device.getMaxIsoPacketSize(0x84));
-		depthTransfers=new USB::TransferPool(20,8,33792); // Ignore what libusb says
+		// depthTransfers=new USB::TransferPool(21,8,device.getMaxIsoPacketSize(0x84)); // Allocate 1 extra buffer to prevent underrun
+		depthTransfers=new USB::TransferPool(21,8,33792); // Ignore what libusb says
 		
 		/* Set up the depth image processing pipeline: */
 		depthTransferCallback=depthStreamReader->startStreaming(depthTransfers,newDepthStreamingCallback);
