@@ -1,6 +1,6 @@
 /***********************************************************************
 CameraV2 - Class representing a Kinect v2 camera.
-Copyright (c) 2015-2017 Oliver Kreylos
+Copyright (c) 2015-2018 Oliver Kreylos
 
 This file is part of the Kinect 3D Video Capture Project (Kinect).
 
@@ -119,7 +119,7 @@ CameraV2::CameraV2(size_t index)
 	USB::DeviceList deviceList;
 	device=deviceList.getDevice(KinectV2CameraMatcher(),index);
 	if(!device.isValid())
-		Misc::throwStdErr("Kinect::CameraV2::CameraV2: Less than %d Kinect v2 camera devices detected",int(index));
+		Misc::throwStdErr("Kinect::CameraV2::CameraV2: Fewer than %d Kinect v2 camera devices detected",int(index)+1);
 	
 	/* Initialize the camera: */
 	initialize();

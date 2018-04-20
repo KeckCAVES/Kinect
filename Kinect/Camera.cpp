@@ -1,7 +1,7 @@
 /***********************************************************************
 Camera - Wrapper class to represent the color and depth camera interface
 aspects of the Kinect sensor.
-Copyright (c) 2010-2016 Oliver Kreylos
+Copyright (c) 2010-2018 Oliver Kreylos
 
 This file is part of the Kinect 3D Video Capture Project (Kinect).
 
@@ -984,7 +984,7 @@ Camera::Camera(size_t index)
 	USB::DeviceList deviceList;
 	device=deviceList.getDevice(KinectCameraMatcher(),index);
 	if(!device.isValid())
-		Misc::throwStdErr("Kinect::Camera::Camera: Less than %d Kinect camera devices detected",int(index));
+		Misc::throwStdErr("Kinect::Camera::Camera: Fewer than %d Kinect camera devices detected",int(index)+1);
 	
 	/* Initialize the camera: */
 	initialize(&deviceList);

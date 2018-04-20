@@ -1,7 +1,7 @@
 /***********************************************************************
 Motor - Wrapper class to represent the motor and accelerometer interface
 aspect of the Kinect sensor.
-Copyright (c) 2010-2015 Oliver Kreylos
+Copyright (c) 2010-2018 Oliver Kreylos
 
 This file is part of the Kinect 3D Video Capture Project (Kinect).
 
@@ -38,7 +38,7 @@ Motor::Motor(size_t index)
 	USB::DeviceList deviceList;
 	USB::Device::operator=(deviceList.getDevice(0x045e,0x02b0,index));
 	if(!isValid())
-		Misc::throwStdErr("Kinect::Motor::Motor: Less than %d Kinect motor devices detected",int(index));
+		Misc::throwStdErr("Kinect::Motor::Motor: Fewer than %d Kinect motor devices detected",int(index)+1);
 	
 	/* Open and prepare the device: */
 	open();
