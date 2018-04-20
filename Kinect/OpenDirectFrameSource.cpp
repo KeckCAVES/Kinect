@@ -1,7 +1,7 @@
 /***********************************************************************
 OpenDirectFrameSource - Helper functions to open a 3D camera by index or
 serial number without having to know its type.
-Copyright (c) 2016-2017 Oliver Kreylos
+Copyright (c) 2016-2018 Oliver Kreylos
 
 This file is part of the Kinect 3D Video Capture Project (Kinect).
 
@@ -73,7 +73,7 @@ DirectFrameSource* openDirectFrameSource(unsigned int index)
 	searchIndex-=numRealSenses;
 	
 	/* Not enough cameras: */
-	Misc::throwStdErr("Kinect::openDirectFrameSource: Less than %u 3D cameras connected to local host",index);
+	Misc::throwStdErr("Kinect::openDirectFrameSource: Fewer than %u 3D cameras connected to local host",index+1);
 	return 0; // Never reached
 	}
 

@@ -1,7 +1,7 @@
 /***********************************************************************
 KinectViewer - Simple application to view 3D reconstructions of color
 and depth images captured from a Kinect device.
-Copyright (c) 2010-2017 Oliver Kreylos
+Copyright (c) 2010-2018 Oliver Kreylos
 
 This file is part of the Kinect 3D Video Capture Project (Kinect).
 
@@ -593,7 +593,7 @@ KinectViewer::KinectViewer(int& argc,char**& argv)
 	 mainMenu(0)
 	{
 	/* Add a streamer for each camera index or frame file name prefix passed on the command line: */
-	bool printHelp=argc==1;
+	bool printHelp=false;
 	bool highres=false;
 	bool compressDepth=false;
 	for(int i=1;i<argc;++i)
@@ -684,6 +684,16 @@ KinectViewer::KinectViewer(int& argc,char**& argv)
 				for(unsigned int i=0;i<source->getNumStreams();++i)
 					streamers.push_back(new KinectStreamer(this,source->getStream(i)));
 				}
+			else
+				{
+				std::cerr<<"Ignoring unrecognized command line parameter "<<argv[i]<<std::endl;
+				printHelp=true;
+				}
+			}
+		else
+			{
+			std::cerr<<"Ignoring unrecognized command line argument "<<argv[i]<<std::endl;
+			printHelp=true;
 			}
 		}
 	
@@ -713,6 +723,7 @@ KinectViewer::KinectViewer(int& argc,char**& argv)
 	
 	if(streamers.empty())
 		{
+		std::cerr<<"No 3D video sources requested; exiting"<<std::endl;
 		Vrui::shutdown();
 		return;
 		}

@@ -269,3 +269,9 @@ Kinect-3.4:
 - Fixed location of RealSense library dso in BuildRoot/Packages.Kinect
   to use .../$(LIBEXT) instead of .../lib, which should fix run-time
   search paths again.
+
+Kinect-3.5:
+- Bumped Vrui version requirement to 4.5-001.
+- Added command line checking to KinectUtil utility and RawKinectViewer
+  and KinectViewer applications.
+- Fixed error messages when camera indices are out-of-bounds.

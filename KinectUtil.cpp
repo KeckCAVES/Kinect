@@ -1,7 +1,7 @@
 /***********************************************************************
 KinectUtil - Utility program to detect, list, and configure Kinect
 devices.
-Copyright (c) 2011-2017 Oliver Kreylos
+Copyright (c) 2011-2018 Oliver Kreylos
 
 This file is part of the Kinect 3D Video Capture Project (Kinect).
 
@@ -357,8 +357,12 @@ bool downloadCalibration(unsigned int index)
 		/* Get depth camera parameters from command dispatcher: */
 		const Kinect::KinectV2CommandDispatcher::DepthCameraParams& dcp=commandDispatcher.getDepthCameraParams();
 		
+		/* Print intrinsic camera parameters: */
+		std::cout<<std::endl<<"Depth camera intrinsic parameters: ";
+		std::cout<<dcp.sx<<", "<<dcp.cx<<", "<<dcp.sy<<", "<<dcp.cy<<std::endl;
+		
 		/* Print depth camera distortion correction coefficients: */
-		std::cout<<std::endl<<"Depth distortion correction coefficients: ";
+		std::cout<<"Depth distortion correction coefficients: ";
 		std::cout<<dcp.k1<<", "<<dcp.k2<<", "<<dcp.k3<<", "<<dcp.p1<<", "<<dcp.p2<<std::endl;
 		
 		/* Set up a lens distortion corrector: */
@@ -894,6 +898,11 @@ int main(int argc,char* argv[])
 			std::cerr<<"Kinect "<<index<<" does not exist."<<std::endl;
 			return 1;
 			}
+		}
+	else
+		{
+		std::cerr<<"Ignoring unrecognized command line argument "<<argv[1]<<std::endl;
+		return 1;
 		}
 	
 	return 0;

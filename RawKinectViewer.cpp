@@ -1,7 +1,7 @@
 /***********************************************************************
 RawKinectViewer - Simple application to view color and depth images
 captured from a Kinect device.
-Copyright (c) 2010-2017 Oliver Kreylos
+Copyright (c) 2010-2018 Oliver Kreylos
 
 This file is part of the Kinect 3D Video Capture Project (Kinect).
 
@@ -23,6 +23,7 @@ Software Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA
 
 #include "RawKinectViewer.h"
 
+#include <ctype.h>
 #include <stdexcept>
 #include <iostream>
 #include <Misc/SelfDestructPointer.h>
@@ -709,6 +710,30 @@ GLMotif::PopupWindow* RawKinectViewer::createAverageDepthFrameDialog(void)
 	return averageDepthFrameDialogPopup;
 	}
 
+namespace {
+
+/****************
+Helper functions:
+****************/
+
+inline bool isUInt(const char* string)
+	{
+	/* Empty string is not an unsigned integer: */
+	if(*string=='\0')
+		return false;
+	
+	bool result=true;
+	while(*string!='\0'&&result)
+		{
+		result=isdigit(*string);
+		++string;
+		}
+	
+	return result;
+	}
+
+}
+
 RawKinectViewer::RawKinectViewer(int& argc,char**& argv)
 	:Vrui::Application(argc,argv),
 	 camera(0),
@@ -780,14 +805,24 @@ RawKinectViewer::RawKinectViewer(int& argc,char**& argv)
 					depthValueRange[j]=float(atof(argv[i+1+j]));
 				i+=2;
 				}
+			else
+				{
+				std::cerr<<"Ignoring unrecognized command line parameter "<<argv[i]<<std::endl;
+				printHelp=true;
+				}
 			}
-		else
+		else if(isUInt(argv[i]))
 			cameraIndex=atoi(argv[i]);
+		else
+			{
+			std::cerr<<"Ignoring unrecognized command line argument "<<argv[i]<<std::endl;
+			printHelp=true;
+			}
 		}
 	
 	if(printHelp)
 		{
-		std::cout<<"Usage: RawKinectViewer [option 1] ... [option n] <camera index>"<<std::endl;
+		std::cout<<"Usage: RawKinectViewer [option 1] ... [option n] [<camera index>]"<<std::endl;
 		std::cout<<"  <camera index>"<<std::endl;
 		std::cout<<"     Selects the local 3D camera of the given index (0: first camera on USB bus)"<<std::endl;
 		std::cout<<"     Default: 0"<<std::endl;

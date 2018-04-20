@@ -1,19 +1,19 @@
 ========================================================================
-README for Kinect 3D Video Capture Project version 3.4
+README for Kinect 3D Video Capture Project version 3.5
 Copyright (c) 2010-2018 Oliver Kreylos
 ========================================================================
 
 Requirements
 ============
 
-This software requires the Vrui VR toolkit, version 4.4 build 001 or
+This software requires the Vrui VR toolkit, version 4.5 build 001 or
 newer. It also requires libusb version 1.0, and that Vrui was configured
 with support for libusb prior to its installation. To properly work with
 multiple Kinect-for-Xbox version 1473 and/or Kinect-for-Windows devices,
 the libusb library needs to provide USB bus topology query functions
 such as those provided by the libusbx fork. This software can optionally
 create Kinect 3D video streaming plug-ins for Vrui's collaboration
-infrastructure (version 2.7 or newer). The presence of Vrui's
+infrastructure (version 2.8 or newer). The presence of Vrui's
 collaboration infrastructure will be detected automatically during the
 build process.
 
@@ -40,7 +40,7 @@ instructions need to be changed.
 2. Change into the Kinect 3D Video Capture Project's base directory:
    > cd Kinect-<version>
 
-3. If the Vrui version installed in step 0 was not 4.4, or Vrui's
+3. If the Vrui version installed in step 0 was not 4.5, or Vrui's
    installation directory was changed from the default of /usr/local,
    adapt the makefile using a text editor. Change the value of
    VRUI_MAKEDIR close to the beginning of the file as follows:
