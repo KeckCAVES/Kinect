@@ -275,3 +275,7 @@ Kinect-3.5:
 - Added command line checking to KinectUtil utility and RawKinectViewer
   and KinectViewer applications.
 - Fixed error messages when camera indices are out-of-bounds.
+
+Kinect-3.6:
+- Added check for GL_EXT_gpu_shader4 OpenGL extension in makefile, as it
+  is required by Kinect::Projector2 but not supported by most IGPs.
