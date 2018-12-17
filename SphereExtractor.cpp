@@ -1,7 +1,7 @@
 /***********************************************************************
 SphereExtractor - Helper class to identify and extract spheres of known
 radii in depth images.
-Copyright (c) 2014-2017 Oliver Kreylos
+Copyright (c) 2014-2018 Oliver Kreylos
 
 This file is part of the Kinect 3D Video Capture Project (Kinect).
 
@@ -410,7 +410,7 @@ void* SphereExtractor::frameProcessingThreadMethod(void)
 							}
 						}
 					}
-				catch(Math::Matrix::RankDeficientError)
+				catch(const Math::Matrix::RankDeficientError&)
 					{
 					/* Ignore this blob */
 					}

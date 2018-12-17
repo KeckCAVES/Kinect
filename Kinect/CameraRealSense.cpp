@@ -1,6 +1,6 @@
 /***********************************************************************
 CameraRealSense - Class representing an Intel RealSense camera.
-Copyright (c) 2016 Oliver Kreylos
+Copyright (c) 2016-2018 Oliver Kreylos
 
 This file is part of the Kinect 3D Video Capture Project (Kinect).
 
@@ -224,7 +224,7 @@ void* CameraRealSense::streamingThreadMethod(void)
 				}
 			}
 		}
-	catch(std::runtime_error err)
+	catch(const std::runtime_error& err)
 		{
 		Misc::formattedUserError("Kinect::CameraRealSense::streamingThreadMethod: Terminating streaming thread due to exception %s",err.what());
 		}

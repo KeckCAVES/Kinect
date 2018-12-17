@@ -1,7 +1,7 @@
 /***********************************************************************
 KinectViewer - Vislet to draw 3D reconstructions captured from a Kinect
 device in 3D space.
-Copyright (c) 2010-2017 Oliver Kreylos
+Copyright (c) 2010-2018 Oliver Kreylos
 
 This file is part of the Kinect 3D Video Capture Project (Kinect).
 
@@ -820,7 +820,7 @@ KinectViewer::KinectViewer(int numArguments,const char* const arguments[])
 					preTransform=Misc::ValueCoder<Kinect::FrameSource::ExtrinsicParameters>::decode(arguments[i],arguments[i]+strlen(arguments[i]),0);
 					applyPreTransform=true;
 					}
-				catch(Misc::DecodingError err)
+				catch(const Misc::DecodingError& err)
 					{
 					std::cerr<<"KinectViewer: Ignoring malformed pre-transformation due to exception "<<err.what()<<std::endl;
 					}

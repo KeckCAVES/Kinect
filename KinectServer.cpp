@@ -1,7 +1,7 @@
 /***********************************************************************
 KinectServer - Server to stream 3D video data from one or more Kinect
 cameras to remote clients for tele-immersion.
-Copyright (c) 2010-2017 Oliver Kreylos
+Copyright (c) 2010-2018 Oliver Kreylos
 
 This file is part of the Kinect 3D Video Capture Project (Kinect).
 
@@ -245,7 +245,7 @@ void KinectServer::newFrameCallback(void)
 						cameraStates[cameraIndex]->depthFrames.getLockedValue().data.writeToSink((*csIt)->pipe);
 						(*csIt)->pipe.flush();
 						}
-					catch(std::runtime_error err)
+					catch(const std::runtime_error& err)
 						{
 						#ifdef VERBOSE
 						std::cout<<"KinectServer: Disconnecting client "<<(*csIt)->clientName<<" due to exception "<<err.what()<<std::endl;
@@ -287,7 +287,7 @@ void KinectServer::newFrameCallback(void)
 						cameraStates[cameraIndex]->colorFrames.getLockedValue().data.writeToSink((*csIt)->pipe);
 						(*csIt)->pipe.flush();
 						}
-					catch(std::runtime_error err)
+					catch(const std::runtime_error& err)
 						{
 						#ifdef VERBOSE
 						std::cout<<"KinectServer: Disconnecting client "<<(*csIt)->clientName<<" due to exception "<<err.what()<<std::endl;
@@ -455,7 +455,7 @@ bool KinectServer::clientMessageCallback(Threads::EventDispatcher::ListenerKey e
 				}
 			}
 		}
-	catch(std::runtime_error err)
+	catch(const std::runtime_error& err)
 		{
 		#ifdef VERBOSE
 		std::cout<<"KinectServer: Disconnecting client "<<client->clientName<<" due to exception "<<err.what()<<std::endl;
@@ -554,7 +554,7 @@ KinectServer::KinectServer(Misc::ConfigurationFileSection& configFileSection)
 			
 			++numFoundCameras;
 			}
-		catch(std::runtime_error err)
+		catch(const std::runtime_error& err)
 			{
 			std::cerr<<"Could not open Kinect camera with serial number "<<serialNumber<<" due to exception "<<err.what()<<std::endl;
 			}

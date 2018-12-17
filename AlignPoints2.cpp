@@ -1,7 +1,7 @@
 /***********************************************************************
 AlignPoints - Utility to align two sets of measurements of the same set
 of points using a variety of transformation types.
-Copyright (c) 2009-2014 Oliver Kreylos
+Copyright (c) 2009-2018 Oliver Kreylos
 
 This file is part of the Kinect 3D Video Capture Project (Kinect).
 
@@ -551,7 +551,7 @@ AlignPoints::AlignPoints(int& argc,char**& argv,char**& appDefaults)
 				for(int i=0;i<3;++i)
 					p[i]=Scalar(reader.readNumber());
 				}
-			catch(IO::ValueSource::NumberError)
+			catch(const IO::ValueSource::NumberError&)
 				{
 				for(int i=0;i<3;++i)
 					p[i]=Math::Constants<Scalar>::max;

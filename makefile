@@ -24,7 +24,7 @@
 # matches the default Vrui installation; if Vrui's installation
 # directory was changed during Vrui's installation, the directory below
 # must be adapted.
-VRUI_MAKEDIR := /usr/local/share/Vrui-4.5/make
+VRUI_MAKEDIR := /usr/local/share/Vrui-4.6/make
 ifdef DEBUG
   VRUI_MAKEDIR := $(VRUI_MAKEDIR)/debug
 endif
@@ -68,9 +68,9 @@ endif
 PACKAGEROOT := $(shell pwd)
 
 # Specify version of created dynamic shared libraries
-KINECT_VERSION = 3006
+KINECT_VERSION = 3007
 MAJORLIBVERSION = 3
-MINORLIBVERSION = 6
+MINORLIBVERSION = 7
 KINECT_NAME := Kinect-$(MAJORLIBVERSION).$(MINORLIBVERSION)
 
 # Check if Vrui's collaboration infrastructure is installed
@@ -120,8 +120,6 @@ endif
 ########################################################################
 # Specify additional compiler and linker flags
 ########################################################################
-
-CFLAGS += -Wall -pedantic
 
 # Set flags to distinguish between static and shared libraries
 ifdef STATIC_LINK
