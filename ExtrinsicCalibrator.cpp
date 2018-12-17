@@ -1,7 +1,7 @@
 /***********************************************************************
 ExtrinsicCalibrator - Utility to calibrate a 3D camera with a 6-DOF
 tracking system.
-Copyright (c) 2016-2017 Oliver Kreylos
+Copyright (c) 2016-2018 Oliver Kreylos
 
 This file is part of the Virtual Reality User Interface Library (Vrui).
 
@@ -862,7 +862,7 @@ ExtrinsicCalibrator::Calibration ExtrinsicCalibrator::fullCalibration(const std:
 		
 		return result;
 		}
-	catch(Math::Matrix::RankDeficientError err)
+	catch(const Math::Matrix::RankDeficientError& err)
 		{
 		/* System was under-determined; return bogus result: */
 		Calibration result;

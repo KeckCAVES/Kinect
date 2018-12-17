@@ -506,7 +506,7 @@ void KinectViewer::saveStreamsCallback(GLMotif::ToggleButton::ValueChangedCallba
 				/* Remember the file selection dialog: */
 				saveStreamsFileSelectionDialog=saveDialog.releaseTarget();
 				}
-			catch(std::runtime_error err)
+			catch(const std::runtime_error& err)
 				{
 				/* Show an error message: */
 				Misc::formattedUserError("Save Streams...: Could not select file name due to exception %s",err.what());
@@ -668,7 +668,7 @@ KinectViewer::KinectViewer(int& argc,char**& argv)
 					{
 					soundPlayer=new Sound::SoundPlayer(argv[i]);
 					}
-				catch(std::runtime_error err)
+				catch(const std::runtime_error& err)
 					{
 					std::cerr<<"Could not open sound file "<<argv[i]<<" due to exception "<<err.what()<<std::endl;
 					}

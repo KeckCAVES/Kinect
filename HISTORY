@@ -279,3 +279,7 @@ Kinect-3.5:
 Kinect-3.6:
 - Added check for GL_EXT_gpu_shader4 OpenGL extension in makefile, as it
   is required by Kinect::Projector2 but not supported by most IGPs.
+
+Kinect-3.7:
+- Bumped Vrui version requirement to 4.6-005.
+- Fixed exception catches from by-value to by-const-reference.

@@ -1053,7 +1053,7 @@ FrameSource::DepthCorrection* Camera::getDepthCorrectionParameters(void)
 			/* Read and return a depth correction object: */
 			return new DepthCorrection(*depthCorrectionFile);
 			}
-		catch(std::runtime_error err)
+		catch(const std::runtime_error& err)
 			{
 			/* Log an error: */
 			Misc::formattedConsoleError("Kinect::Camera::getDepthCorrectionParameters: Could not load depth correction file %s due to exception %s",depthCorrectionFileName.c_str(),err.what());
@@ -1096,7 +1096,7 @@ FrameSource::IntrinsicParameters Camera::getIntrinsicParameters(void)
 		parameterFile->read(colorMatrix,4*4);
 		result.colorProjection=IntrinsicParameters::PTransform::fromRowMajor(colorMatrix);
 		}
-	catch(std::runtime_error err)
+	catch(const std::runtime_error& err)
 		{
 		/* Log an error: */
 		Misc::formattedConsoleError("Kinect::Camera::getIntrinsicParameters: Could not load intrinsic parameter file %s due to exception %s",intrinsicParameterFileName.c_str(),err.what());
@@ -1166,7 +1166,7 @@ void Camera::startStreaming(FrameSource::StreamingCallback* newColorStreamingCal
 			sendMessage(0x0000U,0,0,replyBuffer,sizeof(replyBuffer));
 			sendMessage(0x0005U,0,0,replyBuffer,sizeof(replyBuffer));
 			}
-		catch(std::runtime_error err)
+		catch(const std::runtime_error& err)
 			{
 			Misc::formattedConsoleWarning("Kinect::Camera::startStreaming: Caught exception %s; retrying to wake up Kinect camera %s",err.what(),getSerialNumber().c_str());
 			usleep(100000);
@@ -1299,7 +1299,7 @@ void Camera::startStreaming(FrameSource::StreamingCallback* newColorStreamingCal
 				{
 				writeRegister(0x0105U,sharpening);
 				}
-			catch(std::runtime_error)
+			catch(const std::runtime_error&)
 				{
 				sequenceOk=false;
 				}

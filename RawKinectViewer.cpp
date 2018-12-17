@@ -564,7 +564,7 @@ void RawKinectViewer::saveAverageFrameOKCallback(GLMotif::FileSelectionDialog::O
 					frameFile->write<Misc::Float32>(*affPtr>=cutoff?(*afdPtr)/(*affPtr):2047.0f);
 			}
 		}
-	catch(std::runtime_error err)
+	catch(const std::runtime_error& err)
 		{
 		/* Show an error message: */
 		Vrui::showErrorMessage("Save Average Depth Frame...",Misc::printStdErrMsg("Could not write depth frame file %s due to exception %s",cbData->getSelectedPath().c_str(),err.what()));
@@ -597,7 +597,7 @@ void RawKinectViewer::saveAverageFrameCallback(Misc::CallbackData* cbData)
 		/* Show the file selection dialog: */
 		Vrui::popupPrimaryWidget(saveAverageFrameDialog.releaseTarget());
 		}
-	catch(std::runtime_error err)
+	catch(const std::runtime_error& err)
 		{
 		/* Show an error message: */
 		Vrui::showErrorMessage("Save Average Depth Frame...",Misc::printStdErrMsg("Could not save average depth frame due to exception %s",err.what()));
@@ -631,7 +631,7 @@ void RawKinectViewer::saveColorFrameOKCallback(GLMotif::FileSelectionDialog::OKC
 		
 		#endif
 		}
-	catch(std::runtime_error err)
+	catch(const std::runtime_error& err)
 		{
 		/* Show an error message: */
 		Vrui::showErrorMessage("Save Color Frame...",Misc::printStdErrMsg("Could not write color frame file %s due to exception %s",cbData->getSelectedPath().c_str(),err.what()));
@@ -657,7 +657,7 @@ void RawKinectViewer::saveColorFrameCallback(Misc::CallbackData* cbData)
 		/* Show the file selection dialog: */
 		Vrui::popupPrimaryWidget(saveColorFrameDialog.releaseTarget());
 		}
-	catch(std::runtime_error err)
+	catch(const std::runtime_error& err)
 		{
 		/* Show an error message: */
 		Vrui::showErrorMessage("Save Color Frame...",Misc::printStdErrMsg("Could not save color frame due to exception %s",err.what()));

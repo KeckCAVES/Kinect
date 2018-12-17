@@ -1,7 +1,7 @@
 /***********************************************************************
 VRDeviceClient - Class encapsulating the VR device protocol's client
 side.
-Copyright (c) 2002-2017 Oliver Kreylos
+Copyright (c) 2002-2018 Oliver Kreylos
 
 This file is part of the Virtual Reality User Interface Library (Vrui).
 
@@ -156,7 +156,7 @@ void* VRDeviceClient::streamReceiveThreadMethod(void)
 				break;
 				}
 			}
-		catch(std::runtime_error err)
+		catch(const std::runtime_error& err)
 			{
 			/* Signal an error and shut down: */
 			if(errorCallback!=0)
@@ -406,7 +406,7 @@ void VRDeviceClient::getPacket(void)
 					adjustTrackerStateTimeStamps(state,timeStampDelta);
 					}
 				}
-			catch(std::runtime_error err)
+			catch(const std::runtime_error& err)
 				{
 				/* Mark the connection as dead and re-throw the original exception: */
 				connectionDead=true;
@@ -474,6 +474,14 @@ void VRDeviceClient::startStream(VRDeviceClient::Callback* newPacketNotification
 		/* Install the new callback functions: */
 		packetNotificationCallback=newPacketNotificationCallback;
 		errorCallback=newErrorCallback;
+		
+		if(batteryStateUpdatedCallback!=0)
+			{
+			/* Send initial battery states for all devices: */
+			Threads::Mutex::Lock batteryStatesLock(batteryStatesMutex);
+			for(unsigned int i=0;i<virtualDevices.size();++i)
+				(*batteryStateUpdatedCallback)(i);
+			}
 		
 		/* Start the packet receiving thread: */
 		streamReceiveThread.start(this,&VRDeviceClient::streamReceiveThreadMethod);

@@ -210,7 +210,7 @@ FrameSource::IntrinsicParameters CameraV2::getIntrinsicParameters(void)
 			parameterFile->read(colorMatrix,4*4);
 			result.colorProjection=IntrinsicParameters::PTransform::fromRowMajor(colorMatrix);
 			}
-		catch(std::runtime_error err)
+		catch(const std::runtime_error& err)
 			{
 			/* Log an error: */
 			Misc::formattedConsoleError("Kinect::CameraV2::getIntrinsicParameters: Could not load intrinsic parameter file %s due to exception %s",intrinsicParameterFileName.c_str(),err.what());

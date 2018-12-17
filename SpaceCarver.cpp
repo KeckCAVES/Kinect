@@ -1,7 +1,7 @@
 /***********************************************************************
 SpaceCarver - Utility to convert a set of colocated Kinect facades into
 a watertight mesh using a space carving approach.
-Copyright (c) 2011-2015 Oliver Kreylos
+Copyright (c) 2011-2018 Oliver Kreylos
 
 This file is part of the Kinect 3D Video Capture Project (Kinect).
 
@@ -222,7 +222,7 @@ int main(int argc,char* argv[])
 				}
 			std::cout<<"done"<<std::endl;
 			}
-		catch(std::runtime_error err)
+		catch(const std::runtime_error& err)
 			{
 			std::cerr<<"Ignoring depth file "<<argv[depthFileIndex]<<" due to exception "<<err.what()<<std::endl;
 			}

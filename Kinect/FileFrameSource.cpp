@@ -1,7 +1,7 @@
 /***********************************************************************
 FileFrameSource - Class to stream depth and color frames from a pair of
 time-stamped depth and color stream files.
-Copyright (c) 2010-2017 Oliver Kreylos
+Copyright (c) 2010-2018 Oliver Kreylos
 
 This file is part of the Kinect 3D Video Capture Project (Kinect).
 
@@ -132,7 +132,7 @@ void* FileFrameSource::colorStreamingThreadMethod(void)
 			colorFrame=colorFrameReader->readNextFrame();
 			}
 		}
-	catch(std::runtime_error err)
+	catch(const std::runtime_error& err)
 		{
 		/* Print an error message: */
 		Misc::formattedUserError("Kinect::FileFrameSource::colorStreamingThreadMethod: Terminating color streaming due to exception %s",err.what());
@@ -251,7 +251,7 @@ void* FileFrameSource::depthStreamingThreadMethod(void)
 		
 		#endif
 		}
-	catch(std::runtime_error err)
+	catch(const std::runtime_error& err)
 		{
 		/* Print an error message: */
 		Misc::formattedUserError("Kinect::FileFrameSource::depthStreamingThreadMethod: Terminating depth streaming due to exception %s",err.what());

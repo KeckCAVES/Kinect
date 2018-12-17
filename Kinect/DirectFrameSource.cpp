@@ -1,7 +1,7 @@
 /***********************************************************************
 DirectFrameSource - Intermediate class for frame sources that are
 directly connected to a camera device.
-Copyright (c) 2015-2016 Oliver Kreylos
+Copyright (c) 2015-2018 Oliver Kreylos
 
 This file is part of the Kinect 3D Video Capture Project (Kinect).
 
@@ -185,7 +185,7 @@ void DirectFrameSource::loadBackgroundCallback(GLMotif::FileSelectionDialog::OKC
 		IO::FilePtr backgroundFile=cbData->selectedDirectory->openFile(cbData->selectedFileName);
 		loadBackground(*backgroundFile);
 		}
-	catch(std::runtime_error err)
+	catch(const std::runtime_error& err)
 		{
 		/* Show an error message: */
 		Misc::formattedUserError("Load...: Could not load background from file %s due to exception %s",cbData->selectedFileName,err.what());
@@ -200,7 +200,7 @@ void DirectFrameSource::saveBackgroundCallback(GLMotif::FileSelectionDialog::OKC
 		IO::FilePtr backgroundFile=cbData->selectedDirectory->openFile(cbData->selectedFileName,IO::File::WriteOnly);
 		saveBackground(*backgroundFile);
 		}
-	catch(std::runtime_error err)
+	catch(const std::runtime_error& err)
 		{
 		/* Show an error message: */
 		Misc::formattedUserError("Save...: Could not save background to file %s due to exception %s",cbData->selectedFileName,err.what());
@@ -243,7 +243,7 @@ FrameSource::ExtrinsicParameters DirectFrameSource::getExtrinsicParameters(void)
 				transformation.push_back(parameterFile->getChar());
 			return Misc::ValueCoder<ExtrinsicParameters>::decode(transformation.c_str(),transformation.c_str()+transformation.length(),0);
 			}
-		catch(std::runtime_error err)
+		catch(const std::runtime_error& err)
 			{
 			/* Log an error and return a default set of extrinsic parameters: */
 			Misc::formattedConsoleError("Kinect::DirectFrameSource::getExtrinsicParameters: Could not load extrinsic parameter file %s due to exception %s",extrinsicParameterFileName.c_str(),err.what());
@@ -268,7 +268,7 @@ void DirectFrameSource::configure(Misc::ConfigurationFileSection& configFileSect
 			/* Load a background file: */
 			loadBackground(configFileSection.retrieveString("./loadBackground").c_str());
 			}
-		catch(std::runtime_error err)
+		catch(const std::runtime_error& err)
 			{
 			/* Log an error message and carry on: */
 			Misc::formattedConsoleError("DirectFrameSource::configure: Unable to load background frame %s due to exception %s",configFileSection.retrieveString("./loadBackground").c_str(),err.what());
@@ -415,7 +415,7 @@ bool DirectFrameSource::loadDefaultBackground(void)
 			
 			return true;
 			}
-		catch(std::runtime_error err)
+		catch(const std::runtime_error& err)
 			{
 			/* Log an error: */
 			Misc::formattedConsoleError("Kinect::DirectFrameSource: Could not load default background file %s due to exception %s",backgroundFileName.c_str(),err.what());

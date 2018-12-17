@@ -1,7 +1,7 @@
 /***********************************************************************
 KinectClient - Client object to implement the Kinect 3D video tele-
 immersion protocol for the Vrui collaboration infrastructure.
-Copyright (c) 2010-2012 Oliver Kreylos
+Copyright (c) 2010-2018 Oliver Kreylos
 
 This file is part of the Kinect 3D Video Capture Project (Kinect).
 
@@ -91,7 +91,7 @@ void KinectClient::RemoteClientState::connect(void)
 		numRenderers=newNumRenderers;
 		clientReady=true;
 		}
-	catch(std::runtime_error err)
+	catch(const std::runtime_error& err)
 		{
 		std::cerr<<"Node "<<Vrui::getNodeIndex()<<": "<<"KinectClient: Could not connect to remote Kinect server on host "<<kinectServerHostName<<", port "<<kinectServerPortId<<" due to exception "<<err.what()<<std::endl;
 		for(unsigned int i=0;i<newNumRenderers;++i)

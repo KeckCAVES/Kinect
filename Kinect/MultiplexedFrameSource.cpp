@@ -1,7 +1,7 @@
 /***********************************************************************
 MultiplexedFrameSource - Class to stream several pairs of color and
 depth frames from a single source file or pipe.
-Copyright (c) 2010-2017 Oliver Kreylos
+Copyright (c) 2010-2018 Oliver Kreylos
 
 This file is part of the Kinect 3D Video Capture Project (Kinect).
 
@@ -274,7 +274,7 @@ void* MultiplexedFrameSource::receivingThreadMethod(void)
 			frames[frameId].timeStamp-=timeStampOffset;
 			}
 		}
-	catch(std::runtime_error err)
+	catch(const std::runtime_error& err)
 		{
 		/* Log an error message: */
 		Misc::formattedUserError("Kinect::MultiplexedFrameSource: Terminating streaming thread due to exception %s",err.what());
@@ -336,7 +336,7 @@ MultiplexedFrameSource::MultiplexedFrameSource(Comm::PipePtr sPipe)
 			{
 			streams[i]=new Stream(this,i,*pipe);
 			}
-		catch(std::runtime_error err)
+		catch(const std::runtime_error& err)
 			{
 			/* Signal an error to clean up later: */
 			allStreamsOk=false;

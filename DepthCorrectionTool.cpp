@@ -1,6 +1,6 @@
 /***********************************************************************
 DepthCorrectionTool - Calibration tool for RawKinectViewer.
-Copyright (c) 2012-2015 Oliver Kreylos
+Copyright (c) 2012-2018 Oliver Kreylos
 
 This file is part of the Kinect 3D Video Capture Project (Kinect).
 
@@ -216,7 +216,7 @@ void DepthCorrectionTool::buttonCallback(int buttonSlotIndex,Vrui::InputDevice::
 								bsplineAtb(i,1)+=c[i]*offset;
 								}
 							}
-						catch(Math::Matrix::RankDeficientError)
+						catch(const Math::Matrix::RankDeficientError&)
 							{
 							/* Ignore the pixel */
 							}
@@ -261,7 +261,7 @@ void DepthCorrectionTool::buttonCallback(int buttonSlotIndex,Vrui::InputDevice::
 				/* Clean up: */
 				delete[] correctionCoefficients;
 				}
-			catch(std::runtime_error err)
+			catch(const std::runtime_error& err)
 				{
 				/* Show an error message: */
 				Vrui::showErrorMessage("Calibrate Depth Lens",Misc::printStdErrMsg("Could not calculate depth correction coefficients due to exception %s",err.what()));

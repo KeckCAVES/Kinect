@@ -1,6 +1,6 @@
 /***********************************************************************
 KinectServerMain - Main program for Kinect 3D video streamer.
-Copyright (c) 2010-2017 Oliver Kreylos
+Copyright (c) 2010-2018 Oliver Kreylos
 
 This file is part of the Kinect 3D Video Capture Project (Kinect).
 
@@ -76,7 +76,7 @@ int main(void)
 		/* Shut down the server: */
 		delete server;
 		}
-	catch(std::runtime_error err)
+	catch(const std::runtime_error& err)
 		{
 		std::cerr<<"KinectServer: Server terminated due to exception "<<err.what()<<std::endl;
 		return 1;
